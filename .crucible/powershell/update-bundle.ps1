@@ -280,6 +280,8 @@ function Invoke-UpdateBundle {
     $baselineFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $frameworkRoot -AtCommit $baselineCommit)
     $headFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $frameworkRoot -AtCommit $frameworkHead)
     $sourcePaths = @($baselineFiles + $headFiles | Sort-Object -Unique)
+    $baselineHashes = Get-GitFileNormalizedHashes -Repo $frameworkRoot -Commit $baselineCommit -Paths $sourcePaths
+    $headHashes = Get-GitFileNormalizedHashes -Repo $frameworkRoot -Commit $frameworkHead -Paths $sourcePaths
     $results = New-ClassificationResult
     $instantiatedScaffold = @()
     $recreatedScaffold = @()
@@ -294,12 +296,14 @@ function Invoke-UpdateBundle {
         }
     }
 
+    $adopterPaths = @($sourcePaths | ForEach-Object { Get-AdopterPathsForSource -SourcePath $_ -Manifest $manifest } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $ignoredPaths = Get-CrucibleGitIgnoredPaths -BundleRoot $adopterCrucibleRoot -RelativePaths $adopterPaths
     foreach ($sourcePath in $sourcePaths) {
         foreach ($adopterPath in @(Get-AdopterPathsForSource -SourcePath $sourcePath -Manifest $manifest)) {
             if ([string]::IsNullOrWhiteSpace($adopterPath)) { continue }
             if (Test-AdopterOwnedPath -RelativePath $adopterPath -Manifest $manifest) { continue }
             if (-not (Test-ScaffoldSnapshotPath -RelativePath $adopterPath -Manifest $manifest)) {
-                if (Test-CrucibleGitIgnored -BundleRoot $adopterCrucibleRoot -RelativePath $adopterPath) { continue }
+                if ($ignoredPaths.Contains($adopterPath)) { continue }
             }
 
             $adopterFile = Join-Path $adopterCrucibleRoot $adopterPath
@@ -316,13 +320,13 @@ function Invoke-UpdateBundle {
                 }
             }
             if ($null -eq $hManifest) {
-                $hManifest = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $baselineCommit -Path $sourcePath
+                $hManifest = $baselineHashes[$sourcePath].Hash
             }
             if ($null -eq $hManifestBase) {
-                $hManifestBase = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $baselineCommit -Path $sourcePath -WithoutCustomRegions
+                $hManifestBase = $baselineHashes[$sourcePath].BaseHash
             }
 
-            $hHead = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath
+            $hHead = $headHashes[$sourcePath].Hash
 
             # Resolve git lookups and manifest predicates here; the classification
             # lattice stays pure so tests can cover every branch without installing

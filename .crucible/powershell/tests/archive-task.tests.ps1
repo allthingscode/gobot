@@ -92,7 +92,7 @@ function Invoke-ArchiveTask {
         if ($null -ne $ShippedCode) {
             $cmdArgs += @("-ShippedCode", ([bool]$ShippedCode).ToString().ToLowerInvariant())
         }
-        $outputLines = @(& (Get-PwshCommand) @cmdArgs 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) @cmdArgs 2>&1 })
         return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -490,7 +490,7 @@ try {
         
         # Validate backlog passes validation using validate-backlog.ps1 check
         $validateScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
-        $validateOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
+        $validateOutput = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1 })
         Assert-Result -Name "validate-backlog exit 0 post-archive" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validation success, output: " + ($validateOutput -join "`n"))
     }
 
@@ -532,7 +532,7 @@ try {
 
         # Validate backlog passes validation using validate-backlog.ps1 check
         $validateScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
-        $validateOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
+        $validateOutput = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1 })
         Assert-Result -Name "validate-backlog exit 0 post-archive sole" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validation success, output: " + ($validateOutput -join "`n"))
     }
 

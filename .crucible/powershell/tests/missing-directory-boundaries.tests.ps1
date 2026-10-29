@@ -27,12 +27,12 @@ try {
                         $actual = @(if ($caller -eq 'owner') {
                             @(Normalize-HandoffArtifactPaths -Artifacts @($artifact) -WorktreePath $wtPath -ProjectRoot $repoArgument)
                         } else {
-                            @(& {
+                            @(Invoke-ExternalCommand -AsLines { & {
                                 $REPO_ROOT = $repoArgument
                                 $resolvedArtifacts = @($artifact)
                                 . $generator
                                 $normalizedArtifacts
-                            })
+                            } })
                         })
                         Assert-Result 'contained suffix retains case' ($actual.Count -eq 1 -and $actual[0] -ceq 'Docs/File.md') ($actual -join ',')
                         $outside = Join-Path $root 'outside/../Other.md'
@@ -61,7 +61,7 @@ try {
                 if ($shape -ne 'native' -and -not $IsWindows) { Skip-Test 'Windows root-relative bundle directory.' }
                 $suffix = if ($outside) { 'outside/missing' } else { 'project/missing' }
                 $bundle = if ($shape -eq 'native') { Join-Path $root $suffix } else { $shape + $suffix }
-                $output = & (Get-PwshCommand) -NoProfile -NonInteractive -File $runner $framework $root $bundle 2>&1 | Out-String
+                $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -NonInteractive -File $runner $framework $root $bundle 2>&1 } | Out-String
                 Assert-Result 'CLI refuses with exit 2' ($LASTEXITCODE -eq 2 -and $output -notmatch 'CAUGHT_LAUNCH|must not start codex') $output
                 if ($outside) {
                     Assert-Result 'outside refusal stays explicit' ($output -match 'absolute path outside it') $output

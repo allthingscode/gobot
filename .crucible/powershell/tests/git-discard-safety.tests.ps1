@@ -31,12 +31,12 @@ paths:
                     git -C $root init -q -b trunk
                     git -C $root add .
                     git -C $root commit -qm base
-                    $base = (git -C $root rev-parse HEAD).Trim()
+                    $base = (Invoke-ExternalCommand -AsLines { git -C $root rev-parse HEAD }).Trim()
                     git -C $root checkout -qb task/F-253
                     git -C $root commit -q --allow-empty -m task
                     git -C $root checkout -q trunk
                     git -C $root merge -q --no-ff --no-edit task/F-253
-                    $merged = (git -C $root rev-parse HEAD).Trim()
+                    $merged = (Invoke-ExternalCommand -AsLines { git -C $root rev-parse HEAD }).Trim()
                     # Configured runtime changes are permitted even when tracked.
                     'runtime changed' | Set-Content -LiteralPath (Join-Path $root 'live/session/state.txt')
                     if ($dirty) { 'precious human edit' | Set-Content -LiteralPath (Join-Path $root 'human notes.txt') }
@@ -82,7 +82,7 @@ if ($InputPath -eq 'action') {
 }
 '@ | Set-Content -LiteralPath $runner
                     $run = Invoke-ExternalCommand -Command { & (Get-PwshCommand) -NoProfile -File $runner (Join-Path $repoRoot 'powershell/crucible-lib.ps1') $root $outcome $inputPath $dirty.ToString() }
-                    $head = (git -C $root rev-parse HEAD).Trim()
+                    $head = (Invoke-ExternalCommand -AsLines { git -C $root rev-parse HEAD }).Trim()
                     if ($dirty) {
                         Assert-Result -Name 'planted edit survives' -Condition ((Get-Content -LiteralPath (Join-Path $root 'human notes.txt') -Raw).Trim() -eq 'precious human edit') -FailureMessage $run.Output
                         Assert-Result -Name 'refusal exits 2 and names paths and remedy' -Condition ($run.ExitCode -eq 2 -and $run.Output -match 'human notes.txt' -and $run.Output -match '(?i)commit or stash' -and $run.Output -match '(?i)rerun') -FailureMessage $run.Output
@@ -105,7 +105,7 @@ if ($InputPath -eq 'action') {
         git -C $root add human.txt
         git -C $root commit -qm base
         git -C $root branch task/F-253
-        $head = (git -C $root rev-parse HEAD).Trim()
+        $head = (Invoke-ExternalCommand -AsLines { git -C $root rev-parse HEAD }).Trim()
         'precious human edit' | Set-Content -LiteralPath (Join-Path $root 'human.txt')
         $decision = Join-Path $decisions 'F-253-accepted.json'
         '{"outcome":"accepted"}' | Set-Content -LiteralPath $decision
@@ -123,7 +123,7 @@ try {
         $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runner (Join-Path $repoRoot 'powershell/crucible-lib.ps1') $root }
         Assert-Result -Name 'unconditional merge refusal exits 2' -Condition ($run.ExitCode -eq 2 -and $run.Output -match 'human.txt') -FailureMessage $run.Output
         Assert-Result -Name 'acceptance record removed before refusal' -Condition (-not (Test-Path $decision)) -FailureMessage 'premature acceptance could bypass the next gate'
-        Assert-Result -Name 'merge refusal preserves head and edit' -Condition ((git -C $root rev-parse HEAD).Trim() -eq $head -and (Get-Content -LiteralPath (Join-Path $root 'human.txt') -Raw).Trim() -eq 'precious human edit') -FailureMessage $run.Output
+        Assert-Result -Name 'merge refusal preserves head and edit' -Condition ((Invoke-ExternalCommand -AsLines { git -C $root rev-parse HEAD }).Trim() -eq $head -and (Get-Content -LiteralPath (Join-Path $root 'human.txt') -Raw).Trim() -eq 'precious human edit') -FailureMessage $run.Output
     }
     $results += Run-Test -Name 'Shared guard protects staged renames across a runtime boundary' -Body {
         $root = Join-Path $fixture 'rename'
@@ -147,7 +147,7 @@ try {
         'committed' | Set-Content -LiteralPath (Join-Path $root 'precious.txt')
         git -C $root add -f precious.txt
         git -C $root commit -qm target
-        $target = (git -C $root rev-parse HEAD).Trim()
+        $target = (Invoke-ExternalCommand -AsLines { git -C $root rev-parse HEAD }).Trim()
         git -C $root rm -q precious.txt
         git -C $root commit -qm removal
         'precious edit' | Set-Content -LiteralPath (Join-Path $root 'precious.txt')

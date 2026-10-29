@@ -102,7 +102,7 @@ try {
         git -C $repo config core.safecrlf false | Out-Null
         git -C $repo add . | Out-Null
         git -C $repo commit -m "baseline" | Out-Null
-        $baseSha = (git -C $repo rev-parse HEAD).Trim()
+        $baseSha = (Invoke-ExternalCommand -AsLines { git -C $repo rev-parse HEAD }).Trim()
 
         "changed config" | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
         "changed state" | Set-Content -LiteralPath (Join-Path $crucible "session/state.txt") -Encoding UTF8
@@ -133,7 +133,7 @@ try {
         git -C $Path config core.safecrlf false | Out-Null
         git -C $Path add . | Out-Null
         git -C $Path commit -m "baseline" | Out-Null
-        return (git -C $Path rev-parse HEAD).Trim()
+        return (Invoke-ExternalCommand -AsLines { git -C $Path rev-parse HEAD }).Trim()
     }
 
     $results += Run-Test -Name "A framework edit committed during the task is flagged" -Body {
@@ -148,7 +148,7 @@ try {
         git -C $repo add . | Out-Null
         git -C $repo commit -m "specialist edits a vendored framework file" | Out-Null
 
-        $worktree = @(git -C $repo status --porcelain)
+        $worktree = @(Invoke-ExternalCommand -AsLines { git -C $repo status --porcelain })
         Assert-Result -Name "working tree is clean" -Condition ($worktree.Count -eq 0) -FailureMessage ("fixture is not clean, so this would pass for the wrong reason: " + ($worktree -join ", "))
 
         $ctx = New-TestContext -TempRoot $repo -TaskId "F-030"
@@ -213,7 +213,7 @@ try {
         Assert-Result -Name "I12 unrun committed leg reaches the not-run record (item 258)" `
             -Condition ($notRun.Contains("[integrity gate v2] framework integrity committed-change check: no task baseline")) -FailureMessage ("record: " + $notRun)
 
-        $ctx.Handoff = [pscustomobject]@{ task_id = "F-032"; base_commit = (git -C $repo rev-parse HEAD).Trim() }
+        $ctx.Handoff = [pscustomobject]@{ task_id = "F-032"; base_commit = (Invoke-ExternalCommand -AsLines { git -C $repo rev-parse HEAD }).Trim() }
         Assert-CrucibleFrameworkIntegrity -Context $ctx
         $afterBaseline = @(Get-ChecksNotRun -SessionDir $ctx.SessionDir -TaskId "F-032") -join "`n"
         Assert-Result -Name "the record clears once the committed leg runs" -Condition (-not $afterBaseline.Contains("[integrity gate v2]")) -FailureMessage ("record: " + $afterBaseline)
@@ -433,14 +433,14 @@ Invoke-FileLock -LockPath ($Record + '.lock') -TimeoutMs 100 -ScriptBlock { thro
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-260"
         $ctx.Handoff = [pscustomobject]@{ task_id = "F-260"; source_phase = "verification"; target_phase = "deployment"; file_affinity = @() }
-        $null = (& { Invoke-CrucibleScopeGates -Context $ctx } 6>&1 | Out-String)
+        $null = (Invoke-ExternalCommand -AsLines { & { Invoke-CrucibleScopeGates -Context $ctx } 6>&1 } | Out-String)
         $lines = @(Get-ChecksNotRun -SessionDir $ctx.SessionDir -TaskId "F-260") -join "`n"
         Assert-Result -Name "I12 verification to deployment without affinity records the conflict check" -Condition ($lines.Contains("[scope gate v2] file affinity conflict check: no file_affinity declared")) -FailureMessage ("record: " + $lines)
 
         $research = New-TestContext -TempRoot $caseRoot -TaskId "R-260"
         $research.Handoff = [pscustomobject]@{ task_id = "R-260"; source_phase = "research"; target_phase = "grooming"; file_affinity = @() }
         $research.RepoRoot = $caseRoot
-        $null = (& { Invoke-CrucibleScopeGates -Context $research } 6>&1 | Out-String)
+        $null = (Invoke-ExternalCommand -AsLines { & { Invoke-CrucibleScopeGates -Context $research } 6>&1 } | Out-String)
         $researchLines = @(Get-ChecksNotRun -SessionDir $research.SessionDir -TaskId "R-260") -join "`n"
         Assert-Result -Name "research to grooming has no files to overlap and records no conflict skip" -Condition (-not $researchLines.Contains("file affinity conflict check")) -FailureMessage ("record: " + $researchLines)
 
@@ -448,7 +448,7 @@ Invoke-FileLock -LockPath ($Record + '.lock') -TimeoutMs 100 -ScriptBlock { thro
         $marker = Join-Path $caseRoot "affinity-ran.txt"
         [System.IO.File]::WriteAllText((Join-Path $ctx.FrameworkPowerShell "check-file-affinity.ps1"), ("param(`$TaskId, `$Affinity)`n[System.IO.File]::WriteAllText('" + $marker.Replace("'", "''") + "', `$TaskId)`nexit 0`n"), (New-Object System.Text.UTF8Encoding($false)))
         $ctx.Handoff = [pscustomobject]@{ task_id = "F-260"; source_phase = "verification"; target_phase = "deployment"; file_affinity = @("src/a.txt") }
-        $null = (& { Invoke-CrucibleScopeGates -Context $ctx } 6>&1 | Out-String)
+        $null = (Invoke-ExternalCommand -AsLines { & { Invoke-CrucibleScopeGates -Context $ctx } 6>&1 } | Out-String)
         $after = @(Get-ChecksNotRun -SessionDir $ctx.SessionDir -TaskId "F-260") -join "`n"
         Assert-Result -Name "a check that ran clears its line" -Condition ((Test-Path -LiteralPath $marker) -and -not $after.Contains("file affinity conflict check")) -FailureMessage ("marker present: " + (Test-Path -LiteralPath $marker) + "; record: " + $after)
     }
@@ -459,7 +459,7 @@ Invoke-FileLock -LockPath ($Record + '.lock') -TimeoutMs 100 -ScriptBlock { thro
         # FrameworkPowerShell has no check-file-affinity.ps1, and RepoRoot is not a git repository.
         $ctx.Handoff = [pscustomobject]@{ task_id = "R-258"; source_phase = "research"; target_phase = "grooming"; file_affinity = @("src/a.txt") }
         $ctx.RepoRoot = $caseRoot
-        $out = (& { Invoke-CrucibleScopeGates -Context $ctx } 6>&1 | Out-String)
+        $out = (Invoke-ExternalCommand -AsLines { & { Invoke-CrucibleScopeGates -Context $ctx } 6>&1 } | Out-String)
         $lines = @(Get-ChecksNotRun -SessionDir $ctx.SessionDir -TaskId "R-258") -join "`n"
         Assert-Result -Name "I12 missing affinity script is recorded" -Condition ($lines.Contains("[scope gate v2] file affinity conflict check: check-file-affinity.ps1 not found")) -FailureMessage ($lines + "`n" + $out)
         Assert-Result -Name "I12 unreadable research scope is recorded" -Condition ($lines.Contains("[scope gate v2] research scope check: could not read the changed files")) -FailureMessage ($lines + "`n" + $out)

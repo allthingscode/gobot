@@ -363,7 +363,7 @@ try {
             # into a fact. It also fixes the worse failure mode: with the redirect not taking,
             # this case passes as soon as any other run happens to collect the fixture from the
             # shared TEMP first, which is the vacuous pass the comment above was written against.
-            $childTemp = (& (Get-PwshCommand) -NoProfile -Command '[System.IO.Path]::GetTempPath()' | Select-Object -First 1)
+            $childTemp = (Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -Command '[System.IO.Path]::GetTempPath()' } | Select-Object -First 1)
             $childTempFull = [System.IO.Path]::GetFullPath(([string]$childTemp).Trim()).TrimEnd('/', '\')
             $privateTempFull = [System.IO.Path]::GetFullPath($privateTemp).TrimEnd('/', '\')
             Assert-Result -Name "the child's temp directory is the private one" -Condition ($childTempFull -eq $privateTempFull) -FailureMessage (

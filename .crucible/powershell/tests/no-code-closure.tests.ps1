@@ -155,7 +155,7 @@ function Invoke-DeploymentDoneHandoff {
     }
 
     try {
-        $output = & $generator @handoffArgs 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $generator @handoffArgs 2>&1 }
         return @{ Ok = $true; Output = (@($output) -join ([string][char]10)) }
     } catch {
         return @{ Ok = $false; Output = $_.Exception.Message }
@@ -186,7 +186,7 @@ function Invoke-HandoffValidator {
     $schema = Join-Path $REPO_ROOT "schemas/handoff.schema.json"
     Push-Location -LiteralPath $Root
     try {
-        $out = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validator -HandoffFile $HandoffFile -SchemaPath $schema)
+        $out = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validator -HandoffFile $HandoffFile -SchemaPath $schema })
         return @{ ExitCode = $LASTEXITCODE; Output = ($out -join ([string][char]10)) }
     } finally {
         Pop-Location

@@ -126,7 +126,7 @@ try {
 }
 '@
             [System.IO.File]::WriteAllText($child, $childText, $utf8)
-            $output = @(& $pwshCmd -NoProfile -File $child -Root $root -Case $case 2>&1)
+            $output = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -File $child -Root $root -Case $case 2>&1 })
             Assert-Result "missing-library gate behavior preserved" ($LASTEXITCODE -eq 0) ($output -join "`n")
             Assert-Result "spec stays in its original directory" (Test-Path -LiteralPath $spec) "expected no archival move"
             if ($case -eq "abandon-archived") {
@@ -162,7 +162,7 @@ Invoke-HumanGateAcceptRedirect -TaskId "F-222" -Outcome "accepted" -ProjectRoot 
 Write-Host "GATE_COMPLETED"
 '@
             [System.IO.File]::WriteAllText($child, $childText, $utf8)
-            $output = @(& $pwshCmd -NoProfile -File $child -Root $root -Lib (Join-Path $REPO_ROOT "powershell/lib") -MergeResult $mergeCase.Result 2>&1) -join "`n"
+            $output = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -File $child -Root $root -Lib (Join-Path $REPO_ROOT "powershell/lib") -MergeResult $mergeCase.Result 2>&1 }) -join "`n"
             Assert-Result "gate exits with the merge outcome" ($LASTEXITCODE -eq $mergeCase.Exit -and -not $output.Contains("GATE_COMPLETED")) ("expected exit " + $mergeCase.Exit + ", got " + $LASTEXITCODE + ". Output: " + $output)
             Assert-Result "spec stays active" (Test-Path -LiteralPath $spec) ("the spec was archived although the merge returned " + $mergeCase.Result)
             Assert-Result "row is not Production" ((Get-Content -LiteralPath $backlog -Raw) -match '\| In Progress \|') (Get-Content -LiteralPath $backlog -Raw)
@@ -250,7 +250,7 @@ Write-Host "GATE_COMPLETED"
         $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
         $ctx.IsBootstrap = $false
 
-        $logOutput = & { Resolve-CrucibleTransition -Context $ctx } 6>&1
+        $logOutput = Invoke-ExternalCommand -AsLines { & { Resolve-CrucibleTransition -Context $ctx } 6>&1 }
         $logText = $logOutput -join "`n"
 
         Assert-Result -Name "Warning emitted for active task F-102" -Condition ($logText -match "F-102[/\\]grooming[/\\]task\.md") -FailureMessage "expected warning for F-102, got: $logText"
@@ -277,7 +277,7 @@ Write-Host "GATE_COMPLETED"
         $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
         $ctx.IsBootstrap = $false
 
-        $logText = (& { Resolve-CrucibleTransition -Context $ctx } 6>&1) -join "`n"
+        $logText = (Invoke-ExternalCommand -AsLines { & { Resolve-CrucibleTransition -Context $ctx } 6>&1 }) -join "`n"
 
         Assert-Result -Name "R-10 session is reported" -Condition ($logText -match "R-10[/\\]grooming[/\\]task\.md") -FailureMessage "R-1 excluded R-10's grooming session. Output: $logText"
         Assert-Result -Name "R-1 own session is excluded" -Condition ($logText -notmatch "[/\\]R-1[/\\]grooming") -FailureMessage "R-1 reported its own session. Output: $logText"
@@ -304,7 +304,7 @@ Write-Host "GATE_COMPLETED"
         New-PSDrive -Name Item333 -PSProvider FileSystem -Root $caseRoot | Out-Null
         try {
             $ctx.SessionDir = 'Item333:/session'
-            $logText = (& { Resolve-CrucibleTransition -Context $ctx } 6>&1) -join "`n"
+            $logText = (Invoke-ExternalCommand -AsLines { & { Resolve-CrucibleTransition -Context $ctx } 6>&1 }) -join "`n"
         } finally { Remove-PSDrive Item333 }
 
         Assert-Result -Name "other task session is reported" -Condition ($logText -match "R-10[/\\]grooming[/\\]task\.md") -FailureMessage "expected R-10 reported. Output: $logText"
@@ -350,7 +350,7 @@ Write-Host "GATE_COMPLETED"
         $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
         $ctx.IsBootstrap = $false
 
-        $logOutput = & { Resolve-CrucibleTransition -Context $ctx } 6>&1
+        $logOutput = Invoke-ExternalCommand -AsLines { & { Resolve-CrucibleTransition -Context $ctx } 6>&1 }
         $logText = $logOutput -join "`n"
 
         $freshLine = (@($logOutput | Where-Object { "$_" -match "F-202" }) -join "`n")
@@ -482,7 +482,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -628,7 +628,7 @@ try {
         $scriptContent = $scriptTemplate.Replace("__LIB__", $libPath).Replace("__SESSION__", $sessionDir).Replace("__REPO__", $localRepo)
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join ([string][char]10)
 
@@ -732,7 +732,7 @@ Write-Host "AFTER_ARCHIVED: `$(`$resAfter.SpecExistsInArchived)"
         $outputLines = @()
         Push-Location $tempRoot
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location
@@ -847,7 +847,7 @@ Complete-CrucibleSourceSession -Context `$ctx
 
         # Run script - it should exit with 2 because task is not finalized
         $exitCode = 0
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -877,7 +877,7 @@ Complete-CrucibleSourceSession -Context `$ctx
         git -C $localRepo push -u origin master 2>$null | Out-Null
 
         # Save origin master head commit hash
-        $beforeOriginHead = (git -C $localRepo rev-parse origin/master).Trim()
+        $beforeOriginHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse origin/master }).Trim()
 
         # Create backlog structure under local_repo, but do NOT create the active spec file (it is missing)
         $backlogDir = Join-Path $localRepo ".crucible/backlog"
@@ -954,7 +954,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -963,7 +963,7 @@ try {
         Assert-Result -Name "D45-1: outputs refusing to push message" -Condition ($output -match "refusing to push" -and $output -match "Auto-finalization failed") -FailureMessage ("expected refusing to push and Auto-finalization failed messages. Got: " + $output)
 
         # Verify push did not happen (origin/master still points to $beforeOriginHead)
-        $afterOriginHead = (git -C $localRepo rev-parse origin/master).Trim()
+        $afterOriginHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse origin/master }).Trim()
         Assert-Result -Name "D45-1: push did not occur" -Condition ($beforeOriginHead -eq $afterOriginHead) -FailureMessage ("expected origin master tip to remain " + $beforeOriginHead + ", but it advanced to " + $afterOriginHead)
     }
 
@@ -989,7 +989,7 @@ try {
         git -C $localRepo push -u origin master 2>$null | Out-Null
 
         # Save origin master head commit hash
-        $beforeOriginHead = (git -C $localRepo rev-parse origin/master).Trim()
+        $beforeOriginHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse origin/master }).Trim()
 
         # Create backlog structure under local_repo
         $backlogDir = Join-Path $localRepo ".crucible/backlog"
@@ -1084,7 +1084,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -1093,7 +1093,7 @@ try {
         Assert-Result -Name "D45-2: outputs refusing to push and archival failed messages" -Condition ($output -match "refusing to push" -and $output -match "Archived spec already exists") -FailureMessage ("expected refusing to push and Archived spec already exists messages. Got: " + $output)
 
         # Verify push did not happen (origin/master still points to $beforeOriginHead)
-        $afterOriginHead = (git -C $localRepo rev-parse origin/master).Trim()
+        $afterOriginHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse origin/master }).Trim()
         Assert-Result -Name "D45-2: push did not occur" -Condition ($beforeOriginHead -eq $afterOriginHead) -FailureMessage ("expected origin master tip to remain " + $beforeOriginHead + ", but it advanced to " + $afterOriginHead)
     }
 

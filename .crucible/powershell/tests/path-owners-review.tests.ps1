@@ -39,7 +39,7 @@ try {
         New-Item -ItemType Directory -Path $project -Force | Out-Null
         $escape = Join-Path $project 'missing/../../evil'
         Assert-Result 'escape does not exist' (-not (Test-Path -LiteralPath $escape)) 'fixture exists'
-        $output = & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT 'powershell/launch-codex-specialist.ps1') -ProjectRoot $project -CrucibleRoot $escape -Model unused -TaskId F-001 -Phase verification -PromptText REVIEW 2>&1 | Out-String
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT 'powershell/launch-codex-specialist.ps1') -ProjectRoot $project -CrucibleRoot $escape -Model unused -TaskId F-001 -Phase verification -PromptText REVIEW 2>&1 } | Out-String
         Assert-Result 'refusal exit 2' ($LASTEXITCODE -eq 2) $output
         Assert-Result 'item 303 diagnostic' ($output -match '-CrucibleRoot must be relative to the repo root') $output
         Assert-Result 'no empty-root exception' ($output -notmatch 'crucible_root value is empty') $output
@@ -47,7 +47,7 @@ try {
     }
     $results += Run-Test 'Rooted but non-qualified Windows bundle keeps item 303 refusal' {
         if (-not (Test-PlatformIsWindows)) { Skip-Test 'Root-relative Windows paths require Windows.' }
-        $output = & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT 'powershell/launch-codex-specialist.ps1') -ProjectRoot $root -CrucibleRoot '\missing-bundle' -Model unused 2>&1 | Out-String
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT 'powershell/launch-codex-specialist.ps1') -ProjectRoot $root -CrucibleRoot '\missing-bundle' -Model unused 2>&1 } | Out-String
         Assert-Result 'refusal exit 2' ($LASTEXITCODE -eq 2) $output
         Assert-Result 'item 303 diagnostic' ($output -match '-CrucibleRoot must be relative to the repo root') $output
     }

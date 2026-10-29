@@ -53,7 +53,7 @@ function Get-SharedAdopterFixture { return $null }
         $psDir = Stage-RunnerScratch -Dir $scratchDir
         $runnerCopy = Join-Path $psDir "run-all-tests.ps1"
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -66,7 +66,7 @@ function Get-SharedAdopterFixture { return $null }
         $psDir = Stage-RunnerScratch -Dir $scratchDir
         $runnerCopy = Join-Path $psDir "run-all-tests.ps1"
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -93,7 +93,7 @@ exit 0
 '@
         Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -131,9 +131,9 @@ exit 0
             Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
             if ($mode -eq "serial") {
-                $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1)
+                $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1 })
             } else {
-                $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+                $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
             }
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"
@@ -169,7 +169,7 @@ exit 0
 '@
         Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -195,7 +195,7 @@ exit 0
 '@
         Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -215,7 +215,7 @@ exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "silent.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 1 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 1 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -243,7 +243,7 @@ exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "talking.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 5 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 5 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -264,7 +264,7 @@ exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "silent-finish.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 1 -NoTimeout 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 1 -NoTimeout 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -290,7 +290,7 @@ exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "stderr-talking.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 5 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 5 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -469,7 +469,7 @@ exit 0
 '@
         Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -493,7 +493,7 @@ exit 0
 '@
         Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -516,7 +516,7 @@ exit 0
 '@
         Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -547,7 +547,7 @@ exit 0
 '@
         Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -570,7 +570,7 @@ exit 0
 '@
         Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -593,7 +593,7 @@ exit 0
 '@
         Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -613,7 +613,7 @@ exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "parallel-silent.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 1 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 1 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -641,7 +641,7 @@ exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "parallel-talking.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 5 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 5 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -667,7 +667,7 @@ exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "parallel-stderr.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 5 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 5 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -687,7 +687,7 @@ exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "parallel-silent-finish.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 1 -NoTimeout 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 1 -NoTimeout 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -717,7 +717,7 @@ exit 3
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "parallel-chatty.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 30 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 30 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -894,6 +894,72 @@ exit 0
             $reportedDuration = [double]$Matches[1]
         }
         Assert-Result -Name "exited-holder waited out the idle window with its pipes still held" -Condition ($null -ne $reportedDuration -and $reportedDuration -ge $idleTimeout) -FailureMessage ("expected a reported duration of at least the ${idleTimeout}s idle threshold, proving the pool reached the idle branch on a child whose pipes were still open; got '" + $reportedDuration + "'. A shorter duration means the grandchild released the pipes first and the leaked-handle path was never exercised. Output: " + $output)
+    }
+
+    # A release handshake proves live forwarding without sleeping out an idle
+    # budget. Stalled captures must still reach the runner's real timeout after
+    # their first completed step. Report wrapper load before the inner startup.
+    $probeIdleSeconds = 30
+    foreach ($mode in @('parallel', 'serial', 'serial-marked')) {
+        foreach ($stalled in @($false, $true)) {
+            $results += Run-Test "Nested fixture capture respects child progress and silence ($mode, stalled=$stalled)" {
+                $scratchDir = Join-Path $tempRoot ("captured-$mode-$stalled")
+                $psDir = Stage-RunnerScratch -Dir $scratchDir
+                $testsDir = Join-Path $psDir 'tests'
+                $child = Join-Path $psDir 'steps.ps1'
+                $release = Join-Path $psDir 'release'
+                $body = if ($stalled) {
+                    "Write-Output 'Test: completed first step'`nStart-Sleep -Seconds 120`n"
+                } else {
+                    @'
+Write-Output 'Test: completed live step'
+$release = Join-Path $PSScriptRoot 'release'
+$deadline = [datetime]::UtcNow.AddSeconds(120)
+while (-not (Test-Path -LiteralPath $release) -and [datetime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
+if (-not (Test-Path -LiteralPath $release)) { exit 9 }
+Write-Output 'Test: completed last step'
+'@
+                }
+                [IO.File]::WriteAllText($child, $body, [Text.UTF8Encoding]::new($false))
+                $wrapper = @'
+. (Join-Path $PSScriptRoot '_harness.ps1')
+Write-Host 'Test: capture wrapper loaded'
+$shell = (Get-Process -Id $PID).Path
+$child = Join-Path $PSScriptRoot '../steps.ps1'
+$r = Invoke-ExternalCommand { & $shell -NoProfile -File $child }
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot '../captured.json'), ($r | ConvertTo-Json))
+if ($r.ExitCode -ne 0 -or $r.Output -notmatch 'completed last step') { exit 1 }
+exit 0
+'@
+                if ($mode -eq 'serial-marked') { $wrapper = "# crucible-test: serial - tests nested capture progress after the pool`n" + $wrapper }
+                [IO.File]::WriteAllText((Join-Path $testsDir 'capture.tests.ps1'), $wrapper, [Text.UTF8Encoding]::new($false))
+                $runnerCopy = Join-Path $psDir 'run-all-tests.ps1'
+                $runnerArgs = @('-ThrottleLimit', '2', '-IdleTimeoutSeconds', [string]$probeIdleSeconds)
+                if ($mode -eq 'serial') { $runnerArgs += '-Serial' }
+                # The parallel runner intentionally buffers its display. Observe
+                # arrival at its idle-clock reset in this scratch copy only.
+                # Live children cannot exit until that observation releases them;
+                # stalled children never consult the witness and remain silent.
+                $runnerText = [IO.File]::ReadAllText($runnerCopy)
+                $resetPattern = '(?im)^\s*\$idle\.Restart\(\)$'
+                Assert-Result 'runner observation seam remains calibrated' ([regex]::Matches($runnerText, $resetPattern).Count -eq 3) 'Update the scratch observation seam when the runner changes.'
+                $step = if ($stalled) { 'first' } else { 'live' }
+                $observer = 'if ($line -match ''fixture progress: test: completed ' + $step + ' step'') { [IO.File]::WriteAllText(''' + $release.Replace("'", "''") + ''', ''go'') }'
+                $runnerText = [regex]::Replace($runnerText, $resetPattern, [Text.RegularExpressions.MatchEvaluator]{ param($match) $match.Value + "`n" + $observer })
+                [IO.File]::WriteAllText($runnerCopy, $runnerText, [Text.UTF8Encoding]::new($false))
+                if ($stalled) {
+                    $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runnerCopy @runnerArgs }
+                    Assert-Result 'stalled captured child reported its completed step' (Test-Path -LiteralPath $release) $run.Output
+                    Assert-Result 'silent captured child still times out' ($run.ExitCode -ne 0 -and $run.Output -match ("TIMEOUT after " + $probeIdleSeconds)) $run.Output
+                } else {
+                    $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runnerCopy @runnerArgs }
+                    Assert-Result 'nested captured step arrives before release' (Test-Path -LiteralPath $release) $run.Output
+                    Assert-Result 'nested captured steps survive the idle budget' ($run.ExitCode -eq 0 -and $run.Output -notmatch 'TIMEOUT') $run.Output
+                    $captured = Get-Content -LiteralPath (Join-Path $psDir 'captured.json') -Raw | ConvertFrom-Json
+                    Assert-Result 'nested capture retains the last completed step' ($captured.ExitCode -eq 0 -and $captured.Output -match 'completed last step') $captured.Output
+                }
+            }
+        }
     }
 
 } finally {

@@ -79,7 +79,7 @@ try {
     # TODO item 208: background pwsh launches re-split multi-word -PromptText values.
     $results += Run-Test -Name "printed Codex dispatch uses a file-sourced one-line pointer" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "dispatch with spaces")
-        $output = (& $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -ProjectRoot $p.Root 6>&1 | Out-String)
+        $output = (Invoke-ExternalCommand -AsLines { & $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -ProjectRoot $p.Root 6>&1 } | Out-String)
         $codex = @($output -split "`r?`n" | Where-Object { $_ -match '^    Codex:' })
         Assert-Result "one Codex command" ($codex.Count -eq 1) "expected one printed Codex command"
         Assert-Result "no PromptText" ($codex[0] -notmatch '-PromptText') "printed Codex command must not use -PromptText"
@@ -115,7 +115,7 @@ try {
     $results += Run-Test -Name "a reason with a dollar sign and quotes is recorded and printed as a literal" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "dollar-reason")
         $reason = 'Approve C-350; costs $5 and it''s "cheap"'
-        $output = (& $SCRIPT -TaskId $p.TaskId -Reason $reason -Approved "C-350" -ProjectRoot $p.Root 6>&1 | Out-String)
+        $output = (Invoke-ExternalCommand -AsLines { & $SCRIPT -TaskId $p.TaskId -Reason $reason -Approved "C-350" -ProjectRoot $p.Root 6>&1 } | Out-String)
         $gateDir = Join-Path $p.Root ".crucible/session/global/research_gate"
         $rec = @(Get-ChildItem -LiteralPath $gateDir -Filter "$($p.TaskId)-*.json" -ErrorAction SilentlyContinue)
         Assert-Result "decision recorded" ($rec.Count -eq 1) $output

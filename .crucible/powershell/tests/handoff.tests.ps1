@@ -131,20 +131,20 @@ try {
         }
         $parityFailures = @()
         foreach ($case in $cases) {
-            $generatorResult = @(& {
+            $generatorResult = @(Invoke-ExternalCommand -AsLines { & {
                 $REPO_ROOT = $project
                 $wtPath = $worktree
                 $resolvedArtifacts = @($case.Input)
                 . $generatorCode
                 $normalizedArtifacts
-            })
-            $gateResult = @(& {
+            } })
+            $gateResult = @(Invoke-ExternalCommand -AsLines { & {
                 $repoRoot = $project
                 $wtPath = $worktree
                 $handoff = [pscustomobject]@{ artifacts = @($case.Input) }
                 . $gateCode
                 $normalizedArtifacts
-            })
+            } })
             $expected = @($case.Expected | Where-Object { $null -ne $_ })
             try {
                 Assert-Result -Name ("caller parity: " + $case.Input) -Condition (($generatorResult -join "|") -ceq ($gateResult -join "|") -and $generatorResult.Count -eq $gateResult.Count) -FailureMessage "callers normalized differently"

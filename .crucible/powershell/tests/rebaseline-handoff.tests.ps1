@@ -17,7 +17,7 @@ $results = @()
 
 function Invoke-Git {
     param([string]$Repo, [string[]]$GitArgs)
-    $out = & git -C $Repo @GitArgs 2>&1
+    $out = Invoke-ExternalCommand -AsLines { & git -C $Repo @GitArgs 2>&1 }
     if ($LASTEXITCODE -ne 0) { throw ("git " + ($GitArgs -join " ") + " failed: " + ($out -join "`n")) }
     return $out
 }

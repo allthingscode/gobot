@@ -47,7 +47,7 @@ exit 0
 
 function Invoke-ScratchRunner {
     param([string]$Runner, [string[]]$RunnerArgs)
-    $out = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $Runner @RunnerArgs 2>&1)
+    $out = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $Runner @RunnerArgs 2>&1 })
     return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out -join "`n") }
 }
 

@@ -23,9 +23,9 @@ function New-AgentRoot {
 
 function Invoke-Sync {
     param([string]$Root, [switch]$Check)
-    $args = @("-NoProfile", "-File", $SYNC, "-ProjectRoot", $Root)
-    if ($Check) { $args += "-Check" }
-    $output = & (Get-PwshCommand) @args 2>&1 | Out-String
+    $commandArgs = @("-NoProfile", "-File", $SYNC, "-ProjectRoot", $Root)
+    if ($Check) { $commandArgs += "-Check" }
+    $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) @commandArgs 2>&1 } | Out-String
     return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
 }
 

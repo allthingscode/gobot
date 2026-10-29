@@ -218,7 +218,7 @@ Get-HumanGateReworkRecoveryCommand -TaskId F-1 -ProjectRoot $Root -GateReason 'r
 '@
         $script = Join-Path $dir 'print.ps1'
         Set-Content -LiteralPath $script -Value $runner -Encoding utf8NoBOM
-        $printed = (& (Get-PwshCommand) -NoProfile -File $script $dir $REPO_ROOT | Out-String).Trim()
+        $printed = (Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $script $dir $REPO_ROOT } | Out-String).Trim()
         Assert-Result -Name 'command carries both artifacts' -Condition ($printed.StartsWith("& '") -and $printed -match "-Artifacts 'one file\.md,two file\.md'" -and $printed -match "-ReviewStrikeCount '2'") -FailureMessage $printed
         $exec = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -Command ($printed + '; exit $LASTEXITCODE') }
         Assert-Result -Name 'printed command binds and reaches the row check (exit 2, not a binding failure)' -Condition ($exec.ExitCode -eq 2 -and $exec.Output -match 'no exact row for F-1') -FailureMessage ("exit " + $exec.ExitCode + ": " + $exec.Output)

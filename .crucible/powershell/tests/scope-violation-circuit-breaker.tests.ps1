@@ -46,9 +46,9 @@ try {
         }
 
         # 2. Initialize Crucible
-        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+        $null = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
             -ProjectRoot $projectRoot -ProjectName "ScopeApp" -DefaultBranch "master" `
-            -Language python -Quiet 2>&1
+            -Language python -Quiet 2>&1 }
 
         # 3. Spec declares only src/a.txt as in-scope
         $taskId  = "C-SCOPE"
@@ -177,9 +177,9 @@ try {
         }
 
         # 2. Initialize Crucible
-        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+        $null = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
             -ProjectRoot $projectRoot2 -ProjectName "ScopeApp2" -DefaultBranch "master" `
-            -Language python -Quiet 2>&1
+            -Language python -Quiet 2>&1 }
 
         # 3. Spec has empty file_affinity
         $taskId2  = "C-SCOPE-EMPTY"

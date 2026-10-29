@@ -107,7 +107,7 @@ exit $LASTEXITCODE
                     'watch-adopter-ci' { 'STATUS=GREEN' }
                 }
                 Assert-Result 'caller completed' ($res.ExitCode -eq 0 -and $output.Contains($expected)) $output
-                Assert-Result 'commit worktree removed' (@(& git -C $project worktree list --porcelain | Where-Object { $_ -match 'checks-C-334' }).Count -eq 0) 'temporary worktree retained'
+                Assert-Result 'commit worktree removed' (@(Invoke-ExternalCommand -AsLines { & git -C $project worktree list --porcelain } | Where-Object { $_ -match 'checks-C-334' }).Count -eq 0) 'temporary worktree retained'
             }
         }
     }
@@ -133,7 +133,7 @@ exit $LASTEXITCODE
             [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $aliasConfig, $utf8)
             $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root $project $caller $aliasDrive }
             Assert-Result 'configured worktree ran' ($res.ExitCode -eq 0 -and ($res.Output -join "`n") -match 'ITEM334 CHECK RAN') ($res.Output -join "`n")
-            Assert-Result 'detached worktree removed' (@(& git -C $project worktree list --porcelain | Where-Object { $_ -match 'checks-C-334' }).Count -eq 0) 'temporary worktree retained'
+            Assert-Result 'detached worktree removed' (@(Invoke-ExternalCommand -AsLines { & git -C $project worktree list --porcelain } | Where-Object { $_ -match 'checks-C-334' }).Count -eq 0) 'temporary worktree retained'
         }
     }
     foreach ($refusal in @('missing-doctor', 'missing-health', 'missing-config', 'invalid-commit')) {

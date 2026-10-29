@@ -119,7 +119,7 @@ Invoke-HumanGate -Context `$ctx
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # If gate is NOT bypassed, it writes gate_decision_F-038_pending.json and exits 0
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $pendingFile = Join-Path $gateDir "gate_decision_F-038_pending.json"
 
         Assert-Result -Name "D55: rejected decision does not bypass gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_decision_F-038_pending.json to be created, but it was bypassed"
@@ -135,7 +135,7 @@ Invoke-HumanGate -Context `$ctx
         $decisionAccepted | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "F-038-20260604T130000Z.json") -Encoding UTF8
 
         # Run guard check again
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
 
         Assert-Result -Name "D55: same-cycle accepted decision bypasses gate" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "expected gate to be bypassed, but pending file was created"
 
@@ -152,7 +152,7 @@ Invoke-HumanGate -Context `$ctx
         }
         $decisionStale | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "F-038-20260604T140000Z.json") -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
 
         Assert-Result -Name "D55: stale-cycle accepted decision does NOT bypass gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected stale-cycle accept to re-prompt (pending file created), but the gate was bypassed using a prior-cycle acceptance"
     }
@@ -294,7 +294,7 @@ try {
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # Run rejected outcome
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "E2E Reject: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -340,7 +340,7 @@ try {
         $initScriptContent | Set-Content -LiteralPath $initScriptPath -Encoding UTF8
 
         # Run crucible init to see if it advances to implementation without tripping the artifact gate
-        $initOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $initScriptPath 2>&1
+        $initOutput = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $initScriptPath 2>&1 }
         $initExitCode = $LASTEXITCODE
 
         Assert-Result -Name "E2E Reject: crucible init succeeded" -Condition ($initExitCode -eq 0) -FailureMessage ("expected crucible init to pass, got exit code $initExitCode. Output: " + $initOutput)
@@ -438,7 +438,7 @@ Push-Location '$localRepo'
 try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
         Assert-Result -Name "reject exit code" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got $exitCode. Output: " + ($output | Out-String))
         $afterHead = (Invoke-GitChecked { git -C $localRepo rev-parse master }).Trim()
@@ -491,7 +491,7 @@ Write-Host "SUCCESS_MARKER"
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $outputStr = $output -join "`n"
         $pendingFile = Join-Path $gateDir "gate_decision_F-039_pending.json"
 
@@ -527,7 +527,7 @@ Write-Host "SUCCESS_MARKER"
 "@
         $scriptContentDone | Set-Content -LiteralPath $scriptPathDone -Encoding UTF8
 
-        $outputDone = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathDone 2>&1
+        $outputDone = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathDone 2>&1 }
         $outputDoneStr = $outputDone -join "`n"
 
         Assert-Result -Name "D56: deployment -> done fires gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_decision_F-039_pending.json to be created"
@@ -674,7 +674,7 @@ try {
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # Run rejected outcome
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D57 Reject Restore: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -830,7 +830,7 @@ try {
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # Run abandoned outcome
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D57 Abandon: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -982,7 +982,7 @@ try {
 }
 "@
         $scriptContentReject | Set-Content -LiteralPath $scriptPathReject -Encoding UTF8
-        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathReject 2>&1 | Out-Null
+        Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathReject 2>&1 } | Out-Null
 
         # Verify spec is active and status is In Progress
         Assert-Result -Name "D57 Loop: active spec exists after reject" -Condition (Test-Path (Join-Path $backlogDir "features/active/F-666_Test_Spec.md")) -FailureMessage "expected active spec to exist after reject"
@@ -1035,7 +1035,7 @@ try {
 "@
         $scriptContentAccept | Set-Content -LiteralPath $scriptPathAccept -Encoding UTF8
 
-        $acceptOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathAccept 2>&1
+        $acceptOutput = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathAccept 2>&1 }
         $acceptExitCode = $LASTEXITCODE
 
         Assert-Result -Name "D57 Loop Accept: exit code is 0" -Condition ($acceptExitCode -eq 0) -FailureMessage ("expected exit code 0, got $acceptExitCode. Output: " + $acceptOutput)
@@ -1182,7 +1182,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D58 Redirect: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -1335,7 +1335,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D59 Abandon(pre-archived): exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -1399,7 +1399,7 @@ Spec content
         Assert-Result -Name "F12 row restored to active" -Condition ($backlogText -match '\| In Progress \|') -FailureMessage "expected row status to be In Progress"
 
         $valScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
-        $valOutput = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $valScript -ProjectRoot $caseRoot 2>&1
+        $valOutput = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $valScript -ProjectRoot $caseRoot 2>&1 }
         Assert-Result -Name "F12 validate-backlog passes post-recovery" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validate-backlog exit 0, got $LASTEXITCODE. Output: " + ($valOutput | Out-String))
     }
 
@@ -1577,7 +1577,7 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F14 BOM exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on BOM corruption"
@@ -1659,7 +1659,7 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F12 premature Production exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on premature Production status"
@@ -1723,7 +1723,7 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F14 U+FFFD exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on U+FFFD corruption"
@@ -1805,7 +1805,7 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F12 title with Production exit code is not 2" -Condition ($exitCode -ne 2) -FailureMessage ("expected gate not to block with exit code 2 when Status is Active, got exit code: $exitCode. Output: " + ($output | Out-String))
@@ -1869,7 +1869,7 @@ Complete-CrucibleSourceSession -Context `$ctx
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output | Out-String
         Assert-Result -Name "another task's Production row does not stop F-702" -Condition ($outputText -notmatch "marked Production or Resolved in BACKLOG.md prior to human gate approval") -FailureMessage ("the gate read F-703's row as F-702's status. Exit: $exitCode. Output: " + $outputText)
@@ -1950,7 +1950,7 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F12 premature Resolved exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on premature Resolved status"

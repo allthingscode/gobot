@@ -39,7 +39,7 @@ function Invoke-CrucibleRewind {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $outputLines = @(& (Get-PwshCommand) @cmdArgs 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) @cmdArgs 2>&1 })
         return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
     } finally {
         $ErrorActionPreference = $prev

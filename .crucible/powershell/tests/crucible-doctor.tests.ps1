@@ -407,7 +407,7 @@ try {
             $shas = @()
             for ($i = 1; $i -le $Commits; $i++) {
                 git commit --allow-empty -m "commit $i" --quiet
-                $shas += (git rev-parse HEAD).Trim()
+                $shas += (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
             }
             return [pscustomobject]@{ Head = $shas[-1]; OlderCommit = $shas[0] }
         } finally {
@@ -431,7 +431,7 @@ try {
         Assert-Result -Name "missing definitions are reported" -Condition ($output -match "\[claude\.agents\]" -and $output -match "crucible-strong \(missing\)" -and $output -match "sync-claude-agents\.ps1") -FailureMessage "Output:`n$output"
         Assert-Result -Name "drift does not block" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "Output:`n$output"
 
-        & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $projectRoot 6>&1 | Out-Null
+        Invoke-ExternalCommand -AsLines { & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $projectRoot 6>&1 } | Out-Null
         git -C $projectRoot init --quiet
         [IO.File]::WriteAllText((Join-Path $projectRoot ".gitignore"), ".claude/`n")
         $ignoredRes = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }

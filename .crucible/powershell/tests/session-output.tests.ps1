@@ -122,7 +122,7 @@ try {
         $probePath = Join-Path $tempRoot "bash-session-end.sh"
         [System.IO.File]::WriteAllText($probePath, $probe + "`n", (New-Object System.Text.UTF8Encoding($false)))
         $bash = Get-TestBash
-        $argv = @(& $bash $probePath 2>&1 | ForEach-Object { [string]$_ })
+        $argv = @(Invoke-ExternalCommand -AsLines { & $bash $probePath 2>&1 } | ForEach-Object { [string]$_ })
         $rootAt = [Array]::IndexOf($argv, "-ProjectRoot")
         Assert-Result -Name "bash reads the project root verbatim" -Condition ($LASTEXITCODE -eq 0 -and $rootAt -ge 0 -and $argv[$rootAt + 1] -ceq $ctx.RepoRoot) -FailureMessage ($command + " => " + ($argv -join " | "))
     }
@@ -142,12 +142,12 @@ try {
 
     $results += Run-Test -Name "Write-NextStep names the target and tells grok to omit model" -Body {
         $sessionDir = Join-Path $tempRoot "model-line/session"
-        $grokLines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-911" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "inherit" -RecommendedTarget "grok" 6>&1 | ForEach-Object { "$_" })
+        $grokLines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-911" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "inherit" -RecommendedTarget "grok" 6>&1 } | ForEach-Object { "$_" })
         $grokLine = @($grokLines | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
         Assert-Result -Name "grok line omits model" -Condition ($grokLine.Count -eq 1 -and $grokLine[0] -match 'inherit \(target grok\) - omit model') -FailureMessage ("got: " + ($grokLine -join " | "))
         Assert-Result -Name "grok line does not name a Claude slug" -Condition ($grokLine[0] -notmatch 'sonnet|opus|haiku') -FailureMessage ("got: " + $grokLine[0])
 
-        $claudeLines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-912" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" 6>&1 | ForEach-Object { "$_" })
+        $claudeLines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-912" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" 6>&1 } | ForEach-Object { "$_" })
         $claudeLine = @($claudeLines | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
         Assert-Result -Name "claude line names its target" -Condition ($claudeLine.Count -eq 1 -and $claudeLine[0] -match 'claude-sonnet-5-5 \(target claude\) - dispatch the specialist') -FailureMessage ("got: " + ($claudeLine -join " | "))
         Assert-Result -Name "claude with no level prints no level" -Condition (-not ($claudeLines -match '\[RECOMMENDED LEVEL\]')) -FailureMessage ("got: " + ($claudeLines -join " | "))
@@ -156,15 +156,15 @@ try {
     # Item 213: a Claude dispatch names the generated agent definition and passes neither model nor effort.
     $results += Run-Test -Name "Write-NextStep prints the recommended agent and warns when its definition is stale" -Body {
         $sessionDir = Join-Path $tempRoot "agent-line/session"
-        $lines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-921" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 | ForEach-Object { "$_" })
+        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-921" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 } | ForEach-Object { "$_" })
         $agent = @($lines | Where-Object { $_ -match '\[RECOMMENDED AGENT\]' })
         Assert-Result -Name "agent line names the subagent_type and omits model and effort" -Condition ($agent.Count -eq 1 -and $agent[0] -match '\[RECOMMENDED AGENT\] crucible-default - dispatch with subagent_type crucible-default and omit model and effort') -FailureMessage ("got: " + ($lines -join " | "))
         Assert-Result -Name "no warning when the definition matches" -Condition (-not ($lines -match '\[WARN\]')) -FailureMessage ($lines -join " | ")
 
-        $warned = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-922" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" -RecommendedAgentIssue "Agent definition crucible-default is stale for the configured level. Run: sync" 6>&1 | ForEach-Object { "$_" })
+        $warned = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-922" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" -RecommendedAgentIssue "Agent definition crucible-default is stale for the configured level. Run: sync" 6>&1 } | ForEach-Object { "$_" })
         Assert-Result -Name "stale warning is printed" -Condition (@($warned | Where-Object { $_ -match '^\[WARN\] Agent definition crucible-default is stale' }).Count -eq 1) -FailureMessage ($warned -join " | ")
 
-        $codex = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-923" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 | ForEach-Object { "$_" })
+        $codex = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-923" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 } | ForEach-Object { "$_" })
         Assert-Result -Name "a Codex target prints no agent line" -Condition (-not ($codex -match '\[RECOMMENDED AGENT\]')) -FailureMessage ($codex -join " | ")
     }
 
@@ -183,7 +183,7 @@ try {
             $oldPath = $env:PATH
             try {
                 $env:PATH = ""
-                $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+                $output = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             } finally {
                 $env:PATH = $oldPath
             }
@@ -191,10 +191,10 @@ try {
             Assert-Result -Name ($case.Phase + " names " + $case.Want) -Condition ($agentLine.Count -eq 1 -and $agentLine[0] -match ('\] ' + $case.Want + ' - dispatch with subagent_type')) -FailureMessage $output
             Assert-Result -Name ($case.Phase + " warns with the sync command when the file is missing") -Condition ($output -match ('\[WARN\] Agent definition ' + $case.Want + ' is missing') -and $output -match "& '[^']*sync-claude-agents\.ps1' -ProjectRoot '\.'") -FailureMessage $output
 
-            & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $ctx.RepoRoot 6>&1 | Out-Null
+            Invoke-ExternalCommand -AsLines { & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $ctx.RepoRoot 6>&1 } | Out-Null
             try {
                 $env:PATH = ""
-                $synced = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+                $synced = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             } finally {
                 $env:PATH = $oldPath
             }
@@ -204,7 +204,7 @@ try {
     # Item 163: a Codex level is a model and an effort together, so it is printed as one pair.
     $results += Run-Test -Name "Write-NextStep prints a Codex level as one model and effort pair" -Body {
         $sessionDir = Join-Path $tempRoot "level-line/session"
-        $lines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-914" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" 6>&1 | ForEach-Object { "$_" })
+        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-914" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" 6>&1 } | ForEach-Object { "$_" })
         $level = @($lines | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
         Assert-Result -Name "level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = gpt-6\.1-sol at low effort \(target codex\)') -FailureMessage ("got: " + ($lines -join " | "))
         $effort = @($lines | Where-Object { $_ -match '\[RECOMMENDED EFFORT\]' })
@@ -214,7 +214,7 @@ try {
     # Item 212: a Claude tier is a level too; the effort goes to the Agent tool's effort parameter.
     $results += Run-Test -Name "Write-NextStep prints a Claude level as a pair and points the effort at the Agent tool" -Body {
         $sessionDir = Join-Path $tempRoot "claude-level-line/session"
-        $lines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-916" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" 6>&1 | ForEach-Object { "$_" })
+        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-916" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" 6>&1 } | ForEach-Object { "$_" })
         $level = @($lines | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
         Assert-Result -Name "claude level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = claude-sonnet-5-5 at medium effort \(target claude\)') -FailureMessage ("got: " + ($lines -join " | "))
         $effort = @($lines | Where-Object { $_ -match '\[RECOMMENDED EFFORT\]' })
@@ -242,7 +242,7 @@ try {
             $oldPath = $env:PATH
             try {
                 $env:PATH = ""
-                $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+                $output = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             } finally {
                 $env:PATH = $oldPath
             }
@@ -330,7 +330,7 @@ Ceiling {budget_ceiling}
 
         $Push = Get-Location
         Set-Location -LiteralPath $caseRoot
-        try { Initialize-CrucibleTargetSession -Context $ctx 6>&1 | Out-Null } finally { Set-Location -LiteralPath $Push }
+        try { Invoke-ExternalCommand -AsLines { Initialize-CrucibleTargetSession -Context $ctx 6>&1 } | Out-Null } finally { Set-Location -LiteralPath $Push }
 
         Assert-Result -Name "no worktree created" -Condition (-not (Test-Path -LiteralPath (Join-Path $ctx.WorkspacesDir "implementation-R-914"))) -FailureMessage "a worktree was created for a no-code review-fix"
         & git -C $caseRoot show-ref --verify --quiet refs/heads/task/R-914
@@ -463,7 +463,7 @@ New-Item -ItemType Directory -Path `$handoffs,`$prompts -Force | Out-Null
 New-CruciblePromptText -Context `$ctx
 "@
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1 }
         Assert-Result -Name "exit code" -Condition ($LASTEXITCODE -eq 1) -FailureMessage "unresolved placeholder did not exit 1; output: $($output | Out-String)"
         Assert-Result -Name "message" -Condition (($output | Out-String) -match "unresolved placeholders") -FailureMessage "unresolved placeholder message changed"
     }
@@ -477,7 +477,7 @@ New-CruciblePromptText -Context `$ctx
         try {
             $env:PATH = ""
             $script:Quiet = $false
-            $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             Assert-Result -Name "fallback output" -Condition ($output -match "\[CI\] WARN: gh not found - cannot check CI status") -FailureMessage "no-gh fallback message missing"
         } finally {
             $env:PATH = $oldPath
@@ -504,7 +504,7 @@ New-CruciblePromptText -Context `$ctx
             $oldPath = $env:PATH
             try {
                 $env:PATH = ""
-                $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+                $output = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             } finally {
                 $env:PATH = $oldPath
             }
@@ -530,7 +530,7 @@ New-CruciblePromptText -Context `$ctx
         $oldQuiet = $Quiet
         try {
             $script:Quiet = $false
-            $output = & { Write-CruciblePromptOutput -Context $ctx } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { Write-CruciblePromptOutput -Context $ctx } 6>&1 } | Out-String
             Assert-Result -Name "the handoff success line is present" -Condition ($output -match "\[CRUCIBLE\] Handoff validated\. Next step prepared\.") -FailureMessage ("the line an operator reads to know the run finished is missing. Output:`n" + $output)
             Assert-Result -Name "the success line is followed by its handoff summary" -Condition ($output -match "TASK ID   : F-906") -FailureMessage ("the banner printed but the summary under it did not, so the function did not run to completion and the banner alone would be misleading. Output:`n" + $output)
         } finally {
@@ -578,7 +578,7 @@ Spec body
             Set-Content -Path "README.md" -Value "# t" -Encoding UTF8
             git add README.md
             git commit -m "init" --quiet
-            $mainBranch = (git rev-parse --abbrev-ref HEAD).Trim()
+            $mainBranch = (Invoke-ExternalCommand -AsLines { git rev-parse --abbrev-ref HEAD }).Trim()
             $wtPath = Join-Path $repo ".crucible/.agent-workspaces/implementation-F-907"
 
             $threw = $false
@@ -616,7 +616,7 @@ Spec body
         $oldQuiet = $script:Quiet
         try {
             $script:Quiet = $false
-            $output = & { Initialize-CrucibleTargetSession -Context $ctx } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { Initialize-CrucibleTargetSession -Context $ctx } 6>&1 } | Out-String
             Assert-Result -Name "scoped Groomer task confirmed" -Condition ($output.Contains("[INIT] Confirmed task: R-029") -and $output -notmatch "Next Ready task|No 'Ready' tasks|Identifying target task") -FailureMessage $output
             Assert-Result -Name "scoped Groomer handoff retained" -Condition ($ctx.Handoff.task_id -eq "R-029" -and (Test-Path -LiteralPath (Join-Path $ctx.SessionDir "R-029/grooming/task.md"))) -FailureMessage "named task was not retained"
         } finally {

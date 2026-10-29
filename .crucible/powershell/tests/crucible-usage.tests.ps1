@@ -7,7 +7,7 @@ $results = @()
 
 try {
     # Item 218: no task ID must explain both the invocation path and bootstrap route.
-    $output = (& pwsh -NoProfile -File $CRUCIBLE_SCRIPT -Init -ProjectRoot $tempRoot -Quiet 2>&1) -join "`n"
+    $output = (Invoke-ExternalCommand -AsLines { & pwsh -NoProfile -File $CRUCIBLE_SCRIPT -Init -ProjectRoot $tempRoot -Quiet 2>&1 }) -join "`n"
     $exitCode = $LASTEXITCODE
     $results += Run-Test -Name "Missing TaskId exits with an error" -Body {
         Assert-Result -Name "exit code" -Condition ($exitCode -eq 1) -FailureMessage "expected exit 1, got $exitCode. Output: $output"

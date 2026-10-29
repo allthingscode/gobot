@@ -61,10 +61,10 @@ function Get-SharedAdopterFixture {
     # Capture the child's stdout. Write-Host in init-project/install-hooks becomes
     # the child's success stream here; leaving it uncaptured made this function
     # return "Success:" as a path. Assignment, not 2>&1.
-    $initOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $InitScript `
+    $initOutput = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $InitScript `
         -ProjectRoot $tempPath `
         -ProjectName "Shared App" `
-        -Quiet
+        -Quiet }
     $initExit = $LASTEXITCODE
 
     if ($initExit -ne 0) {

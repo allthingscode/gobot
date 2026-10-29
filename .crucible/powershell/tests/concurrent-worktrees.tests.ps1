@@ -17,7 +17,7 @@ $results = @()
 
 
 function Test-GitInitMainSupported {
-    $versionText = git --version
+    $versionText = Invoke-ExternalCommand -AsLines { git --version }
     if ($versionText -notmatch '(\d+)\.(\d+)') { return $false }
     $major = [int]$matches[1]
     $minor = [int]$matches[2]
@@ -174,12 +174,12 @@ try {
 
         Assert-Result -Name "worktree A exists" -Condition (Test-Path $wtA) -FailureMessage "$wtA missing"
         Assert-Result -Name "worktree B exists" -Condition (Test-Path $wtB) -FailureMessage "$wtB missing"
-        Assert-Result -Name "worktree A branch" -Condition ((git -C $wtA branch --show-current) -eq "task/$taskA") -FailureMessage "worktree A is on wrong branch"
-        Assert-Result -Name "worktree B branch" -Condition ((git -C $wtB branch --show-current) -eq "task/$taskB") -FailureMessage "worktree B is on wrong branch"
+        Assert-Result -Name "worktree A branch" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtA branch --show-current }) -eq "task/$taskA") -FailureMessage "worktree A is on wrong branch"
+        Assert-Result -Name "worktree B branch" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtB branch --show-current }) -eq "task/$taskB") -FailureMessage "worktree B is on wrong branch"
 
-        $baseHead = (git -C $projectRoot rev-parse $baseBranch).Trim()
-        Assert-Result -Name "task A starts at base" -Condition (((git -C $wtA rev-parse HEAD).Trim()) -eq $baseHead) -FailureMessage "task A did not branch from $baseBranch"
-        Assert-Result -Name "task B starts at base" -Condition (((git -C $wtB rev-parse HEAD).Trim()) -eq $baseHead) -FailureMessage "task B did not branch from $baseBranch"
+        $baseHead = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse $baseBranch }).Trim()
+        Assert-Result -Name "task A starts at base" -Condition (((Invoke-ExternalCommand -AsLines { git -C $wtA rev-parse HEAD }).Trim()) -eq $baseHead) -FailureMessage "task A did not branch from $baseBranch"
+        Assert-Result -Name "task B starts at base" -Condition (((Invoke-ExternalCommand -AsLines { git -C $wtB rev-parse HEAD }).Trim()) -eq $baseHead) -FailureMessage "task B did not branch from $baseBranch"
 
         Set-Content -LiteralPath (Join-Path $wtA "task-A-marker.txt") -Value "A" -Encoding UTF8
         Set-Content -LiteralPath (Join-Path $wtB "task-B-marker.txt") -Value "B" -Encoding UTF8
@@ -191,7 +191,7 @@ try {
         Remove-WorktreeIfPresent -ProjectRoot $projectRoot -WorktreePath $wtA
         Assert-Result -Name "worktree A removed" -Condition (-not (Test-Path $wtA)) -FailureMessage "worktree A still exists"
         Assert-Result -Name "worktree B remains" -Condition (Test-Path $wtB) -FailureMessage "worktree B was removed"
-        Assert-Result -Name "worktree B branch intact" -Condition ((git -C $wtB branch --show-current) -eq "task/$taskB") -FailureMessage "worktree B branch changed"
+        Assert-Result -Name "worktree B branch intact" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtB branch --show-current }) -eq "task/$taskB") -FailureMessage "worktree B branch changed"
         Assert-Result -Name "worktree B marker intact" -Condition (Test-Path (Join-Path $wtB "task-B-marker.txt")) -FailureMessage "worktree B marker missing"
     }
 
@@ -206,11 +206,11 @@ try {
         $resSecond = Invoke-CrucibleForArchitect -ProjectRoot $projectRoot -TaskId $taskA
         Assert-CrucibleSuccess -Result $resSecond -Name "task A same-ID crucible init"
         Assert-Result -Name "same-ID worktree remains" -Condition (Test-Path $wtA) -FailureMessage "same-ID re-init did not leave a worktree"
-        Assert-Result -Name "same-ID branch intact" -Condition ((git -C $wtA branch --show-current) -eq "task/$taskA") -FailureMessage "same-ID re-init changed branch"
+        Assert-Result -Name "same-ID branch intact" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtA branch --show-current }) -eq "task/$taskA") -FailureMessage "same-ID re-init changed branch"
     }
 
     $results += Run-Test -Name "Branch namespace remains per task" -Body {
-        $branches = @(git -C $projectRoot branch --list "task/*" --format="%(refname:short)" | Sort-Object)
+        $branches = @(Invoke-ExternalCommand -AsLines { git -C $projectRoot branch --list "task/*" --format="%(refname:short)" } | Sort-Object)
         $expected = @("task/$taskA", "task/$taskB") | Sort-Object
         Assert-Result -Name "branch count" -Condition ($branches.Count -eq $expected.Count) -FailureMessage "expected $($expected.Count) task branches, got $($branches.Count): $($branches -join ', ')"
         for ($i = 0; $i -lt $expected.Count; $i++) {

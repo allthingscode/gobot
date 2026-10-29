@@ -119,3 +119,103 @@ function Get-GitFileNormalizedHash {
     }
     return Get-NormalizedSha256 -Content $content
 }
+
+# One cat-file process per commit, with byte-framed replies. Reading a reply before
+# sending the next request bounds pipe use even for blobs larger than the pipe buffer.
+# Do not cache here: callers own the commit/path set and its lifetime.
+function Start-GitFileContentProcess {
+    param([Parameter(Mandatory=$true)][Diagnostics.ProcessStartInfo]$StartInfo)
+    return [Diagnostics.Process]::Start($StartInfo)
+}
+
+function Get-GitFileContents {
+    param(
+        [Parameter(Mandatory=$true)][string]$Repo,
+        [Parameter(Mandatory=$true)][string]$Commit,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][string[]]$Paths
+    )
+    $contents = [System.Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+    if ($Paths.Count -eq 0) { return ,$contents }
+    $psi = [Diagnostics.ProcessStartInfo]::new('git')
+    foreach ($argument in @('-C', (Resolve-FilesystemPath -Path $Repo), 'cat-file', '--batch')) {
+        $psi.ArgumentList.Add($argument)
+    }
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
+    $proc = Start-GitFileContentProcess -StartInfo $psi
+    try {
+        $stderr = $proc.StandardError.ReadToEndAsync()
+        $stream = $proc.StandardOutput.BaseStream
+        foreach ($path in ($Paths | Select-Object -Unique)) {
+            $spec = $Commit + ':' + (ConvertTo-NormalizedRelativeSlashPath -Path $path)
+            if ($spec -match '[\r\n]') { throw 'Git batch object names must fit on one line.' }
+            # The git protocol uses LF even when StreamWriter defaults to CRLF.
+            $proc.StandardInput.Write($spec + "`n")
+            $proc.StandardInput.Flush()
+            $header = [Text.StringBuilder]::new()
+            while (($b = $stream.ReadByte()) -ne 10) {
+                if ($b -lt 0) { throw 'Git batch output ended before its header.' }
+                [void]$header.Append([char]$b)
+            }
+            if ($header.ToString().EndsWith(' missing')) {
+                $contents[$path] = $null
+                continue
+            }
+            if ($header.ToString() -notmatch '^[0-9a-f]+ (\S+) ([0-9]+)$') {
+                throw "Unexpected git batch header: $header"
+            }
+            $isBlob = $Matches[1] -eq 'blob'
+            $bytes = [byte[]]::new([int]$Matches[2])
+            $offset = 0
+            while ($offset -lt $bytes.Length) {
+                $count = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+                if ($count -eq 0) { throw 'Git batch output ended inside a blob.' }
+                $offset += $count
+            }
+            if ($stream.ReadByte() -ne 10) { throw 'Git batch blob delimiter is missing.' }
+            if (-not $isBlob) {
+                $contents[$path] = $null
+                continue
+            }
+            $reader = [IO.StreamReader]::new([IO.MemoryStream]::new($bytes), [Text.Encoding]::UTF8, $true)
+            try { $contents[$path] = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
+        $proc.StandardInput.Close()
+        $proc.WaitForExit()
+        if ($proc.ExitCode -ne 0) { throw ("git cat-file exited with code " + $proc.ExitCode) }
+    } catch {
+        $failure = $_
+        # Closing/killing also releases the asynchronous stderr reader after a
+        # broken input pipe or truncated output. Include git's diagnostic.
+        if (-not $proc.HasExited) { $proc.Kill($true) }
+        $proc.WaitForExit()
+        $detail = $stderr.GetAwaiter().GetResult()
+        throw ("git cat-file batch failed: " + $failure.Exception.Message + "`n" + $detail)
+    } finally {
+        if (-not $proc.HasExited) { $proc.Kill($true) }
+        $proc.Dispose()
+    }
+    return ,$contents
+}
+
+function Get-GitFileNormalizedHashes {
+    param(
+        [Parameter(Mandatory=$true)][string]$Repo,
+        [Parameter(Mandatory=$true)][string]$Commit,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][string[]]$Paths
+    )
+    $contents = Get-GitFileContents -Repo $Repo -Commit $Commit -Paths $Paths
+    $hashes = [System.Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+    foreach ($path in $contents.Keys) {
+        $content = $contents[$path]
+        $hashes[$path] = [pscustomobject]@{
+            Hash = if ($null -eq $content) { $null } else { Get-NormalizedSha256 -Content $content }
+            BaseHash = if ($null -eq $content) { $null } else { Get-NormalizedSha256 -Content (Get-ContentWithoutCustomRegions -Content $content) }
+        }
+    }
+    return ,$hashes
+}

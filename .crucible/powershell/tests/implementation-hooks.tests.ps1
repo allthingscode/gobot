@@ -33,7 +33,7 @@ function Invoke-RepoGit {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $out = & git -C $Repo @GitArgs 2>&1
+        $out = Invoke-ExternalCommand -AsLines { & git -C $Repo @GitArgs 2>&1 }
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $prev

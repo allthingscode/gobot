@@ -84,7 +84,7 @@ Write-Host 'PASSED'
 
 function Invoke-SelectionRunner {
     param([string]$Root, [string[]]$RunnerArgs)
-    $out = @(& (Get-PwshCommand) -NoProfile -File (Join-Path $Root 'powershell/run-all-tests.ps1') @RunnerArgs 2>&1)
+    $out = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File (Join-Path $Root 'powershell/run-all-tests.ps1') @RunnerArgs 2>&1 })
     return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $out -join "`n" }
 }
 

@@ -11,7 +11,7 @@ $results = @()
 
 $tempRoot = New-TestFixtureRoot -NameHint "manifest-test"
 
-$expectedScaffoldCount = @(git -C $REPO_ROOT ls-files templates/project/.crucible).Count
+$expectedScaffoldCount = @(Invoke-ExternalCommand -AsLines { git -C $REPO_ROOT ls-files templates/project/.crucible }).Count
 
 try {
     # Guards the counts below against vacuous green: if the scaffold tree ever reads as
@@ -43,7 +43,7 @@ try {
     $results += Run-Test -Name "Fresh install ships scaffold snapshot and self-hosts downstream init" -Body {
         $gen1Root = Join-Path $tempRoot "gen1-adopter"
         $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-        $output1 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $gen1Root -ProjectName "Gen1 Adopter" -Description "Gen1" -Language go -Quiet 2>&1)
+        $output1 = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $gen1Root -ProjectName "Gen1 Adopter" -Description "Gen1" -Language go -Quiet 2>&1 })
         Assert-Result -Name "gen1 install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("gen1 install failed: " + ($output1 -join "`n"))
 
         $snapshotConfigFile = Join-Path $gen1Root ".crucible\templates\project\.crucible\config.yaml"
@@ -56,7 +56,7 @@ try {
         # Self-hosting check (Generation 2 from Generation 1's bundled installer)
         $gen2Root = Join-Path $tempRoot "gen2-adopter"
         $gen1InitScript = Join-Path $gen1Root ".crucible\powershell\init-project.ps1"
-        $output2 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $gen1InitScript -ProjectRoot $gen2Root -ProjectName "Gen2 Adopter" -Description "Gen2" -Language go -Quiet 2>&1)
+        $output2 = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $gen1InitScript -ProjectRoot $gen2Root -ProjectName "Gen2 Adopter" -Description "Gen2" -Language go -Quiet 2>&1 })
         Assert-Result -Name "gen2 install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("gen2 self-hosting install failed: " + ($output2 -join "`n"))
 
         $gen2Config = Join-Path $gen2Root ".crucible\config.yaml"
@@ -76,7 +76,7 @@ try {
 
             $guardInstallRoot = Join-Path $tempRoot "guard-install-check"
             $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-            $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $guardInstallRoot -ProjectName "Guard Check" -Quiet 2>&1)
+            $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $guardInstallRoot -ProjectName "Guard Check" -Quiet 2>&1 })
             Assert-Result -Name "guard install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("guard check install failed: " + ($output -join "`n"))
 
             $installedJunkPath = Join-Path $guardInstallRoot ".crucible/powershell/.crucible/junk.txt"
@@ -89,7 +89,7 @@ try {
     $results += Run-Test -Name "Framework-owned files map to files produced by a fresh install" -Body {
         $installRoot = Join-Path $tempRoot "manifest-install"
         $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Manifest Test" -Quiet 2>&1)
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Manifest Test" -Quiet 2>&1 })
         Assert-Result -Name "install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("install failed: " + ($output -join "`n"))
 
         $manifest = Get-InstallManifest -FrameworkRoot $REPO_ROOT
@@ -131,7 +131,7 @@ try {
 
         $installRoot = Join-Path $tempRoot "manifest-install-check"
         $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Exclusion Check" -Quiet 2>&1)
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Exclusion Check" -Quiet 2>&1 })
         Assert-Result -Name "install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("install failed: " + ($output -join "`n"))
 
         foreach ($devOnlyTest in $devOnlyProbes) {
@@ -308,7 +308,7 @@ try {
         $project = Join-Path $tempRoot "gitignored-sibling/proj"
         $bundle = Join-Path $project ".crucible"
         New-Item -ItemType Directory -Path $bundle, (Join-Path $tempRoot "gitignored-sibling/proj2") -Force | Out-Null
-        $null = git init --quiet $project 2>$null
+        $null = Invoke-ExternalCommand -AsLines { git init --quiet $project 2>$null }
         [System.IO.File]::WriteAllText((Join-Path $project ".gitignore"), "/2/`n/local/`n", (New-Object System.Text.UTF8Encoding($false)))
         Assert-Result -Name "an ignored path inside the project is reported" -Condition (Test-CrucibleGitIgnored -BundleRoot $bundle -RelativePath "../local/a.txt") -FailureMessage "the fixture's ignore rule did not apply inside the project, so the check below is vacuous"
         Assert-Result -Name "a sibling path is not ignored by the project" -Condition (-not (Test-CrucibleGitIgnored -BundleRoot $bundle -RelativePath "../../proj2/ignored.txt")) -FailureMessage "a path outside the git root was judged against its ignore rules"

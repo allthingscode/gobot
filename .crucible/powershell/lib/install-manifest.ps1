@@ -184,6 +184,9 @@ function Test-FrameworkDevOnlyFile {
         # every entry naming an excluded file would report itself stale and fail the adopter's run
         # for a rule that is about this repository's migration rather than about their tests.
         "powershell/tests/fixture-root-conformance.tests.ps1",
+        # Inventories framework test capture sites and process seams. Item 338.
+        "powershell/tests/_capture-audit.ps1",
+        "powershell/tests/fixture-capture-guard.tests.ps1",
         # Exclude framework tooling per file; scripts/hooks/ must ship because
         # core.hooksPath uses all four hooks in adopter bundles. Item 83.
         #
@@ -376,6 +379,19 @@ function Test-CrucibleGitIgnored {
         [Parameter(Mandatory=$true)][string]$BundleRoot,
         [Parameter(Mandatory=$true)][string]$RelativePath
     )
+    $ignored = Get-CrucibleGitIgnoredPaths -BundleRoot $BundleRoot -RelativePaths @($RelativePath)
+    return $ignored.Contains($RelativePath)
+}
+
+# One ignore query for the complete classification snapshot, including paths
+# that do not exist yet. NUL framing avoids git's quoted-path display format.
+function Get-CrucibleGitIgnoredPaths {
+    param(
+        [Parameter(Mandatory=$true)][string]$BundleRoot,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][string[]]$RelativePaths
+    )
+    $ignored = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    if ($RelativePaths.Count -eq 0) { return ,$ignored }
     $gitRoot = $null
     $dir = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $BundleRoot))
     while ($null -ne $dir) {
@@ -390,19 +406,42 @@ function Test-CrucibleGitIgnored {
         $dir = $parent
     }
     if ($null -eq $gitRoot) {
-        return $false
+        return ,$ignored
     }
-
-    $absoluteFilePath = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path (Join-Path $BundleRoot $RelativePath)))
-
-    if (Test-PathWithinDirectory -Path $absoluteFilePath -Directory $gitRoot) {
-        $relativeToGit = Get-PathRelativeToDirectory -Path $absoluteFilePath -Directory $gitRoot
-        $relativeToGit = $relativeToGit -replace '\\', '/'
-
-        $null = git -C (Resolve-FilesystemPath -Path $gitRoot) check-ignore --quiet -- $relativeToGit 2>$null
-        return ($LASTEXITCODE -eq 0)
+    $pathsByGitName = @{}
+    foreach ($relativePath in $RelativePaths) {
+        $absoluteFilePath = [IO.Path]::GetFullPath((Resolve-FilesystemPath -Path (Join-Path $BundleRoot $relativePath)))
+        if (Test-PathWithinDirectory -Path $absoluteFilePath -Directory $gitRoot) {
+            $gitName = (Get-PathRelativeToDirectory -Path $absoluteFilePath -Directory $gitRoot) -replace '\\', '/'
+            $pathsByGitName[$gitName] = $relativePath
+        }
     }
-    return $false
+    if ($pathsByGitName.Count -eq 0) { return ,$ignored }
+    $psi = [Diagnostics.ProcessStartInfo]::new('git')
+    foreach ($argument in @('-C', (Resolve-FilesystemPath -Path $gitRoot), 'check-ignore', '--stdin', '-z')) { $psi.ArgumentList.Add($argument) }
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
+    $psi.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $proc = [Diagnostics.Process]::Start($psi)
+    try {
+        $stdout = $proc.StandardOutput.ReadToEndAsync()
+        $stderr = $proc.StandardError.ReadToEndAsync()
+        foreach ($gitName in $pathsByGitName.Keys) { $proc.StandardInput.Write($gitName + [char]0) }
+        $proc.StandardInput.Close()
+        $proc.WaitForExit()
+        if ($proc.ExitCode -gt 1) { throw ("git check-ignore failed: " + $stderr.GetAwaiter().GetResult()) }
+        foreach ($gitName in $stdout.GetAwaiter().GetResult().Split([char]0, [StringSplitOptions]::RemoveEmptyEntries)) {
+            [void]$ignored.Add($pathsByGitName[$gitName])
+        }
+    } finally {
+        if (-not $proc.HasExited) { $proc.Kill($true) }
+        $proc.Dispose()
+    }
+    return ,$ignored
 }
 
 function Test-ScaffoldSnapshotPath {
@@ -514,8 +553,10 @@ function New-ProvenanceManifest {
     }
 
     $files = [ordered]@{}
-    foreach ($entry in @(Get-ProvenanceBundlePaths -FrameworkRoot $FrameworkRoot -Manifest $Manifest -Commit $Commit)) {
-        $content = Get-GitFileContent -Repo $FrameworkRoot -Commit $Commit -Path $entry.SourcePath
+    $entries = @(Get-ProvenanceBundlePaths -FrameworkRoot $FrameworkRoot -Manifest $Manifest -Commit $Commit)
+    $contents = Get-GitFileContents -Repo $FrameworkRoot -Commit $Commit -Paths @($entries | ForEach-Object { $_.SourcePath })
+    foreach ($entry in $entries) {
+        $content = $contents[$entry.SourcePath]
         if ($null -eq $content) { continue }
         $hash = Get-NormalizedSha256 -Content $content
         $baseContent = Get-ContentWithoutCustomRegions -Content $content

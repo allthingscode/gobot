@@ -222,7 +222,7 @@ function Invoke-TestGit {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $output = & git -C $Directory @GitArgs 2>$null
+        $output = Invoke-ExternalCommand -AsLines { & git -C $Directory @GitArgs 2>$null }
         $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previous
@@ -878,7 +878,7 @@ try {
         Assert-Result -Name "dollar root script path is a literal" -Condition ($null -ne $line -and $line.Contains("pwsh -NoProfile -ExecutionPolicy Bypass -File '" + (Join-Path $resolvedRoot ".crucible")) -and $line.Contains("crucible.ps1' -Init")) -FailureMessage ("line: " + $line)
         if ($null -ne $line) {
             $scriptBlockText = '& { $args } ' + $line.Trim().Substring("pwsh ".Length)
-            $argv = @(& ([scriptblock]::Create($scriptBlockText)))
+            $argv = @(Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($scriptBlockText)) })
             $rootAt = [Array]::IndexOf($argv, "-ProjectRoot")
             Assert-Result -Name "PowerShell reads the root verbatim" -Condition ($rootAt -ge 0 -and $argv[$rootAt + 1] -ceq $resolvedRoot) -FailureMessage ($argv -join " | ")
         }

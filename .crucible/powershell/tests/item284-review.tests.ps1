@@ -59,7 +59,7 @@ try {
         $siteIndex++
         $results += Run-Test -Name ($siteName + ' runs under Bash and pwsh') -Body {
             $REPO_ROOT = Join-Path $tempRoot @("project O'Brien", 'recovery$HOME', 'cash$HOME', 'back`tick')[$siteIndex - 1]
-            $line = & ([scriptblock]::Create($sites[$siteName].Right.Extent.Text))
+            $line = Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($sites[$siteName].Right.Extent.Text)) }
             if ($siteName -eq 'Codex handoff') {
                 $prompt = New-BootstrapPrompt -RoleLabel Architect -TaskIdValue $TaskId -PromptPath 'prompt.md' -AdvanceCommand $line -RequireJsonVerdict $false
                 $promptLines = @($prompt -split "`r?`n")
@@ -80,7 +80,7 @@ try {
             } else {
                 # Render the actual checklist hashtable, then extract its executable line.
                 $isolatedChecksCommand = $line; $mergeSimulationCommand = $line
-                $lists = & ([scriptblock]::Create((Get-ReviewAssignment $session 'taskLists').Right.Extent.Text))
+                $lists = Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create((Get-ReviewAssignment $session 'taskLists').Right.Extent.Text)) }
                 $phase = if ($siteName -eq 'task.md isolated checks') { 'verification' } else { 'deployment' }
                 $prefix = if ($phase -eq 'verification') { '- [ ] Run isolated checks: ' } else { '- [ ] Run merge simulation: ' }
                 $line = @($lists[$phase] -split "`n" | Where-Object { $_.StartsWith($prefix) })[0].Substring($prefix.Length)

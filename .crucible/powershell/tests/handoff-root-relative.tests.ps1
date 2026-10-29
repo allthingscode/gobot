@@ -60,20 +60,20 @@ exit `$LASTEXITCODE
         $results += Run-Test ("Missing root-relative caller parity: " + $separator) {
             if (-not $IsWindows) { Skip-Test 'Root-relative Windows artifacts require Windows.' }
             Assert-Result 'fixture is missing' (-not (Test-Path -LiteralPath $artifact)) $artifact
-            $generatorResult = @(& {
+            $generatorResult = @(Invoke-ExternalCommand -AsLines { & {
                 $REPO_ROOT = $project
                 $wtPath = $worktree
                 $resolvedArtifacts = @($artifact)
                 . $generatorCode
                 $normalizedArtifacts
-            })
-            $gateResult = @(& {
+            } })
+            $gateResult = @(Invoke-ExternalCommand -AsLines { & {
                 $repoRoot = $project
                 $wtPath = $worktree
                 $handoff = [pscustomobject]@{ artifacts = @($artifact) }
                 . $gateCode
                 $normalizedArtifacts
-            })
+            } })
             Assert-Result 'generator preserves outside root' ($generatorResult.Count -eq 1 -and $generatorResult[0] -ceq $expected) ($generatorResult -join '|')
             Assert-Result 'gate preserves outside root' ($gateResult.Count -eq 1 -and $gateResult[0] -ceq $expected) ($gateResult -join '|')
         }

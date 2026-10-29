@@ -39,7 +39,7 @@ function Invoke-GateProcess {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $out = & $psExe -NoProfile -ExecutionPolicy Bypass -File $target @GateArgs 2>&1
+        $out = Invoke-ExternalCommand -AsLines { & $psExe -NoProfile -ExecutionPolicy Bypass -File $target @GateArgs 2>&1 }
         return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out | Out-String) }
     } finally {
         $ErrorActionPreference = $prev
@@ -148,7 +148,7 @@ try {
     # contexts. Item 114. The explicit list moved from pre-commit to pre-push when
     # pre-commit went to -Staged, which filters by the script's own list. Item 151.
     $hookPath = Join-Path $REPO_ROOT "scripts/hooks/pre-push"
-    $trackedRootDocs = @(& git -C $REPO_ROOT ls-files --full-name -- "*.md" | Where-Object { $_ -notmatch "/" })
+    $trackedRootDocs = @(Invoke-ExternalCommand -AsLines { & git -C $REPO_ROOT ls-files --full-name -- "*.md" } | Where-Object { $_ -notmatch "/" })
     if (-not (Test-Path -LiteralPath $hookPath) -or $trackedRootDocs.Count -eq 0) {
         Write-Host "SKIPPED: root-doc scope drift guard (framework-only; no tracked root *.md under this tree)" -ForegroundColor Yellow
     } else {

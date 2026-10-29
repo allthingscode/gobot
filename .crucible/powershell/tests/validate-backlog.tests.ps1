@@ -74,7 +74,7 @@ function Invoke-Validator {
     if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
         $cmdArgs += @("-ProjectRoot", $ProjectRoot)
     }
-    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT @cmdArgs 2>&1)
+    $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT @cmdArgs 2>&1 })
     return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
 }
 
@@ -1101,7 +1101,7 @@ R-029 discovery was archived as Resolved after filing C-001.
 
         Push-Location $unrelated
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location

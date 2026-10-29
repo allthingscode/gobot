@@ -19,14 +19,14 @@ $tempRoot = New-TestFixtureRoot -NameHint "config-test"
 
 try {
     $projectRoot = Join-Path $tempRoot "app"
-    $null = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT -ProjectRoot $projectRoot -ProjectName "Config Test" -Quiet 2>&1)
+    $null = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT -ProjectRoot $projectRoot -ProjectName "Config Test" -Quiet 2>&1 })
     $configPath = Join-Path $projectRoot ".crucible/config.yaml"
 
     $results += Run-Test -Name "Template config fails until placeholders are replaced" -Body {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -43,7 +43,7 @@ try {
         $config = $config.Replace("Replace with project-specific engineering rules.", "Keep project-specific mandates current.")
         $config | Out-File -LiteralPath $configPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "configured exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
         Assert-Result -Name "configured message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("missing pass message. Output: " + $output)
@@ -58,7 +58,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -78,7 +78,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -97,7 +97,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -117,7 +117,7 @@ try {
         $testPath = Join-Path $projectRoot ".crucible/config-alt-bundle.yaml"
         $configAltBundle | Out-File -LiteralPath $testPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "alt-bundle exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
         Assert-Result -Name "alt-bundle message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("missing pass message. Output: " + $output)
@@ -135,7 +135,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -150,7 +150,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $missingPath 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $missingPath 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -167,7 +167,7 @@ try {
         $testPath = Join-Path $projectRoot ".crucible/config-no-paths.yaml"
         $configNoPaths | Out-File -LiteralPath $testPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "no-paths exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
         Assert-Result -Name "no-paths message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("expected pass message. Output: " + $output)
@@ -184,7 +184,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -202,7 +202,7 @@ try {
         $testPath = Join-Path $projectRoot ".crucible/config-custom-paths.yaml"
         $configCustomPaths | Out-File -LiteralPath $testPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "custom-paths exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
         Assert-Result -Name "custom-paths message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("expected pass message. Output: " + $output)
@@ -220,7 +220,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLinesAbs = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathAbs 2>&1)
+            $outputLinesAbs = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathAbs 2>&1 })
             $exitCodeAbs = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -237,7 +237,7 @@ try {
 
         $ErrorActionPreference = "Continue"
         try {
-            $outputLinesEsc = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathEsc 2>&1)
+            $outputLinesEsc = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathEsc 2>&1 })
             $exitCodeEsc = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -257,7 +257,7 @@ try {
         $testPath = Join-Path $projectRoot ".crucible/config-tools-crucible.yaml"
         $configToolsCrucible | Out-File -LiteralPath $testPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "tools-crucible exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
         Assert-Result -Name "tools-crucible message" -Condition ($output -match "CONFIG VALIDATION PASSED") -FailureMessage ("missing pass message. Output: " + $output)
@@ -274,7 +274,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLinesEsc = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathEsc 2>&1)
+            $outputLinesEsc = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathEsc 2>&1 })
             $exitCodeEsc = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -290,7 +290,7 @@ try {
 
         $ErrorActionPreference = "Continue"
         try {
-            $outputLinesWin = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathWin 2>&1)
+            $outputLinesWin = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathWin 2>&1 })
             $exitCodeWin = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -306,7 +306,7 @@ try {
 
         $ErrorActionPreference = "Continue"
         try {
-            $outputLinesUnix = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathUnix 2>&1)
+            $outputLinesUnix = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathUnix 2>&1 })
             $exitCodeUnix = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference
@@ -324,7 +324,7 @@ try {
         $testPathWith = Join-Path $projectRoot ".crucible/config-with-manifest.yaml"
         $configWithManifest | Out-File -LiteralPath $testPathWith -Encoding UTF8
 
-        $outputLinesWith = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathWith 2>&1)
+        $outputLinesWith = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathWith 2>&1 })
         $exitCodeWith = $LASTEXITCODE
         $outputWith = $outputLinesWith -join "`n"
         Assert-Result -Name "valid manifest exit" -Condition ($exitCodeWith -eq 0) -FailureMessage ("expected exit 0 for valid manifest_files config, got " + $exitCodeWith + ". Output: " + $outputWith)
@@ -337,7 +337,7 @@ try {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $outputLinesBad = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathBad 2>&1)
+            $outputLinesBad = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $testPathBad 2>&1 })
             $exitCodeBad = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousPreference

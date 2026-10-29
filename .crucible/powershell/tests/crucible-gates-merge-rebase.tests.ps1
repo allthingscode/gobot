@@ -120,9 +120,9 @@ $results += Run-Test "Same-line conflict routes to 'rework', leaves tree clean, 
         $readme = Get-Content -LiteralPath (Join-Path $repo "README.md") -Raw
         Assert-Result "primary-preserved" ($readme.Trim() -eq "BBB") "master README should be restored to 'BBB', got '$($readme.Trim())'"
         Assert-Result "no-conflict-markers" ($readme -notmatch '<<<<<<<') "master README still contains conflict markers"
-        $status = @(git -C $repo status --porcelain)
+        $status = @(Invoke-ExternalCommand -AsLines { git -C $repo status --porcelain })
         Assert-Result "worktree-clean" ($status.Count -eq 0) "master working tree not clean: $($status -join ',')"
-        Assert-Result "branch-intact" (& { git -C $repo show-ref --quiet "refs/heads/task/T-002"; $LASTEXITCODE -eq 0 }) "task/T-002 branch was lost"
+        Assert-Result "branch-intact" (& { Invoke-ExternalCommand -AsLines { git -C $repo show-ref --quiet "refs/heads/task/T-002" }; $LASTEXITCODE -eq 0 }) "task/T-002 branch was lost"
         Assert-Result "handoff-written" (Test-Path $marker) "re-entry handoff was not generated"
         $markerText = Get-Content -LiteralPath $marker -Raw
         Assert-Result "handoff-target" ($markerText -match 'Target=implementation') "handoff did not target implementation: $markerText"
@@ -159,7 +159,7 @@ $results += Run-Test "rebase_count backstop trips the recurring-conflict breaker
 
         Assert-Result "breaker-result" ($result -eq "breaker") "Expected 'breaker', got '$result'"
         Assert-Result "no-merge-head" (-not (Test-Path (Join-Path $repo ".git/MERGE_HEAD"))) "master left mid-merge after breaker"
-        $status = @(git -C $repo status --porcelain)
+        $status = @(Invoke-ExternalCommand -AsLines { git -C $repo status --porcelain })
         Assert-Result "worktree-clean" ($status.Count -eq 0) "master working tree not clean after breaker: $($status -join ',')"
     } finally {
         Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
@@ -279,7 +279,7 @@ $results += Run-Test "Conflict path survives ErrorActionPreference=Stop (git reb
 
         Assert-Result "stop-result" ($result -eq "rework") "Expected 'rework' under Stop, got '$result'"
         Assert-Result "wt-not-mid-rebase" (-not (Test-Path (Join-Path $repo ".git/worktrees/wt-T-004/rebase-merge"))) "worktree left mid-rebase under Stop"
-        $status = @(git -C $repo status --porcelain)
+        $status = @(Invoke-ExternalCommand -AsLines { git -C $repo status --porcelain })
         Assert-Result "primary-clean" ($status.Count -eq 0) "master not clean under Stop: $($status -join ',')"
     } finally {
         Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue

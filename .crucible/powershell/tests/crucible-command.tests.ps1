@@ -18,7 +18,7 @@ function Invoke-TestBashLine {
     param([Parameter(Mandatory = $true)][string]$Bash, [Parameter(Mandatory = $true)][string]$Line, [Parameter(Mandatory = $true)][string]$Name)
     $scriptPath = Join-Path $tempRoot ($Name + ".sh")
     [System.IO.File]::WriteAllText($scriptPath, ($Line + "`n"), (New-Object System.Text.UTF8Encoding($false)))
-    $output = @(& $Bash $scriptPath 2>&1 | ForEach-Object { [string]$_ })
+    $output = @(Invoke-ExternalCommand -AsLines { & $Bash $scriptPath 2>&1 } | ForEach-Object { [string]$_ })
     return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = $output }
 }
 $utf8 = [System.Text.UTF8Encoding]::new($false)
@@ -72,7 +72,7 @@ try {
         Assert-Result "note is a comment" ($note.StartsWith("# (command unavailable: ")) $note
         $bashRun = Invoke-TestBashLine -Bash (Get-TestBash) -Line $note -Name "note"
         Assert-Result "bash runs nothing" ($bashRun.ExitCode -eq 0 -and @($bashRun.Lines).Count -eq 0) (@($bashRun.Lines) -join " | ")
-        $psOut = @(& ([scriptblock]::Create($note)))
+        $psOut = @(Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($note)) })
         Assert-Result "PowerShell runs nothing" ($psOut.Count -eq 0) ($psOut -join " | ")
     }
 
@@ -96,7 +96,7 @@ $rootShown = -join @($ProjectRoot.ToCharArray() | ForEach-Object { if ([int]$_ -
         $parameters = [ordered]@{ Init = $true; TaskId = "F-247"; ProjectRoot = $project; GateReason = "approve O'Brien; & (checks)" }
         $expected = @("init=True", "task=F-247", ("root=" + $project), "reason=approve O'Brien; & (checks)") -join "`n"
         $direct = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $parameters -CrucibleRoot $captureRoot
-        $actual = @(& ([scriptblock]::Create($direct))) -join "`n"
+        $actual = @(Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($direct)) }) -join "`n"
         Assert-Result "direct values preserved" ($actual -ceq $expected) $actual
 
         $native = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $parameters -CrucibleRoot $captureRoot -Invoker "pwsh -NoProfile -File"
@@ -132,7 +132,7 @@ $rootShown = -join @($ProjectRoot.ToCharArray() | ForEach-Object { if ([int]$_ -
             $parameters = [ordered]@{ Init = $true; TaskId = "F-247"; ProjectRoot = $value }
             $expected = "root=" + (-join @($value.ToCharArray() | ForEach-Object { if ([int]$_ -gt 126) { "\u" + ([int]$_).ToString("X4") } else { [string]$_ } }))
             $direct = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $parameters -CrucibleRoot $captureRoot -Strict
-            $actual = @(& ([scriptblock]::Create($direct)))[2]
+            $actual = @(Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($direct)) })[2]
             Assert-Result ("direct literal " + $i) ($actual -ceq $expected) ($direct + " => " + $actual)
             if ($value.StartsWith("-")) { continue }
 
@@ -151,7 +151,7 @@ $rootShown = -join @($ProjectRoot.ToCharArray() | ForEach-Object { if ([int]$_ -
 
             # Legacy invokers must also render the direct form; no native passing remains.
             $native = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $parameters -CrucibleRoot $captureRoot -Invoker "pwsh -NoProfile -File"
-            $nativeLine = @(& ([scriptblock]::Create($native)))[2]
+            $nativeLine = @(Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($native)) })[2]
             Assert-Result ("native literal " + $i) ($native.StartsWith("& '") -and $nativeLine -ceq $expected) ($native + " => " + $nativeLine)
 
             $argumentList = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters $parameters -CrucibleRoot $captureRoot -Transport ArgumentList -Strict
@@ -167,13 +167,13 @@ $rootShown = -join @($ProjectRoot.ToCharArray() | ForEach-Object { if ([int]$_ -
         $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $REPO_ROOT "powershell/new-handoff.ps1"), [ref]$tokens, [ref]$errors)
         [System.IO.File]::WriteAllText((Join-Path $captureDir "new-handoff.ps1"), ($ast.ParamBlock.Extent.Text + "`n`$HumanApproved -join '|'`n"), $utf8)
         $cmd = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters ([ordered]@{ TaskId = "R-1"; Source = "research"; Target = "grooming"; Reason = "approve"; HumanApproved = @("C-1", "C-10") }) -CrucibleRoot $captureRoot
-        $actual = @(& ([scriptblock]::Create($cmd))) -join "`n"
+        $actual = @(Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($cmd)) }) -join "`n"
         Assert-Result "array retains two IDs" ($actual -ceq "C-1|C-10") $actual
         $message = ""
         try { $null = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters ([ordered]@{ HumanApproved = @("C-1", "C-10") }) -CrucibleRoot $captureRoot -Transport ArgumentList -Strict } catch { $message = $_.Exception.Message }
         Assert-Result "native list refuses rather than collapsing IDs" ($message.Contains("pwsh -File accepts only scalar arguments")) $message
         $legacy = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters ([ordered]@{ TaskId = "R-1"; Source = "research"; Target = "grooming"; Reason = "approve"; HumanApproved = @("C-1", "C-10") }) -CrucibleRoot $captureRoot -Invoker "pwsh -File" -Strict
-        Assert-Result "legacy invoker retains two IDs directly" ((@(& ([scriptblock]::Create($legacy))) -join "`n") -ceq "C-1|C-10") $legacy
+        Assert-Result "legacy invoker retains two IDs directly" ((@(Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($legacy)) }) -join "`n") -ceq "C-1|C-10") $legacy
     }
 
     # Run the printed line inside a fresh pwsh, rather than passing its values through a
@@ -193,7 +193,7 @@ param($Root, $Destination)
 New-CrucibleCommand -Script 'powershell/capture.ps1' -BundleRoot $Root -CrucibleRoot $Root -Parameters ([ordered]@{ ProjectRoot = 'child''s $HOME'; OutputPath = $Destination })
 '@, $utf8)
         $destination = Join-Path $tempRoot "child-bytes.out"
-        $line = & $child -Root $literalRoot -Destination $destination
+        $line = Invoke-ExternalCommand -AsLines { & $child -Root $literalRoot -Destination $destination }
         Assert-Result "child script builds a direct command" ($line.StartsWith("& '")) $line
         $driver = Join-Path $tempRoot "run-child-command.ps1"
         [IO.File]::WriteAllText($driver, ($line + "`n"), $utf8)

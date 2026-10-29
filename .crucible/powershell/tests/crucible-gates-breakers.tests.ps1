@@ -167,7 +167,7 @@ function Invoke-ResearchBreakerRun {
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$safeCaseRoot'
             `$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop
             `$Quiet = `$true
@@ -204,7 +204,7 @@ function Invoke-ResearchBreakerRun {
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1)
+"@ 2>&1 })
             $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousPreference
@@ -461,7 +461,7 @@ Write-EventLog -Event 'session_start' -TaskId 'F-031' -Phase 'grooming' -Handoff
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
         Assert-Result -Name "quality gate exits 2" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit 2, got " + $exitCode + ". Output: " + $output)
@@ -501,7 +501,7 @@ Complete-CrucibleSourceSession -Context `$ctx
 
         # First occurrence: should exit 2 with quality_gate_retry logged (not circuit_breaker)
         $exitCode = 0
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
@@ -520,7 +520,7 @@ Complete-CrucibleSourceSession -Context `$ctx
                 }
             }
             Invoke-CrucibleRuntimeValidation -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         Assert-Result -Name "D26 retry exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
 
@@ -539,7 +539,7 @@ Complete-CrucibleSourceSession -Context `$ctx
         [System.IO.File]::AppendAllText($ctx.LogFile, $startEvent + "`n")
 
         # Second occurrence: should exit 2 with circuit_breaker logged
-        $exitCode2 = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode2 = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
@@ -558,7 +558,7 @@ Complete-CrucibleSourceSession -Context `$ctx
                 }
             }
             Invoke-CrucibleRuntimeValidation -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode2 = $LASTEXITCODE
         Assert-Result -Name "D26 retry block exit code is 2" -Condition ($exitCode2 -eq 2) -FailureMessage "expected exit code 2, got $exitCode2"
 
@@ -577,7 +577,7 @@ Complete-CrucibleSourceSession -Context `$ctx
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
         $runGate = {
             param([string]$ArtifactLiteral)
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
@@ -596,15 +596,15 @@ Complete-CrucibleSourceSession -Context `$ctx
                 }
             }
             Invoke-CrucibleRuntimeValidation -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         }
 
-        $quotedOutput = (& $runGate "`"'docs/REAL.md'`"") -join "`n"
+        $quotedOutput = (Invoke-ExternalCommand -AsLines { & $runGate "`"'docs/REAL.md'`"" }) -join "`n"
         Assert-Result -Name "quoted artifact still stops the gate" -Condition ($LASTEXITCODE -eq 2) -FailureMessage "expected exit code 2, got $LASTEXITCODE"
         Assert-Result -Name "quoted artifact named as the cause" -Condition ($quotedOutput -match "carry quote characters" -and $quotedOutput -match [regex]::Escape("['docs/REAL.md']")) -FailureMessage ("expected the quote hint naming ['docs/REAL.md'], got: " + $quotedOutput)
 
         Remove-Item -LiteralPath $ctx.LogFile -Force -ErrorAction SilentlyContinue
-        $plainOutput = (& $runGate "'docs/NOT_THERE.md'") -join "`n"
+        $plainOutput = (Invoke-ExternalCommand -AsLines { & $runGate "'docs/NOT_THERE.md'" }) -join "`n"
         Assert-Result -Name "plain missing artifact still stops the gate" -Condition ($LASTEXITCODE -eq 2) -FailureMessage "expected exit code 2, got $LASTEXITCODE"
         Assert-Result -Name "plain missing artifact gets no quote hint" -Condition ($plainOutput -notmatch "carry quote characters") -FailureMessage ("a plain missing path must not get the quote hint, got: " + $plainOutput)
     }
@@ -659,7 +659,7 @@ verification:
         [System.IO.File]::AppendAllText($logFile, $optionalHistory)
 
 
-        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -683,7 +683,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D38 first failure exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
@@ -757,7 +757,7 @@ verification:
         } | ConvertTo-Json -Compress
         [System.IO.File]::AppendAllText($logFile, $startEvent + "`n")
 
-        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -781,7 +781,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D38 second failure exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2, got $exitCode"
@@ -833,7 +833,7 @@ verification:
         $logFile = Join-Path $caseRoot "session/F-038/pipeline.log.jsonl"
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
 
-        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -857,7 +857,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D38 success exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode"
@@ -901,7 +901,7 @@ verification:
 
         $logFile = Join-Path $caseRoot "session/F-221/pipeline.log.jsonl"
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -925,7 +925,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1 | Out-String
+"@ 2>&1 } | Out-String
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "uncommitted worktree exits 2" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit 2, got " + $exitCode + ". Output: " + $output)
@@ -943,7 +943,7 @@ verification:
         $logFile = Join-Path $caseRoot "session/F-038/pipeline.log.jsonl"
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
 
-        $exitCode = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $exitCode = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -967,7 +967,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D38 no-worktree exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage "expected exit code 0, got $exitCode"
@@ -982,7 +982,7 @@ verification:
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
         $breakerBacklog = Join-Path $caseRoot "backlog"
 
-        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $outputLines = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
@@ -1010,7 +1010,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $outputLines -join "`n"
 
@@ -1038,7 +1038,7 @@ verification:
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
         $breakerBacklog = Join-Path $caseRoot "backlog"
 
-        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $outputLines = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
@@ -1066,7 +1066,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $outputLines -join "`n"
 
@@ -1094,7 +1094,7 @@ verification:
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
         $breakerBacklog = Join-Path $caseRoot "backlog"
 
-        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $outputLines = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
@@ -1125,7 +1125,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $outputLines -join "`n"
 
@@ -1148,7 +1148,7 @@ verification:
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
         $breakerBacklog = Join-Path $caseRoot "backlog"
 
-        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $outputLines = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location -LiteralPath '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
@@ -1180,7 +1180,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $outputLines -join "`n"
 
@@ -1198,7 +1198,7 @@ verification:
         $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
         $breakerBacklog = Join-Path $caseRoot "backlog"
 
-        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $outputLines = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
@@ -1227,7 +1227,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $outputLines -join "`n"
 
@@ -1268,7 +1268,7 @@ verification:
 
         $breakerBacklog = Join-Path $caseRoot "backlog"
 
-        $outputLines = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $outputLines = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$($breakerBacklog.Replace("'", "''"))'
@@ -1294,7 +1294,7 @@ verification:
             }
             Read-CrucibleHandoffContext -Context `$ctx
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $outputLines -join "`n"
 
@@ -1364,7 +1364,7 @@ verification:
         $unparseableRetry = '{"event":"quality_gate_retry","task_id":"F-040A","phase":"implementation","notes":"Required artifact missing'
         [System.IO.File]::AppendAllText($ctx.LogFile, $unparseableRetry + "`n")
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
@@ -1383,7 +1383,7 @@ verification:
                 }
             }
             Invoke-CrucibleRuntimeValidation -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8
@@ -1438,7 +1438,7 @@ verification:
         $unparseableRetry = '{"event":"quality_gate_retry","task_id":"F-040V","phase":"verification","notes":"Verification check failed'
         [System.IO.File]::AppendAllText($logFile, $unparseableRetry + "`n")
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             Set-Location '$caseRoot'
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
@@ -1462,7 +1462,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         $logContent = Get-Content -LiteralPath $logFile -Raw -Encoding UTF8
@@ -1520,7 +1520,7 @@ verification:
         # 9 counted handoffs is under the ceiling of 10, but only by one - and two log lines
         # could not be read, either of which may be a session_end. Passing here would assert
         # a ceiling check the evidence does not support.
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$Quiet = `$true
             `$backlogDir = '$(Join-Path $caseRoot "backlog")'
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
@@ -1548,7 +1548,7 @@ verification:
                 }
             }
             Invoke-CircuitBreakerGates -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         $logContent = Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8

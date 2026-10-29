@@ -26,7 +26,7 @@ function Invoke-StagedScript {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @ArgumentList 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @ArgumentList 2>&1 }
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $prev
@@ -46,7 +46,7 @@ try {
 
         $r = Invoke-StagedScript -ScriptPath (Join-Path $repo "powershell/install-hooks.ps1")
         Assert-Result -Name "exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ": " + $r.Output)
-        $configured = (git -C $repo config --get core.hooksPath)
+        $configured = (Invoke-ExternalCommand -AsLines { git -C $repo config --get core.hooksPath })
         Assert-Result -Name "hooksPath" -Condition ($configured -eq "scripts/hooks") -FailureMessage ("expected scripts/hooks, got '" + $configured + "'")
         Assert-Result -Name "prints Success" -Condition ($r.Output -match "Success: Set git core.hooksPath") -FailureMessage ("expected the Success line on a non-Quiet run, got: " + $r.Output)
     }
@@ -60,7 +60,7 @@ try {
 
         $r = Invoke-StagedScript -ScriptPath (Join-Path $repo ".crucible/powershell/install-hooks.ps1")
         Assert-Result -Name "exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ": " + $r.Output)
-        $configured = (git -C $repo config --get core.hooksPath)
+        $configured = (Invoke-ExternalCommand -AsLines { git -C $repo config --get core.hooksPath })
         Assert-Result -Name "hooksPath" -Condition ($configured -eq ".crucible/scripts/hooks") -FailureMessage ("expected .crucible/scripts/hooks, got '" + $configured + "'")
     }
 
@@ -179,7 +179,7 @@ try {
 
         $r = Invoke-StagedScript -ScriptPath (Join-Path $repo "powershell/install-hooks.ps1") -ArgumentList @("-Quiet")
         Assert-Result -Name "exit 0" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $r.ExitCode + ": " + $r.Output)
-        $configured = (git -C $repo config --get core.hooksPath)
+        $configured = (Invoke-ExternalCommand -AsLines { git -C $repo config --get core.hooksPath })
         Assert-Result -Name "hooksPath" -Condition ($configured -eq "scripts/hooks") -FailureMessage ("expected scripts/hooks, got '" + $configured + "'")
         Assert-Result -Name "no Success line" -Condition ($r.Output -notmatch "Success: Set git core.hooksPath") -FailureMessage ("Quiet still printed Success: " + $r.Output)
         Assert-Result -Name "no shadowed-hook warning" -Condition ($r.Output -notmatch "shadowed by core.hooksPath") -FailureMessage ("Quiet still printed the shadowed-hook warning: " + $r.Output)

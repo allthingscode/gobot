@@ -88,7 +88,7 @@ try {
             }
 
             $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-            $outputLines = @(& $pwshCmd -NoProfile -Command @"
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -Command @"
 `$ErrorActionPreference = 'Stop'
 `$Quiet = `$true
 . '$libPath'
@@ -109,7 +109,7 @@ Set-Location '$($caseRoot.Replace("'", "''"))'
 }
 Test-CompletionArtifactGate -Context `$ctx
 Write-Host 'HANDOFF_PASSED'
-"@ 2>&1)
+"@ 2>&1 })
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"
 
@@ -252,14 +252,14 @@ APPROVED. Looks great!
         $contextPath = Join-Path $caseRoot "context.xml"
         $ctx | Export-Clixml -LiteralPath $contextPath
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-        $outputLines = @(& $pwshCmd -NoProfile -Command @"
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -Command @"
 `$ErrorActionPreference = 'Stop'
 `$Quiet = `$true
 . '$libPath'
 `$ctx = Import-Clixml -LiteralPath '$($contextPath.Replace("'", "''"))'
 Test-CompletionArtifactGate -Context `$ctx
 Write-Host 'HANDOFF_PASSED'
-"@ 2>&1)
+"@ 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
         Assert-Result -Name "plain-text approval refuses handoff" -Condition ($exitCode -eq 1 -and -not $output.Contains("HANDOFF_PASSED")) -FailureMessage "expected exit 1, got $exitCode. Output: $output"
@@ -285,14 +285,14 @@ Write-Host 'HANDOFF_PASSED'
             $contextPath = Join-Path $caseRoot "context.xml"
             $ctx | Export-Clixml -LiteralPath $contextPath
             $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-            $outputLines = @(& $pwshCmd -NoProfile -Command @"
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -Command @"
 `$ErrorActionPreference = 'Stop'
 `$Quiet = `$true
 . '$libPath'
 `$ctx = Import-Clixml -LiteralPath '$($contextPath.Replace("'", "''"))'
 Test-CompletionArtifactGate -Context `$ctx
 Write-Host 'HANDOFF_PASSED'
-"@ 2>&1)
+"@ 2>&1 })
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"
             Assert-Result -Name "body example refuses handoff" -Condition ($exitCode -eq 1 -and -not $output.Contains("HANDOFF_PASSED")) -FailureMessage "expected exit 1, got $exitCode. Output: $output"
@@ -355,7 +355,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "D21: unquoted YAML parses without fallback warning" -Condition ($output -match "PASSED_UNQUOTED") -FailureMessage ("expected PASSED_UNQUOTED, got: " + $output)
         Assert-Result -Name "D21: CHANGES_REQUESTED YAML blocks even if APPROVED in prose" -Condition ($output -match "PASSED_BLOCKED") -FailureMessage ("expected PASSED_BLOCKED, got: " + $output)
@@ -419,7 +419,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "D20: artifacts resolve relative to implementation worktree path" -Condition ($output -match "PASSED_RESOLVED") -FailureMessage ("expected PASSED_RESOLVED, got: " + $output)
     }
@@ -473,7 +473,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "D35: artifacts resolve from both worktree and repo root" -Condition ($output -match "PASSED_RESOLVED") -FailureMessage ("expected PASSED_RESOLVED, got: " + $output)
     }
@@ -666,7 +666,7 @@ Write-EventLog -Event "session_start" -TaskId "F-099" -Phase "grooming" -Handoff
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         $exitCode = $LASTEXITCODE
 
@@ -701,12 +701,12 @@ Complete-CrucibleSourceSession -Context `$ctx
             Set-Content -LiteralPath "README.md" -Value "# d40" -Encoding UTF8
             git add README.md
             git commit -m "init" --quiet
-            $mainBranch = (git rev-parse --abbrev-ref HEAD).Trim()
+            $mainBranch = (Invoke-ExternalCommand -AsLines { git rev-parse --abbrev-ref HEAD }).Trim()
             git checkout -b side-only --quiet
             Set-Content -LiteralPath "side.txt" -Value "side" -Encoding UTF8
             git add side.txt
             git commit -m "side" --quiet
-            $sideHash = (git rev-parse HEAD).Trim()
+            $sideHash = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
             git checkout $mainBranch --quiet
         } finally {
             Pop-Location
@@ -721,7 +721,7 @@ Complete-CrucibleSourceSession -Context `$ctx
         New-Item -ItemType Directory -Path (Split-Path -Parent $ctx.LogFile) -Force | Out-Null
 
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$Quiet = `$true
             `$backlogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
@@ -744,7 +744,7 @@ Complete-CrucibleSourceSession -Context `$ctx
                 }
             }
             Test-CompletionArtifactGate -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         $logContent = if (Test-Path -LiteralPath $ctx.LogFile) { Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8 } else { "" }
@@ -775,7 +775,7 @@ Complete-CrucibleSourceSession -Context `$ctx
         Set-Content -LiteralPath (Join-Path $gateDir "F-040F-20260902T120000Z.json") -Value '{"task_id":"F-040F","outcome":"accepted"' -Encoding UTF8
 
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop
             `$Quiet = `$true
             Set-Location '$($caseRoot.Replace("'", "''"))'
@@ -796,7 +796,7 @@ Complete-CrucibleSourceSession -Context `$ctx
                 }
             }
             Complete-CrucibleSourceSession -Context `$ctx
-"@)
+"@ })
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         $logContent = if (Test-Path -LiteralPath $logFile) { Get-Content -LiteralPath $logFile -Raw -Encoding UTF8 } else { "" }
@@ -825,7 +825,7 @@ Complete-CrucibleSourceSession -Context `$ctx
             Set-Content -LiteralPath (Join-Path $archDir ($TaskId + "_test.md")) -Value "---`nitem_id: `"$TaskId`"`nstatus: `"Production`"`n---`n# $TaskId" -Encoding UTF8
         }
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop
             `$Quiet = `$true
             Set-Location '$($caseRoot.Replace("'", "''"))'
@@ -846,7 +846,7 @@ Complete-CrucibleSourceSession -Context `$ctx
                 }
             }
             Complete-CrucibleSourceSession -Context `$ctx
-"@ 2>&1)
+"@ 2>&1 })
         return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Text = ($output -join "`n") }
     }
 
@@ -1006,7 +1006,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         $exitCode = $LASTEXITCODE
 
@@ -1059,7 +1059,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines2 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines2 = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output2 = $outputLines2 -join "`n"
         $exitCode2 = $LASTEXITCODE
 

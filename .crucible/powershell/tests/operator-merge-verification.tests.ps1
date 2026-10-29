@@ -8,7 +8,7 @@ $CRUCIBLE_SCRIPT = Join-Path $REPO_ROOT "powershell/crucible.ps1"
 $results = @()
 
 function Test-GitInitMainSupported {
-    $versionText = git --version
+    $versionText = Invoke-ExternalCommand -AsLines { git --version }
     if ($versionText -notmatch '(\d+)\.(\d+)') { return $false }
     $major = [int]$matches[1]
     $minor = [int]$matches[2]
@@ -76,7 +76,7 @@ function Initialize-ProjectRepo {
 
         git add README.md .crucible/config.yaml .crucible/.gitignore .crucible/backlog/BACKLOG.md .crucible/dev-logs/UNPUBLISHED_LOGS.md .crucible/backlog/
         git commit -m "init" --quiet
-        return (git rev-parse HEAD).Trim()
+        return (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
     } finally {
         Pop-Location
     }
@@ -142,7 +142,7 @@ function New-SideBranchCommit {
         Set-Content -LiteralPath "side.txt" -Value "side branch only" -Encoding UTF8
         git add side.txt
         git commit -m "side branch commit" --quiet
-        $hash = (git rev-parse HEAD).Trim()
+        $hash = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
         git checkout $BaseBranch --quiet
         return $hash
     } finally {
@@ -278,7 +278,7 @@ try {
             git commit -m "task work" --quiet
             git checkout master --quiet
             git merge task/$taskId --no-ff -m "merge task work" --quiet
-            $mergedHash = (git rev-parse HEAD).Trim()
+            $mergedHash = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
         } finally {
             Pop-Location
         }
@@ -301,14 +301,14 @@ try {
             # .crucible change during the task and only the missing dev log is wrong.
             git rm --quiet .crucible/dev-logs/UNPUBLISHED_LOGS.md
             git commit -m "drop dev log" --quiet
-            $baseHash = (git rev-parse HEAD).Trim()
+            $baseHash = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
             git checkout -b task/$taskId --quiet
             Set-Content -LiteralPath "work.txt" -Value "task work" -Encoding UTF8
             git add work.txt
             git commit -m "task work" --quiet
             git checkout master --quiet
             git merge task/$taskId --no-ff -m "merge task work" --quiet
-            $mergedHash = (git rev-parse HEAD).Trim()
+            $mergedHash = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
         } finally {
             Pop-Location
         }
@@ -849,7 +849,7 @@ try {
             git commit -m "task work" --quiet
             git checkout master --quiet
             git merge task/$taskId --no-ff -m "merge task work" --quiet
-            $mergedHash = (git rev-parse HEAD).Trim()
+            $mergedHash = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
         } finally {
             Pop-Location
         }

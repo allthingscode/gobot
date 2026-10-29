@@ -63,7 +63,7 @@ function Invoke-Generator {
     }
     try {
         $global:LASTEXITCODE = 0
-        $output = & $generator @InputArgs 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $generator @InputArgs 2>&1 }
         return @{
             ExitCode = $(if ($global:LASTEXITCODE -eq 2) { 2 } else { 0 })
             Output   = ($output -join "`n")
@@ -482,7 +482,7 @@ budget_tier: "low"
         if ($null -eq $obj.stub_specs_created -or $obj.stub_specs_created.Count -eq 0 -or $obj.stub_specs_created[0] -ne "backlog/features/active/F-001_Stub.md") {
             throw "Expected stub_specs_created to contain mock spec, got: $($obj.stub_specs_created)"
         }
-        $validationResult = & "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $path -SchemaPath $schemaPath 2>&1
+        $validationResult = Invoke-ExternalCommand -AsLines { & "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $path -SchemaPath $schemaPath 2>&1 }
         $validationJson = $validationResult | Where-Object { $_ -match '^\{' } | Select-Object -First 1
         if (-not $validationJson) { throw "Validator produced no JSON output" }
         $validated = $validationJson | ConvertFrom-Json
@@ -715,7 +715,7 @@ budget_tier: "low"
             "    Write-Output ('CALLER_LASTEXIT=' + `$LASTEXITCODE)",
             "} catch { Write-Output ('CALLER_CAUGHT=' + `$_.Exception.Message) }"
         ) | Set-Content -LiteralPath $script -Encoding UTF8
-        $inProc = & (Get-PwshCommand) -NoProfile -File $script $generator $taskId $schemaPath $tempRoot 2>&1
+        $inProc = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $script $generator $taskId $schemaPath $tempRoot 2>&1 }
         $text = $inProc -join "`n"
         if ($text -match "CALLER_CAUGHT" -or $text -notmatch "CALLER_LASTEXIT=2") {
             throw "Expected an in-process caller to see exit 2 without a catch, got: $text"
@@ -1054,7 +1054,7 @@ budget_tier: "low"
             & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
             & git commit -m "initial commit" --quiet
             
-            $expectedHead = (& git rev-parse HEAD).Trim()
+            $expectedHead = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
             
             $result = Invoke-Generator -InputArgs @{
                 TaskId = $taskId
@@ -1130,13 +1130,13 @@ budget_tier: "low"
             Set-Content -LiteralPath "dummy.txt" -Value "hello"
             & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
             & git commit -m "initial commit" --quiet
-            $masterHead = (& git rev-parse HEAD).Trim()
+            $masterHead = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
 
             & git checkout -b "task/$taskId" --quiet
             Set-Content -LiteralPath "feature.txt" -Value "work"
             & git add feature.txt
             & git commit -m "task work" --quiet
-            $taskTip = (& git rev-parse HEAD).Trim()
+            $taskTip = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
             & git checkout master --quiet
 
             $sessionHandoffDir = Join-Path $gitRepoDir ".crucible/session/handoffs"
@@ -1251,7 +1251,7 @@ budget_tier: "low"
             Set-Content -LiteralPath "dummy.txt" -Value "hello"
             & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
             & git commit -m "initial commit" --quiet
-            $fullSha = (& git rev-parse HEAD).Trim()
+            $fullSha = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
             $shortSha = $fullSha.Substring(0, 8)
             $sessionHandoffDir = Join-Path $gitRepoDir ".crucible/session/handoffs"
 

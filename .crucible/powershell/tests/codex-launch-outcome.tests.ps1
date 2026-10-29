@@ -97,7 +97,7 @@ try {
             Assert-Result -Name ($row.Name + " status") -Condition ($record.Status -eq $row.Status) -FailureMessage ("expected " + $row.Status + ", got " + $record.Status + ": " + ($record.Detail -join " | "))
             Assert-Result -Name ($row.Name + " exit code") -Condition ($record.ExitCode -eq $row.Exit) -FailureMessage ("expected exit " + $row.Exit + ", got " + $record.ExitCode)
             $statusPath = Join-Path $tempRoot (($row.Name -replace '[^A-Za-z0-9]', '-') + "/codex-launch-status.txt")
-            $stdout = @(& { Write-CodexLaunchStatus -Record $record -StatusPath $statusPath } 6>&1 | ForEach-Object { [string]$_ })
+            $stdout = @(Invoke-ExternalCommand -AsLines { & { Write-CodexLaunchStatus -Record $record -StatusPath $statusPath } 6>&1 } | ForEach-Object { [string]$_ })
             $raw = [System.IO.File]::ReadAllText($statusPath)
             Assert-Result -Name ($row.Name + " file ends in one newline") -Condition ($raw.EndsWith("`n") -and -not $raw.EndsWith("`n`n")) -FailureMessage "status file: $raw"
             $fileLines = @($raw.TrimEnd("`n") -split "`n")

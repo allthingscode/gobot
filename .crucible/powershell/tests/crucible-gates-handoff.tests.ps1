@@ -181,7 +181,7 @@ Resolve-CrucibleInputHandoff -Context `$ctx
         $previous = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previous
@@ -252,7 +252,7 @@ Resolve-CrucibleInputHandoff -Context `$ctx
             prompt_version = "1.0.0"; session_cycle_id = "cycle-x"
         }
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-        $out = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
+        $out = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
 `$Quiet = `$true
 . '$libPath'
 `$ctx = @{
@@ -264,7 +264,7 @@ Resolve-CrucibleInputHandoff -Context `$ctx
 }
 Read-CrucibleHandoffContext -Context `$ctx
 Write-Host 'READ_COMPLETED'
-"@ 2>&1
+"@ 2>&1 }
         $code = $LASTEXITCODE
         $text = $out -join "`n"
         Assert-Result -Name "mismatch exits 2" -Condition ($code -eq 2 -and -not ($text -match 'READ_COMPLETED')) -FailureMessage ("expected exit 2 before the handoff is used, got " + $code + ". Output: " + $text)
@@ -289,7 +289,7 @@ Write-Host 'READ_COMPLETED'
             New-Item -ItemType Directory -Path (Split-Path -Parent $misplaced) -Force | Out-Null
             Write-TestHandoff -Path $misplaced -Values ($values + @{ task_id = $payloadTask })
             $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-            $out = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
+            $out = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
 `$Quiet = `$true
 . '$libPath'
 `$ctx = @{
@@ -304,7 +304,7 @@ Write-Host 'READ_COMPLETED'
 Restore-MisplacedHandoff -Context `$ctx
 Read-CrucibleHandoffContext -Context `$ctx
 Write-Host ('READ_COMPLETED ' + `$ctx.Handoff.task_id + ' ' + `$ctx.LatestHandoff.Name)
-"@ 2>&1
+"@ 2>&1 }
             $code = $LASTEXITCODE
             $text = $out -join "`n"
             Assert-Result -Name "misplaced file moved" -Condition (-not (Test-Path -LiteralPath $misplaced)) -FailureMessage "the misplaced handoff was not recovered"
@@ -382,7 +382,7 @@ Invoke-CircuitBreakerGates -Context `$ctx
         $previous = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previous
@@ -415,9 +415,9 @@ Invoke-CircuitBreakerGates -Context `$ctx
         }
 
         $script:InvalidTransitionResult = $null
-        $outputLines = @(& {
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & {
             $script:InvalidTransitionResult = Resolve-CrucibleTransition -Context $ctx
-        } 6>&1)
+        } 6>&1 })
         $transitionResult = $script:InvalidTransitionResult
         $script:InvalidTransitionResult = $null
         $outputText = ($outputLines | ForEach-Object { [string]$_ }) -join "`n"
@@ -533,7 +533,7 @@ Invoke-HandoffPreflightValidation -Context `$ctx
         $previous = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previous

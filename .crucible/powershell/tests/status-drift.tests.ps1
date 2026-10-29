@@ -69,7 +69,7 @@ function Invoke-Drift {
         [Parameter(Mandatory=$true)][string]$Framework
     )
     $callArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $STATUS_SCRIPT, "-Drift", "-BundleRoot", $BundleRoot, "-FrameworkSource", $Framework)
-    $output = @(& (Get-PwshCommand) @callArgs 2>&1)
+    $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) @callArgs 2>&1 })
     return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = ($output -join "`n")

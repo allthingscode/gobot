@@ -142,7 +142,7 @@ try {
                     [pscustomobject]@{ IsFinalized = $false }
                 }
             }
-            $output = @(Invoke-HumanGateBacklogFinalization -TaskId "F-197" -ProjectRoot $root -BacklogPath $backlog -HasTaskBranch $true 6>&1)
+            $output = @(Invoke-ExternalCommand -AsLines { Invoke-HumanGateBacklogFinalization -TaskId "F-197" -ProjectRoot $root -BacklogPath $backlog -HasTaskBranch $true 6>&1 })
             Assert-Result "failure returns false without exiting caller" ($output[-1] -eq $false) "expected false result"
             Assert-Result "refusal message preserved" (($output -join "`n") -match '\[D44\] STOP:.*refusing to push.*merge remains LOCAL only') ($output -join "`n")
             $expected = switch ($failure) {
@@ -160,7 +160,7 @@ try {
         New-SpecFile -Root $root -RelPath "features/active/F-1_Test.md" -ItemId "F-1" -Type "feature" -Priority "P2" -Title "Test" | Out-Null
         $backlog = Join-Path $root "BACKLOG.md"
         if (Test-Path -LiteralPath $backlog) { Remove-Item -LiteralPath $backlog -Force }
-        $output = @(Invoke-HumanGateBacklogFinalization -TaskId "F-1" -ProjectRoot $root -BacklogPath $backlog -HasTaskBranch $true 6>&1)
+        $output = @(Invoke-ExternalCommand -AsLines { Invoke-HumanGateBacklogFinalization -TaskId "F-1" -ProjectRoot $root -BacklogPath $backlog -HasTaskBranch $true 6>&1 })
         $text = $output -join "`n"
         Assert-Result "missing BACKLOG.md returns false" ($output[-1] -eq $false) $text
         Assert-Result "refusal names the path and remedy" ($text -match "BACKLOG\.md is missing at .*BACKLOG\.md" -and $text -match "Restore BACKLOG\.md with an exact row for F-1" -and $text -match "STOP:.*refusing to push") $text
@@ -177,7 +177,7 @@ try {
             [System.IO.File]::WriteAllText($backlog, ("| ID | Status | Title |`n|---|---|---|`n" + $other + "`n"), [System.Text.UTF8Encoding]::new($false))
             New-Item -ItemType Directory -Path (Join-Path $root ".crucible") -Force | Out-Null
             [System.IO.File]::WriteAllText((Join-Path $root ".crucible/config.yaml"), "paths:`n  backlog: .`n", [System.Text.UTF8Encoding]::new($false))
-            $output = @(Invoke-HumanGateBacklogFinalization -TaskId "F-1" -ProjectRoot $root -BacklogPath $backlog -HasTaskBranch $true 6>&1)
+            $output = @(Invoke-ExternalCommand -AsLines { Invoke-HumanGateBacklogFinalization -TaskId "F-1" -ProjectRoot $root -BacklogPath $backlog -HasTaskBranch $true 6>&1 })
             $text = $output -join "`n"
             Assert-Result "missing exact row returns false" ($output[-1] -eq $false) $text
             Assert-Result "refusal names the exact row and remedy" ($text -match 'no exact row for F-1' -and $text -match 'Repair the row in BACKLOG.md' -and $text -match 'STOP:.*refusing to push') $text

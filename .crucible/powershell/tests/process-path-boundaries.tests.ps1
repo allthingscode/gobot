@@ -116,7 +116,7 @@ try {
                             $null = Invoke-Git @('add', '-A') -Directory $native
                             $contentArgument = if ($site -eq 'staged-candidate') { $inputPath } else { $native }
                             $scopeArgument = if ($site -eq 'staged-scope') { Join-Path $inputPath 'docs' } else { Join-Path $native 'docs' }
-                            $output = & (Get-PwshCommand) -NoProfile -NonInteractive -File $wrapper $REPO_ROOT $root $contentArgument $scopeArgument no 2>&1 | Out-String
+                            $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -NonInteractive -File $wrapper $REPO_ROOT $root $contentArgument $scopeArgument no 2>&1 } | Out-String
                             Assert-Result 'staged marker refuses with exit 1' ($LASTEXITCODE -eq 1) $output
                             Assert-Result 'one scoped file scanned' ($output -match 'SCOPED=1' -and $output -match '\[FAIL\].*mojibake' -and $output -notmatch 'Outside.md') $output
                             Assert-Result 'refusal cannot be caught or return' ($output -notmatch 'CAUGHT_GATE|RETURNED_AFTER_GATE') $output
@@ -129,7 +129,7 @@ try {
             $native = Join-Path $root 'staged-error'
             New-Item -ItemType Directory -Path $native | Out-Null
             $null = Invoke-Git @('init', '--quiet', $native)
-            $output = & (Get-PwshCommand) -NoProfile -NonInteractive -File $wrapper $REPO_ROOT $root $native $native yes 2>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -NonInteractive -File $wrapper $REPO_ROOT $root $native $native yes 2>&1 } | Out-String
             Assert-Result 'qualification refusal exit 1' ($LASTEXITCODE -eq 1) $output
             Assert-Result 'explicit failure and no catch or return' ($output -match '\[FAIL\] Cannot qualify staged scope:' -and $output -notmatch 'CAUGHT_GATE|SCOPED=|RETURNED_AFTER_GATE') $output
         }
@@ -147,14 +147,14 @@ try {
             Write-BoundaryFile (Join-Path $native 'docs-old/Outside.md') ([string][char]0x00C3)
             $null = Invoke-Git @('add', 'docs', 'docs-old') -Directory $native
             $installedGate = Join-Path $gateDir 'check-mojibake.ps1'
-            $output = & (Get-PwshCommand) -NoProfile -NonInteractive -File $installedGate -Staged 2>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -NonInteractive -File $installedGate -Staged 2>&1 } | Out-String
             Assert-Result 'public staged marker refusal' ($LASTEXITCODE -eq 1 -and $output -match 'Guide.md' -and $output -notmatch 'Outside.md') $output
             Write-BoundaryFile $doc 'clean'
             $null = Invoke-Git @('add', 'docs') -Directory $native
-            $output = & (Get-PwshCommand) -NoProfile -NonInteractive -File $installedGate -Staged 2>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -NonInteractive -File $installedGate -Staged 2>&1 } | Out-String
             Assert-Result 'public staged clean scan' ($LASTEXITCODE -eq 0 -and $output -match 'in 1 scoped file') $output
             Remove-Item -LiteralPath (Join-Path $libDir 'config-helpers.ps1')
-            $output = & (Get-PwshCommand) -NoProfile -NonInteractive -File $installedGate -Staged 2>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -NonInteractive -File $installedGate -Staged 2>&1 } | Out-String
             Assert-Result 'missing qualification owner refuses explicitly' ($LASTEXITCODE -eq 1 -and $output -match '\[FAIL\] Cannot qualify staged scope: Filesystem qualification helper not found') $output
         }
     } finally { Pop-Location }

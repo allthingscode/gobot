@@ -34,12 +34,12 @@ try {
             Pop-Location
         }
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
             -ProjectRoot $projectRoot `
             -ProjectName "Adopter App" `
             -Description "Smoke testing the adopter adoption path." `
             -DefaultBranch "main" `
-            -Quiet 2>&1)
+            -Quiet 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "init-project exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
 
@@ -76,7 +76,7 @@ try {
         try {
             function Get-IsIgnored {
                 param([string]$path)
-                $out = @(git check-ignore -v $path 2>&1)
+                $out = @(Invoke-ExternalCommand -AsLines { git check-ignore -v $path 2>&1 })
                 $code = $LASTEXITCODE
                 if ($code -ne 0) { return $false }
                 $line = $out[0]
@@ -142,7 +142,7 @@ try {
         $config = $config.Replace("Replace with project-specific engineering rules.", "Keep project-specific mandates current.")
         $config | Out-File -LiteralPath $configPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $configPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "validate-config exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit 0, got " + $LASTEXITCODE + ". Output: " + $output)
     }
@@ -151,11 +151,11 @@ try {
         if (-not (Test-Path -LiteralPath $LINT_SCRIPT)) {
             Skip-Test "scripts/crucible_lint.go is framework-dev-only and is not in this bundle"
         }
-        $backlogDir = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RESOLVE_PATH -Key backlog -ProjectRoot $projectRoot
+        $backlogDir = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RESOLVE_PATH -Key backlog -ProjectRoot $projectRoot }
         Assert-Result -Name "resolve backlog path exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected resolve-config-path exit 0, got " + $LASTEXITCODE)
         Push-Location $projectRoot
         try {
-            $outputLines = @(go run $LINT_SCRIPT -framework-root $REPO_ROOT -session-dir (Get-ConfiguredPath -Key "session" -ProjectRoot (Get-Location).Path) -backlog-dir $backlogDir 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { go run $LINT_SCRIPT -framework-root $REPO_ROOT -session-dir (Get-ConfiguredPath -Key "session" -ProjectRoot (Get-Location).Path) -backlog-dir $backlogDir 2>&1 })
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"
             Assert-Result -Name "crucible_lint exit" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got " + $exitCode + ". Output: " + $output)
@@ -177,7 +177,7 @@ try {
             Set-Content -LiteralPath $seedFile -Value '{"seeded":"leak"}' -Encoding UTF8
 
             New-Item -ItemType Directory -Path $leakApp -Force | Out-Null
-            $out = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT -ProjectRoot $leakApp -ProjectName "Leak Guard" -Quiet 2>&1)
+            $out = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT -ProjectRoot $leakApp -ProjectName "Leak Guard" -Quiet 2>&1 })
             Assert-Result -Name "init exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("init failed: " + ($out -join "`n"))
 
             $nested = Join-Path $leakApp ".crucible/powershell/.crucible"

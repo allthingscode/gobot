@@ -41,12 +41,12 @@ try {
         }
 
         # 2. Initialize Crucible project
-        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+        $null = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
             -ProjectRoot $projectRoot `
             -ProjectName "Fabricated Test App" `
             -DefaultBranch "master" `
             -Language python `
-            -Quiet 2>&1
+            -Quiet 2>&1 }
 
         # 3. Configure failing verification check. Use the resolved pwsh command
         # with a non-zero exit so the check fails portably on Windows and Linux

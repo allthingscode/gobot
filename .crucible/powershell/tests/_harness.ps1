@@ -217,16 +217,56 @@ function Start-HiddenHostProcess {
 
 function Invoke-ExternalCommand {
     param(
-        [Parameter(Mandatory=$true)][scriptblock]$Command
+        [Parameter(Mandatory=$true)][scriptblock]$Command,
+        # Preserve native pipeline objects and LASTEXITCODE for existing line captures.
+        [switch]$AsLines
     )
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prev
+    $output = [Collections.Generic.List[object]]::new()
+    $lastForwardedProgress = $null
+    $receive = {
+        # Treat any case-insensitive progress-prefix match as display data.
+        # Forward without retaining it, including real child payload collisions.
+        if ([string]$_ -match '^\s*fixture progress: ') {
+            $forwardedProgress = ([string]$_).ToLowerInvariant()
+            Write-Host $forwardedProgress
+            $lastForwardedProgress = $forwardedProgress
+            return
+        }
+        # Forward child lines without a timer. Lowercase the display
+        # copy so a deliberately failing fixture cannot trip its parent's verdict.
+        # Objects not matched as progress, including failure/skip contracts, stay captured.
+        if (-not [string]::IsNullOrWhiteSpace([string]$_)) {
+            $display = "    fixture progress: " + ([string]$_).ToLowerInvariant()
+            # A nested line capture emits its display immediately before its
+            # payload. Retain the payload and avoid displaying that copy twice.
+            if ($display -cne $lastForwardedProgress) { Write-Host $display }
+        }
+        $lastForwardedProgress = $null
+        if ($AsLines) { $_ } else { $output.Add($_) }
     }
+    try {
+        # Line callers historically captured stdout only. Leave stderr on its
+        # stream unless the caller explicitly merges it inside Command. In-process
+        # errors must retain the caller's preference, including Stop.
+        if ($AsLines) { & $Command | ForEach-Object $receive }
+        else { & $Command 2>&1 | ForEach-Object $receive }
+        # Native commands update the global variable. Do not create a caller-local
+        # shadow. Before any native invocation, preserve the absent value as null.
+        $nativeExit = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        $exitCode = if ($null -ne $nativeExit) { $nativeExit.Value } else { $null }
+    } catch {
+        $partialOutput = @($output.ToArray())
+        # Preserve inner capture data after adding this owner's earlier output.
+        if ($_.Exception.Data.Contains('CrucibleCapturedOutput')) {
+            $partialOutput += @($_.Exception.Data['CrucibleCapturedOutput'])
+        }
+        $_.Exception.Data['CrucibleCapturedOutput'] = $partialOutput
+        throw
+    }
+    # Completion is a real boundary even when a successful child is silent.
+    $status = if ($null -eq $exitCode) { 'no native exit' } else { "exit $exitCode" }
+    Write-Host ("    fixture progress: command completed ($status)")
+    if ($AsLines) { return }
     return [PSCustomObject]@{ Output = ($output -join "`n"); ExitCode = $exitCode }
 }
 

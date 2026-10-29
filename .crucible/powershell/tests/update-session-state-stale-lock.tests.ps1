@@ -44,7 +44,7 @@ $payloadFile = Join-Path (New-TestFixtureRoot -NameHint "stale-lock-payload") "u
 '{"status":"locktest"}' | Out-File -LiteralPath $payloadFile -Encoding UTF8
 
 function Invoke-ScriptUnderTest {
-    $args = @(
+    $commandArgs = @(
         "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", $scriptUnderTest,
         "-Specialist", "implementation",
@@ -57,7 +57,7 @@ function Invoke-ScriptUnderTest {
     $prevPref = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $output = & (Get-PwshCommand) @args 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) @commandArgs 2>&1 }
         $exit = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $prevPref
@@ -122,16 +122,16 @@ try {
         $shell = Get-PwshCommand
         $register = {
             param($Id)
-            & $shell -NoProfile -ExecutionPolicy Bypass -File $scriptUnderTest -Specialist implementation -TaskId $Id -UpdateJson '{"status":"active","file_affinity":["internal/app/"]}' -ProjectRoot $root 2>&1 | Out-Null
+            Invoke-ExternalCommand -AsLines { & $shell -NoProfile -ExecutionPolicy Bypass -File $scriptUnderTest -Specialist implementation -TaskId $Id -UpdateJson '{"status":"active","file_affinity":["internal/app/"]}' -ProjectRoot $root 2>&1 } | Out-Null
             return $LASTEXITCODE
         }
-        $e1 = & $register "F-901"
+        $e1 = Invoke-ExternalCommand -AsLines { & $register "F-901" }
         $afterFirst = Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
         Assert-True -Name "$seed : first write exits 0" -Cond ($e1 -eq 0) -Detail ("got " + $e1)
         Assert-True -Name "$seed : first write is stored" -Cond ($null -ne $afterFirst.tasks.PSObject.Properties["F-901"] -and $afterFirst.tasks."F-901".phases.implementation.status -eq "active") -Detail (Get-Content -LiteralPath $state -Raw)
-        $conflict = & $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path (Split-Path -Parent $scriptUnderTest) "check-file-affinity.ps1") -TaskId "F-902" -Affinity "internal/app/" -ProjectRoot $root 2>&1
+        $conflict = Invoke-ExternalCommand -AsLines { & $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path (Split-Path -Parent $scriptUnderTest) "check-file-affinity.ps1") -TaskId "F-902" -Affinity "internal/app/" -ProjectRoot $root 2>&1 }
         Assert-True -Name "$seed : overlapping task is refused" -Cond ($LASTEXITCODE -eq 1) -Detail ("got " + $LASTEXITCODE + " :: " + ($conflict -join " "))
-        $e2 = & $register "F-902"
+        $e2 = Invoke-ExternalCommand -AsLines { & $register "F-902" }
         $afterSecond = Get-Content -LiteralPath $state -Raw | ConvertFrom-Json
         Assert-True -Name "$seed : second task keeps the first" -Cond ($e2 -eq 0 -and $null -ne $afterSecond.tasks.PSObject.Properties["F-901"] -and $null -ne $afterSecond.tasks.PSObject.Properties["F-902"]) -Detail (Get-Content -LiteralPath $state -Raw)
         Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue

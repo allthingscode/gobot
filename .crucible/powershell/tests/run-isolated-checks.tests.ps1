@@ -437,7 +437,7 @@ try {
 
         $left = @(Get-ChildItem -LiteralPath $workspaces -Directory -Filter "checks-*" -ErrorAction SilentlyContinue)
         Assert-Result -Name "temporary worktrees removed" -Condition ($left.Count -eq 0) -FailureMessage ("left behind: " + (($left | ForEach-Object { $_.Name }) -join ", "))
-        $worktrees = @(git -C $commitRoot worktree list | Where-Object { $_ })
+        $worktrees = @(Invoke-ExternalCommand -AsLines { git -C $commitRoot worktree list } | Where-Object { $_ })
         Assert-Result -Name "git forgets them" -Condition ($worktrees.Count -eq 1) -FailureMessage ("git worktree list: " + ($worktrees -join " | "))
 
         $bad = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId R-001 -Mode quick -Commit no-such-rev -ProjectRoot $commitRoot }
@@ -580,7 +580,7 @@ try {
             [Console]::SetError($stderr)
             $global:LASTEXITCODE = 0
             try {
-                $output = @(& $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot 6>&1)
+                $output = @(Invoke-ExternalCommand -AsLines { & $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot 6>&1 })
             } catch {
                 $output = @($_.Exception.Message)
             }

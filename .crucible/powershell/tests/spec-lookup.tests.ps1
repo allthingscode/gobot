@@ -101,7 +101,7 @@ try {
         [System.IO.File]::WriteAllText((Join-Path $root "README.md"), "fixture", $utf8)
         git -C $root add README.md
         git -C $root commit -m "fixture" --quiet
-        $primary = (git -C $root branch --show-current).Trim()
+        $primary = (Invoke-ExternalCommand -AsLines { git -C $root branch --show-current }).Trim()
         Push-Location $root
         try {
             Invoke-HumanGateRejectAbandon -TaskId "F-190" -Outcome "abandoned" -ProjectRoot $root -PrimaryBranch $primary

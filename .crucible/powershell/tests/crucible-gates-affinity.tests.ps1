@@ -513,7 +513,7 @@ try {
         New-Item -ItemType Directory -Path $researchDir -Force | Out-Null
         Set-Content -Path (Join-Path $researchDir "R-123_Findings.md") -Value "some research findings"
 
-        $outputClean = (& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1) -join "`n"
+        $outputClean = (Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }) -join "`n"
         $exitCodeClean = $LASTEXITCODE
 
         Assert-Result -Name "Clean research: exit code is 0" -Condition ($exitCodeClean -eq 0) -FailureMessage "expected clean research gate to run with exit code 0"
@@ -523,7 +523,7 @@ try {
         # Modify the tracked project file src/x.txt
         Set-Content -Path (Join-Path $localRepo "src/x.txt") -Value "modified tracked file"
 
-        $outputModified = (& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1) -join "`n"
+        $outputModified = (Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }) -join "`n"
         $exitCodeModified = $LASTEXITCODE
 
         Assert-Result -Name "Modified research: exit code is 0" -Condition ($exitCodeModified -eq 0) -FailureMessage "expected modified research gate to run with exit code 0 (WARN-only)"
@@ -542,7 +542,7 @@ try {
         # Modify the tracked backlog spec
         Set-Content -Path (Join-Path $backlogDir "features/active/R-123_Spec.md") -Value "modified backlog spec"
 
-        $outputBacklog = (& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1) -join "`n"
+        $outputBacklog = (Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }) -join "`n"
         $exitCodeBacklog = $LASTEXITCODE
 
         Assert-Result -Name "Backlog modified: exit code is 0" -Condition ($exitCodeBacklog -eq 0) -FailureMessage "expected backlog modified research gate to run with exit code 0 (WARN-only)"
@@ -558,7 +558,7 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $backlogDir "chores/active") -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $backlogDir "chores/active/C-900_Approved.md") -Value "approved stub"
         Set-Content -LiteralPath (Join-Path $backlogDir "chores/active/C-901_Unapproved.md") -Value "unapproved stub"
-        $outputFiling = (& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1) -join "`n"
+        $outputFiling = (Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }) -join "`n"
         Assert-Result -Name "Filing pass: exit code is 0" -Condition ($LASTEXITCODE -eq 0) -FailureMessage $outputFiling
         Assert-Result -Name "Filing pass: unapproved stub listed" -Condition ($outputFiling -match "C-901_Unapproved\.md") -FailureMessage $outputFiling
         Assert-Result -Name "Filing pass: approved stub not listed" -Condition ($outputFiling -notmatch "C-900_Approved\.md") -FailureMessage $outputFiling
