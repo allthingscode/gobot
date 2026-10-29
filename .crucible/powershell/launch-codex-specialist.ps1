@@ -84,7 +84,7 @@ function Resolve-ProjectRoot {
         if (-not (Test-Path -LiteralPath $Candidate)) {
             throw "ProjectRoot path does not exist: $Candidate"
         }
-        return (Resolve-Path -LiteralPath $Candidate).Path
+        return (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $Candidate))
     }
     # Derive the project root from THIS script's location, never the caller's cwd. The
     # launcher ships to adopters at <root>/.crucible/powershell/ and lives in the framework
@@ -95,7 +95,7 @@ function Resolve-ProjectRoot {
     if ((Split-Path -Path $parent -Leaf) -eq ".crucible") {
         $parent = Split-Path -Path $parent -Parent
     }
-    return (Resolve-Path -LiteralPath $parent).Path
+    return (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $parent))
 }
 
 function Get-RoleForPhase {
@@ -166,7 +166,7 @@ if (-not (Get-Command "Invoke-Git" -ErrorAction SilentlyContinue)) {
             }
         }
         $allArgs = @()
-        if (-not [string]::IsNullOrWhiteSpace($Directory)) { $allArgs += @("-C", $Directory) }
+        if (-not [string]::IsNullOrWhiteSpace($Directory)) { $allArgs += @("-C", (Resolve-FilesystemPath -Path $Directory)) }
         if ($flattenedArgs.Count -gt 0) { $allArgs += $flattenedArgs }
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
@@ -266,7 +266,7 @@ function Invoke-CodexExec {
             if (-not [string]::IsNullOrWhiteSpace($transcriptDir) -and -not (Test-Path -LiteralPath $transcriptDir)) {
                 New-Item -ItemType Directory -Path $transcriptDir -Force | Out-Null
             }
-            [System.IO.File]::WriteAllText($TranscriptPath, $output, (New-Object System.Text.UTF8Encoding($false)))
+            [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $TranscriptPath), $output, (New-Object System.Text.UTF8Encoding($false)))
         } catch {
             Write-Warning ("Could not write Codex transcript to " + $TranscriptPath + ": " + $_.Exception.Message)
         }
@@ -274,13 +274,15 @@ function Invoke-CodexExec {
     return [PSCustomObject]@{ ExitCode = $exitCode; Output = $output }
 }
 
-$REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoot
+try { $REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoot }
+catch { Write-Host ("[CODEX] Error: " + $_.Exception.Message) -ForegroundColor Red; exit 2 }
 
 # -CrucibleRoot is joined onto the repo root, so relativize absolute paths within
 # that root and reject paths outside it before filesystem operations.
-if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
-    $resolvedCrucibleRoot = $CrucibleRoot
-    try { $resolvedCrucibleRoot = (Resolve-Path -LiteralPath $CrucibleRoot -ErrorAction Stop).Path } catch { }
+if ((Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $CrucibleRoot) -ceq $CrucibleRoot) {
+    try { $resolvedCrucibleRoot = Resolve-FilesystemPath -Path $CrucibleRoot }
+    catch { Write-Host ("[CODEX] Error: " + $_.Exception.Message) -ForegroundColor Red; exit 2 }
+    try { $resolvedCrucibleRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $CrucibleRoot -ErrorAction Stop)) } catch { }
     $relativeCrucibleRoot = $null
     try { $relativeCrucibleRoot = Get-PathRelativeToDirectory -Path $resolvedCrucibleRoot -Directory $REPO_ROOT } catch { }
     if (-not [string]::IsNullOrEmpty($relativeCrucibleRoot)) {
@@ -344,8 +346,9 @@ if (-not [string]::IsNullOrWhiteSpace($PromptFile)) {
         Write-Host ("[CODEX] Error: -PromptFile path does not exist: " + $PromptFile) -ForegroundColor Red
         exit 2
     }
-    $resolvedPromptFile = (Resolve-Path -LiteralPath $PromptFile).Path
-    $fileContent = [System.IO.File]::ReadAllText($resolvedPromptFile)
+    try {$resolvedPromptFile = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $PromptFile)) }
+    catch { Write-Host ("[CODEX] Error: " + $_.Exception.Message) -ForegroundColor Red; exit 2 }
+    $fileContent = [System.IO.File]::ReadAllText((Resolve-FilesystemPath -Path $resolvedPromptFile))
     if ([string]::IsNullOrWhiteSpace($fileContent)) {
         Write-Host ("[CODEX] Error: -PromptFile is empty: " + $PromptFile) -ForegroundColor Red
         exit 2
@@ -407,7 +410,8 @@ if ([string]::IsNullOrWhiteSpace($WorkingDir)) {
         Write-Host ("[CODEX] Error: -WorkingDir path does not exist: " + $WorkingDir) -ForegroundColor Red
         exit 2
     }
-    $WorkingDir = (Resolve-Path -LiteralPath $WorkingDir).Path
+    try {$WorkingDir = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $WorkingDir)) }
+    catch { Write-Host ("[CODEX] Error: " + $_.Exception.Message) -ForegroundColor Red; exit 2 }
 }
 
 if ($Phase -eq "deployment") {
@@ -497,11 +501,11 @@ if (-not [string]::IsNullOrWhiteSpace($bootstrapPromptPath)) {
 $codexArgs = @(
     "-s", "danger-full-access",
     "--skip-git-repo-check",
-    "-C", $WorkingDir,
+    "-C", (Resolve-FilesystemPath -Path $WorkingDir),
     "-m", $Model,
-    "--output-last-message", $lastMsgPath
+    "--output-last-message", (Resolve-FilesystemPath -Path $lastMsgPath)
 )
-if ($useSchema) { $codexArgs += @("--output-schema", $schemaPath) }
+if ($useSchema) { $codexArgs += @("--output-schema", (Resolve-FilesystemPath -Path $schemaPath)) }
 if (-not [string]::IsNullOrWhiteSpace($Effort)) {
     $codexArgs += @("-c", ("model_reasoning_effort=`"" + $Effort + "`""))
 }
@@ -563,7 +567,7 @@ try {
                 if (-not (Test-Path -LiteralPath $sessionDir)) { New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null }
                 $recordStamp = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
                 $recordLines = @(("working_dir: " + $WorkingDir), ("fingerprint: " + $leftFingerprint), ("recorded: " + $recordStamp))
-                [System.IO.File]::WriteAllText($treeRecordPath, (($recordLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $treeRecordPath), (($recordLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
             }
         }
     } catch {

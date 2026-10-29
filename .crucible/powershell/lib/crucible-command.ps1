@@ -64,7 +64,7 @@ function Get-CrucibleScriptParameters {
     if ($normalized -notmatch '^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.ps1$' -or $normalized -match '(^|/)\.\.(/|$)') {
         throw ("New-CrucibleCommand: '" + $Script + "' is not a bundle-relative script path such as powershell/crucible.ps1.")
     }
-    $path = Join-Path $BundleRoot $normalized
+    $path = Resolve-FilesystemPath -Path (Join-Path $BundleRoot $normalized)
     $cacheKey = [System.IO.Path]::GetFullPath($path)
     if (-not (Test-Path -Path variable:script:CrucibleCommandParameterCache)) {
         $script:CrucibleCommandParameterCache = @{}

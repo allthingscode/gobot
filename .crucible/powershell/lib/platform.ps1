@@ -1,3 +1,5 @@
+. (Join-Path $PSScriptRoot "config-helpers.ps1")
+
 # Platform resolver helper to handle powershell vs pwsh executable names.
 
 $script:MockPlatformIsWindows = $null
@@ -71,7 +73,7 @@ function Invoke-Git {
 
     $allArgs = @()
     if (-not [string]::IsNullOrWhiteSpace($Directory)) {
-        $allArgs += @("-C", $Directory)
+        $allArgs += @("-C", (Resolve-FilesystemPath -Path $Directory))
     }
     if ($flattenedArgs.Count -gt 0) {
         $allArgs += $flattenedArgs

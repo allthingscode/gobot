@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 . (Join-Path $PSScriptRoot 'platform.ps1')
 
 # Paths stay relative to the runner's parent, including when that is an adopter's
@@ -21,6 +23,7 @@ function Get-TestSelectionChangedPaths {
 function Get-TestSelectionDirectoryPatterns {
     param([string]$Root, [string]$Text)
 
+    $Root = Resolve-FilesystemPath -Path $Root
     $ast = [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$null, [ref]$null)
     $strings = $ast.FindAll({ param($node)
         $node -is [System.Management.Automation.Language.StringConstantExpressionAst] -or
@@ -121,13 +124,14 @@ function Get-AffectedTestFiles {
         [string]$Base = 'HEAD'
     )
 
+    $Root = Resolve-FilesystemPath -Path $Root
     $changedPaths = @(Get-TestSelectionChangedPaths -Root $Root -Base $Base)
     $tests = @(Get-ChildItem -LiteralPath (Join-Path $Root 'powershell/tests') -Filter '*.tests.ps1' -File | Sort-Object Name)
     $texts = @{}
     $reasons = @{}
     $directoryPatterns = @{}
     foreach ($test in $tests) {
-        $texts[$test.FullName] = [System.IO.File]::ReadAllText($test.FullName)
+        $texts[$test.FullName] = [System.IO.File]::ReadAllText((Resolve-FilesystemPath -Path $test.FullName))
         $directoryPatterns[$test.FullName] = @(Get-TestSelectionDirectoryPatterns -Root $Root -Text $texts[$test.FullName])
         $reasons[$test.FullName] = [System.Collections.Generic.List[string]]::new()
     }
@@ -161,7 +165,7 @@ function Get-AffectedTestFiles {
                 if ($old.ExitCode -ne 0) { throw "Cannot select tests: git show failed for $path." }
                 $oldText = $old.Raw
             }
-            $newText = if (Test-Path -LiteralPath $fullPath -PathType Leaf) { [System.IO.File]::ReadAllText($fullPath) } else { '' }
+            $newText = if (Test-Path -LiteralPath $fullPath -PathType Leaf) { [System.IO.File]::ReadAllText((Resolve-FilesystemPath -Path $fullPath)) } else { '' }
             if ($exists.ExitCode -ne 0 -and $newText -and $hunks.Count -eq 0) {
                 $hunks += [pscustomobject]@{ OldStart = 0; OldCount = 0; NewStart = 1; NewCount = ($newText -split "`n").Count }
             }

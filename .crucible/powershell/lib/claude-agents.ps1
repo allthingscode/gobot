@@ -136,7 +136,7 @@ function Get-ClaudeAgentDrift {
             $drift.Add([pscustomobject]@{ Name = $definition.Name; Status = "missing" }) | Out-Null
             continue
         }
-        $existing = [System.IO.File]::ReadAllText($path, [System.Text.UTF8Encoding]::new($false)).Replace("`r`n", "`n")
+        $existing = [System.IO.File]::ReadAllText((Resolve-FilesystemPath -Path $path), [System.Text.UTF8Encoding]::new($false)).Replace("`r`n", "`n")
         if ($existing -ne $definition.Content) {
             $drift.Add([pscustomobject]@{ Name = $definition.Name; Status = "stale" }) | Out-Null
         }
@@ -152,7 +152,7 @@ function Write-ClaudeAgentDefinitions {
     $written = New-Object System.Collections.Generic.List[string]
     foreach ($definition in (Get-ClaudeAgentDefinitions -ProjectRoot $ProjectRoot)) {
         $path = Join-Path $dir $definition.FileName
-        [System.IO.File]::WriteAllText($path, $definition.Content, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $path), $definition.Content, [System.Text.UTF8Encoding]::new($false))
         $written.Add($path) | Out-Null
     }
     return $written.ToArray()
@@ -161,7 +161,7 @@ function Write-ClaudeAgentDefinitions {
 function Get-ClaudeAgentIgnoreWarning {
     param([string]$ProjectRoot)
     $paths = @(Get-ClaudeAgentDefinitions -ProjectRoot $ProjectRoot | ForEach-Object { ".claude/agents/" + $_.FileName })
-    $ignored = @(& git -C $ProjectRoot check-ignore -- @paths 2>$null)
+    $ignored = @(& git -C (Resolve-FilesystemPath -Path $ProjectRoot) check-ignore -- @paths 2>$null)
     if ($LASTEXITCODE -eq 0 -and $ignored.Count -gt 0) {
         return ("Claude agent definitions are git-ignored: " + ($ignored -join ", ") + ". Replace a .claude/ ignore rule with .claude/* and !.claude/agents/ (and remove any other rule ignoring these files), then git add .claude/agents.")
     }

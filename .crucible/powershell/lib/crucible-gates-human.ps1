@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # The human gate: decision intake on both input paths, the dispatch to the accept and
 # reject arms, each arm's phases, and the review surface the human is shown.
 #
@@ -856,11 +858,11 @@ function Invoke-HumanGateRejectAbandon {
         $parentList = @($unwind.ParentList)
         $headIsTaskMerge = $unwind.HeadIsTaskMerge
         $unwindTarget = $unwind.UnwindTarget
-        Invoke-GitChecked { git -C $ProjectRoot checkout $PrimaryBranch }
+        Invoke-GitChecked { git -C (Resolve-FilesystemPath -Path $ProjectRoot) checkout $PrimaryBranch }
         if ($headIsTaskMerge) {
             Write-Quiet "[HUMAN GATE] Unwinding this task's local merge. Resetting $PrimaryBranch to its pre-merge tip ($unwindTarget)..."
             $null = Test-GitDiscardSafe -Directory $ProjectRoot -Operation "$Outcome decision unwind" -AllowConfiguredRuntime -IncludeUntracked:$false -ResetTarget $unwindTarget -Refuse
-            Invoke-GitChecked { git -C $ProjectRoot reset --hard $unwindTarget }
+            Invoke-GitChecked { git -C (Resolve-FilesystemPath -Path $ProjectRoot) reset --hard $unwindTarget }
         } else {
             Write-Quiet "[HUMAN GATE] $PrimaryBranch does not end in a merge of task/$TaskId; leaving it untouched."
         }
@@ -1167,7 +1169,7 @@ function Invoke-HumanGate {
         $checkDir = $parent
     }
     if ($isGit) {
-        git -C $repoRoot show-ref --verify --quiet "refs/heads/task/$($handoff.task_id)" 2>$null
+        git -C (Resolve-FilesystemPath -Path $repoRoot) show-ref --verify --quiet "refs/heads/task/$($handoff.task_id)" 2>$null
         if ($LASTEXITCODE -eq 0) {
             $taskBranchExists = $true
         }

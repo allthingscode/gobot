@@ -57,8 +57,8 @@ function Test-LineEndingConformance {
     # A finding there is a broken bundle, a different defect, and would only add noise.
     $bundlePrefix = ""
     if (Test-Path -LiteralPath $BundleRoot -PathType Container) {
-        $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath.Replace("\", "/").TrimEnd("/")
-        $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).ProviderPath.Replace("\", "/").TrimEnd("/")
+        $rootFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot)).Replace("\", "/").TrimEnd("/")
+        $bundleFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BundleRoot)).Replace("\", "/").TrimEnd("/")
         if (Test-PathWithinDirectory -Path $bundleFull -Directory $rootFull) {
             $bundlePrefix = (Get-PathRelativeToDirectory -Path $bundleFull -Directory $rootFull -Separator "/") + "/"
         }

@@ -34,9 +34,7 @@ try {
         # which is why these nested runs do not collide with the outer suite.
         $libDir = Join-Path $powershellDir "lib"
         New-Item -ItemType Directory -Path $libDir -Force | Out-Null
-        foreach ($lib in @("run-lock.ps1", "normalized-hash.ps1")) {
-            Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/$lib") -Destination (Join-Path $libDir $lib) -Force
-        }
+        Copy-TestRunnerLibraries -Destination $libDir
 
         # The nested runner reaps run roots for real. That is safe because collection is
         # by dead owner, and the outer suite's root is owned by a process that is very

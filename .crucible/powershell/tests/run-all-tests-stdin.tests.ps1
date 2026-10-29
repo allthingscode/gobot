@@ -21,9 +21,7 @@ try {
             $runnerCopy = Join-Path $psDir 'run-all-tests.ps1'
             Copy-Item -LiteralPath (Join-Path $REPO_ROOT 'powershell/run-all-tests.ps1') -Destination $runnerCopy
             Copy-Item -Path (Join-Path $PSScriptRoot '_*.ps1') -Destination $testsDir
-            foreach ($lib in @('run-lock.ps1', 'normalized-hash.ps1')) {
-                Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/$lib") -Destination $libDir
-            }
+            Copy-TestRunnerLibraries -Destination $libDir
             # Keep the real runner and lock; only fixture pre-staging needs the full
             # framework, so stub it just as run-all-tests-runner.tests.ps1 does.
             Set-Content -LiteralPath (Join-Path $testsDir '_fixtures.ps1') -Encoding UTF8 -Value 'function Get-SharedAdopterFixture { return $null }'

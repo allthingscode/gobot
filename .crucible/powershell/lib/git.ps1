@@ -3,7 +3,7 @@
 # a terminating NativeCommandError. CONTRIBUTING.md names this the project-wide idiom.
 #
 # Keep this separate from platform.ps1: standalone scripts and pre-commit gates load
-# that dependency-free library without crucible-lib.ps1, which defines Write-Quiet. Item 14.
+# that library without crucible-lib.ps1, which defines Write-Quiet. Item 14.
 #
 # Requires: Write-Quiet (powershell/crucible-lib.ps1).
 . (Join-Path $PSScriptRoot "platform.ps1")

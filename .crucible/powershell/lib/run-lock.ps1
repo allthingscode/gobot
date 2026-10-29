@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # Deliberately does NOT call Set-StrictMode. The mode is scoped to the session, not to
 # the file that sets it, so a dot-sourced library imposes it on every caller. See the
 # comment at the top of lib/update-classification.ps1 for the failure that caused
@@ -26,7 +28,7 @@ function Get-RunLockPath {
 
     $resolved = $ScopeRoot
     if (Test-Path -LiteralPath $ScopeRoot) {
-        $resolved = (Resolve-Path -LiteralPath $ScopeRoot).ProviderPath
+        $resolved = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ScopeRoot))
     }
     $resolved = $resolved.TrimEnd([char]'\', [char]'/')
 
@@ -62,7 +64,7 @@ function Get-RunLockHolder {
 
     $content = $null
     try {
-        $content = [System.IO.File]::ReadAllText($ownerPath)
+        $content = [System.IO.File]::ReadAllText((Resolve-FilesystemPath -Path $ownerPath))
     } catch {
         return $null
     }
@@ -95,7 +97,7 @@ function Test-RunLockHeld {
     }
 
     try {
-        $probe = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $probe = [System.IO.File]::Open((Resolve-FilesystemPath -Path $LockPath), [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
         $probe.Close()
         $probe.Dispose()
         return $false
@@ -121,7 +123,7 @@ function Enter-RunLock {
 
     for ($attempt = 0; $attempt -lt 2; $attempt++) {
         try {
-            $stream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            $stream = [System.IO.File]::Open((Resolve-FilesystemPath -Path $lockPath), [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
         } catch {
             if (Test-RunLockHeld -LockPath $lockPath) {
                 return [PSCustomObject]@{
@@ -141,7 +143,7 @@ function Enter-RunLock {
         # Written after the handle is held, so a record on disk always describes a
         # holder that actually got the lock.
         $info = "$PID;$(Get-Date -Format 'o')"
-        [System.IO.File]::WriteAllText($ownerPath, $info, (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $ownerPath), $info, (New-Object System.Text.UTF8Encoding($false)))
 
         return [PSCustomObject]@{
             Acquired = $true

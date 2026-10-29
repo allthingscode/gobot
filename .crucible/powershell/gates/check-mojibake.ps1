@@ -25,7 +25,7 @@ if ($Staged -and ($Paths.Count -gt 0 -or $MessageFile)) {
 if ($Paths.Count -eq 0 -and -not $MessageFile) {
     # This script lives in <root>/powershell/gates; resolve ../.. so default content
     # paths target the repository rather than scanning zero files under powershell/.
-    $contentRoot = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+    $contentRoot = (Resolve-Path -Path "$PSScriptRoot/../..").ProviderPath
     # docs/proposals/ is framework-development-only, so an adopter bundle never carries it.
     $isFramework = (Test-Path -LiteralPath (Join-Path $contentRoot "docs/proposals")) -and (Test-Path -LiteralPath (Join-Path $contentRoot "powershell/run-all-tests.ps1"))
 

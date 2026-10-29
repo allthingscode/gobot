@@ -65,7 +65,7 @@ function Write-ConfigScalar {
     } else {
         $content = $content.TrimEnd() + "`n" + $Key + ': ' + $escaped + "`n"
     }
-    [System.IO.File]::WriteAllText($ConfigPath, $content, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $ConfigPath), $content, [System.Text.UTF8Encoding]::new($false))
 }
 
 . (Join-Path (Split-Path -Parent $PSCommandPath) "lib/normalized-hash.ps1")
@@ -205,30 +205,30 @@ function Copy-FrameworkFileToAdopter {
         $adopterContent = Get-Content -LiteralPath $destination -Raw -Encoding UTF8
         $frameworkContent = Get-Content -LiteralPath $source -Raw -Encoding UTF8
         $mergedContent = Merge-CustomRegions -AdopterContent $adopterContent -FrameworkContent $frameworkContent
-        [System.IO.File]::WriteAllText($destination, $mergedContent, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $destination), $mergedContent, [System.Text.UTF8Encoding]::new($false))
     } else {
         Copy-Item -LiteralPath $source -Destination $destination -Force
     }
 }
 
 function Invoke-UpdateBundle {
-    $frameworkRoot = (Resolve-Path -LiteralPath $FrameworkSource).Path
-    $adopterRootResolved = (Resolve-Path -LiteralPath $AdopterRoot).Path
+    $frameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $FrameworkSource))
+    $adopterRootResolved = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $AdopterRoot))
     $adopterCrucibleRoot = Join-Path $adopterRootResolved ".crucible"
     $configPath = Join-Path $adopterCrucibleRoot "config.yaml"
 
-    $null = git -C $frameworkRoot rev-parse --show-toplevel 2>$null
+    $null = git -C (Resolve-FilesystemPath -Path $frameworkRoot) rev-parse --show-toplevel 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "FrameworkSource must be a git repository: $frameworkRoot"
     }
-    $frameworkStatus = @(git -C $frameworkRoot status --porcelain 2>$null)
+    $frameworkStatus = @(git -C (Resolve-FilesystemPath -Path $frameworkRoot) status --porcelain 2>$null)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect framework source git status: $frameworkRoot"
     }
     if ($frameworkStatus.Count -gt 0) {
         throw "FrameworkSource must be clean before updating adopters: $frameworkRoot"
     }
-    $frameworkHead = ((git -C $frameworkRoot rev-parse HEAD) | Out-String).Trim()
+    $frameworkHead = ((git -C (Resolve-FilesystemPath -Path $frameworkRoot) rev-parse HEAD) | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or -not ($frameworkHead -match '^[0-9a-f]{40}$')) {
         throw "Could not resolve framework HEAD in $frameworkRoot"
     }
@@ -246,9 +246,9 @@ function Invoke-UpdateBundle {
     # other helpers must match the installed script. Retain the local copy only when
     # the source has no manifest lib and therefore no competing list. Item 149.
     $headManifestSpec = $frameworkHead + ":powershell/lib/install-manifest.ps1"
-    $null = git -C $frameworkRoot cat-file -e $headManifestSpec 2>$null
+    $null = git -C (Resolve-FilesystemPath -Path $frameworkRoot) cat-file -e $headManifestSpec 2>$null
     if ($LASTEXITCODE -eq 0) {
-        $headManifestLib = @(git -C $frameworkRoot show $headManifestSpec 2>$null) -join "`n"
+        $headManifestLib = @(git -C (Resolve-FilesystemPath -Path $frameworkRoot) show $headManifestSpec 2>$null) -join "`n"
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($headManifestLib)) {
             throw "Could not read powershell/lib/install-manifest.ps1 at $frameworkHead in $frameworkRoot"
         }
@@ -409,7 +409,7 @@ function Invoke-UpdateBundle {
         $reportLines += ("{0}: {1}" -f $category, $results[$category].Count)
         $reportLines += @($results[$category].ToArray() | ForEach-Object { "  " + $_.AdopterPath })
     }
-    [System.IO.File]::WriteAllText($logPath, (($reportLines -join "`r`n") + "`r`n"), [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $logPath), (($reportLines -join "`r`n") + "`r`n"), [System.Text.UTF8Encoding]::new($false))
 
     # Names are UTC yyyyMMdd-HHmmss, so sorting by name is sorting by age, and the log just
     # written is always newest. Counting it in the retention keeps the directory at exactly

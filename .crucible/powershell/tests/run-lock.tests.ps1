@@ -132,9 +132,7 @@ function New-RunnerScratch {
     # item 89 hit. Helpers are the _*.ps1 files, none of which match the runner's *test*.ps1
     # discovery glob, so copying all of them cannot smuggle in a test file.
     Copy-Item -Path (Join-Path (Split-Path -Parent $HARNESS_SCRIPT) "_*.ps1") -Destination $testsDir -Force
-    foreach ($lib in @("run-lock.ps1", "normalized-hash.ps1")) {
-        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/$lib") -Destination (Join-Path $libDir $lib) -Force
-    }
+    Copy-TestRunnerLibraries -Destination $libDir
     # The scratch runner reaps run roots for real, and that is safe: collection is by
     # dead owner, so the outer suite's root - owned by a live process - is never a
     # candidate. The stub only stands in for the fixture build, which needs the whole

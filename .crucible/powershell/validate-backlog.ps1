@@ -78,10 +78,10 @@ if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
 }
 
 if (Test-Path $backlogDir) {
-    $backlogDir = (Resolve-Path $backlogDir).Path
+    $backlogDir = (Resolve-FilesystemPath -Path (Resolve-Path $backlogDir))
 }
 if (Test-Path $BacklogPath) {
-    $BacklogPath = (Resolve-Path $BacklogPath).Path
+    $BacklogPath = (Resolve-FilesystemPath -Path (Resolve-Path $BacklogPath))
 }
 
 # Resolve the project root for file_affinity checks (D46)
@@ -644,7 +644,7 @@ try {
             $writeResult = Invoke-WithBacklogLock -BacklogPath $BacklogPath -ScriptBlock {
                 $current = @(Get-Content -LiteralPath $BacklogPath -Encoding UTF8) -join "`n"
                 if ($current -ne $oldText) { return "changed" }
-                [System.IO.File]::WriteAllText($BacklogPath, $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $BacklogPath), $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
                 return "written"
             }
             if ($writeResult -eq "written") {

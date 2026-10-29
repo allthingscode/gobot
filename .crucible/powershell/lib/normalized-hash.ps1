@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 function ConvertTo-NormalizedRelativeSlashPath {
     param([Parameter(Mandatory=$true)][string]$Path)
     return $Path.Replace("\", "/").TrimStart("/")
@@ -78,6 +80,7 @@ function Get-GitFileContent {
         [Parameter(Mandatory=$true)][string]$Path
     )
 
+    $Repo = Resolve-FilesystemPath -Path $Repo
     $object = $Commit + ":" + (ConvertTo-NormalizedRelativeSlashPath -Path $Path)
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo

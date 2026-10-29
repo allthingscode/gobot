@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # Idempotent instruction-block management for adopter root instruction files.
 # Owns the sentinel markers, canonical block content, and append/detect logic.
 
@@ -184,7 +186,7 @@ function Add-CrucibleInstructionBlock {
                     $separator = "`n"
                 }
                 $newContent = $existing + $separator + $BlockContent + "`n"
-                [System.IO.File]::WriteAllText($FilePath, $newContent, [System.Text.UTF8Encoding]::new($false))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $FilePath), $newContent, [System.Text.UTF8Encoding]::new($false))
                 if (-not $Quiet) {
                     Write-Host "  [APPEND] $FileName - Crucible block appended." -ForegroundColor Green
                 }
@@ -196,7 +198,7 @@ function Add-CrucibleInstructionBlock {
                 if (-not (Test-Path -LiteralPath $parentDir)) {
                     New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
                 }
-                [System.IO.File]::WriteAllText($FilePath, $newContent, [System.Text.UTF8Encoding]::new($false))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $FilePath), $newContent, [System.Text.UTF8Encoding]::new($false))
                 if (-not $Quiet) {
                     Write-Host "  [CREATE] $FileName - created with Crucible block." -ForegroundColor Green
                 }

@@ -147,7 +147,7 @@ function Resolve-ImplementationWorktreePath {
         [string]$WorkspacesDir = $workspacesDir
     )
 
-    return Join-Path $WorkspacesDir ("implementation-" + $TaskId)
+    return Resolve-FilesystemPath -Path (Join-Path $WorkspacesDir ("implementation-" + $TaskId))
 }
 
 # Relative core.hooksPath resolves against the worktree root, so run its branch's hooks.
@@ -165,10 +165,10 @@ function Initialize-ImplementationWorktreeHooks {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        if ((git -C $WorktreePath config --get extensions.worktreeConfig 2>$null) -eq "true") {
-            $override = git -C $WorktreePath config --worktree --get core.hooksPath 2>$null
+        if ((git -C (Resolve-FilesystemPath -Path $WorktreePath) config --get extensions.worktreeConfig 2>$null) -eq "true") {
+            $override = git -C (Resolve-FilesystemPath -Path $WorktreePath) config --worktree --get core.hooksPath 2>$null
             if (-not [string]::IsNullOrWhiteSpace($override)) {
-                git -C $WorktreePath config --worktree --unset core.hooksPath 2>$null
+                git -C (Resolve-FilesystemPath -Path $WorktreePath) config --worktree --unset core.hooksPath 2>$null
             }
         }
 
@@ -177,7 +177,7 @@ function Initialize-ImplementationWorktreeHooks {
             $onWindows = (Get-Variable IsWindows -ValueOnly -ErrorAction SilentlyContinue) -ne $false
         }
         if (-not $onWindows) {
-            $hooksPath = git -C $WorktreePath config --get core.hooksPath 2>$null
+            $hooksPath = git -C (Resolve-FilesystemPath -Path $WorktreePath) config --get core.hooksPath 2>$null
             if (-not [string]::IsNullOrWhiteSpace($hooksPath)) {
                 $hooksDir = $hooksPath.Trim()
                 $hooksDir = Resolve-PathFromRoot -Root $WorktreePath -Path $hooksDir
@@ -197,6 +197,8 @@ function Initialize-ImplementationWorktree {
         [Parameter(Mandatory=$true)][string]$WorktreePath,
         [Parameter(Mandatory=$true)][string]$TaskId
     )
+
+    $WorktreePath = Resolve-FilesystemPath -Path $WorktreePath
 
     # Prune stale worktrees first
     Invoke-GitChecked { git worktree prune }
@@ -229,7 +231,7 @@ function Initialize-ImplementationWorktree {
 # these are work the checks may have tested but nothing will merge. Item 221.
 function Get-WorktreeUncommittedPaths {
     param([Parameter(Mandatory=$true)][string]$WorktreePath)
-    $lines = @(git -C $WorktreePath status --porcelain 2>$null)
+    $lines = @(git -C (Resolve-FilesystemPath -Path $WorktreePath) status --porcelain 2>$null)
     if ($LASTEXITCODE -ne 0) {
         throw ("git status failed in " + $WorktreePath)
     }
@@ -298,15 +300,15 @@ function Get-ImplementationChangedFiles {
 
     # Use the configured primary and fail closed if its committed diff is unreadable. Item 225.
     $baseRef = Get-ConfiguredPrimaryBranch -ProjectRoot $WorktreePath
-    $committed = @(git -C $WorktreePath diff --name-only "$baseRef...HEAD" 2>$null)
+    $committed = @(git -C (Resolve-FilesystemPath -Path $WorktreePath) diff --name-only "$baseRef...HEAD" 2>$null)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not read committed diff against '$baseRef' in '$WorktreePath'."
     }
     $changed = @($committed)
 
-    $changed += @(git -C $WorktreePath diff --name-only --cached 2>$null)
-    $changed += @(git -C $WorktreePath diff --name-only 2>$null)
-    $changed += @(git -C $WorktreePath ls-files --others --exclude-standard 2>$null)
+    $changed += @(git -C (Resolve-FilesystemPath -Path $WorktreePath) diff --name-only --cached 2>$null)
+    $changed += @(git -C (Resolve-FilesystemPath -Path $WorktreePath) diff --name-only 2>$null)
+    $changed += @(git -C (Resolve-FilesystemPath -Path $WorktreePath) ls-files --others --exclude-standard 2>$null)
 
     return @($changed |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |

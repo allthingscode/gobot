@@ -20,13 +20,14 @@ if (-not (Test-Path variable:script:HeldBacklogLocks)) {
 function Get-BacklogLockFilePath {
     param([Parameter(Mandatory=$true)][string]$BacklogPath)
 
-    $resolved = $BacklogPath
     if (Test-Path -LiteralPath $BacklogPath) {
-        $resolved = (Resolve-Path -LiteralPath $BacklogPath).ProviderPath
+        $resolved = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BacklogPath))
     } else {
         $parent = Split-Path -Parent $BacklogPath
         if ($parent -and (Test-Path -LiteralPath $parent)) {
-            $resolved = Join-Path (Resolve-Path -LiteralPath $parent).ProviderPath (Split-Path -Leaf $BacklogPath)
+            $resolved = Join-Path (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $parent)) (Split-Path -Leaf $BacklogPath)
+        } else {
+            $resolved = Resolve-FilesystemPath -Path $BacklogPath
         }
     }
     return "$resolved.lock"
@@ -67,7 +68,7 @@ function Invoke-WithBacklogLock {
     while ($null -eq $fileStream) {
         try {
             $fileStream = New-Object System.IO.FileStream(
-                $lockPath,
+                (Resolve-FilesystemPath -Path $lockPath),
                 [System.IO.FileMode]::OpenOrCreate,
                 [System.IO.FileAccess]::ReadWrite,
                 [System.IO.FileShare]::None,
@@ -75,6 +76,16 @@ function Invoke-WithBacklogLock {
                 [System.IO.FileOptions]::DeleteOnClose
             )
         } catch [System.IO.IOException] {
+            # As in Invoke-FileLock, only a sharing violation is another holder. A missing
+            # directory or bad path cannot be waited out, so it refuses now, naming the lock.
+            $ioError = $_.Exception
+            while ($null -ne $ioError.InnerException) { $ioError = $ioError.InnerException }
+            $nativeCode = $ioError.HResult -band 0xFFFF
+            $isContention = ($IsWindows -and $nativeCode -in @(32, 33)) -or
+                ($IsLinux -and $nativeCode -eq 11) -or ($IsMacOS -and $nativeCode -eq 35)
+            if (-not $isContention) {
+                throw [System.IO.IOException]::new("Cannot acquire BACKLOG.md lock at " + $lockPath + ": " + $ioError.Message, $ioError)
+            }
             if (([System.DateTime]::UtcNow - $startTime).TotalSeconds -ge $TimeoutSeconds) {
                 throw "Timed out waiting to acquire BACKLOG.md lock at $lockPath (timeout ${TimeoutSeconds}s)"
             }
@@ -314,7 +325,7 @@ function Restore-BacklogTask {
     $relativeArchived = "$type/archived/$fileName".Replace("\", "/")
 
     Invoke-WithBacklogLock -BacklogPath $backlogPath -ScriptBlock {
-        $rawLines = [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)
+        $rawLines = [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $backlogPath), [System.Text.Encoding]::UTF8)
         $lines = [System.Collections.Generic.List[string]]::new()
         foreach ($line in $rawLines) { [void]$lines.Add($line) }
 
@@ -415,7 +426,7 @@ function Restore-BacklogTask {
             }
         }
 
-        [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $backlogPath), (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
     }
 
     # Reconcile Priority-Summary and validate
@@ -455,7 +466,7 @@ function Set-ArchivedBacklogTaskAbandoned {
             # in between is not overwritten. Item 183.
             Invoke-WithBacklogLock -BacklogPath $backlogPath -ScriptBlock {
                 $lines = [System.Collections.Generic.List[string]]::new()
-                foreach ($line in [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)) {
+                foreach ($line in [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $backlogPath), [System.Text.Encoding]::UTF8)) {
                     [void]$lines.Add($line)
                 }
                 $rowIndex = -1
@@ -475,7 +486,7 @@ function Set-ArchivedBacklogTaskAbandoned {
                 if ($statusColumn -ge $cells.Count) { return }
                 $cells[$statusColumn] = "Abandoned"
                 $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
-                [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $backlogPath), (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
             }
             break
         }
@@ -535,7 +546,7 @@ function Get-TaskFinalizationDetails {
 
     # Item 227: match only the complete ID cell, not prefix IDs or other columns.
     # 2. Parse BACKLOG.md to find status of TaskId (ignoring Priority Summary table rows)
-    $lines = [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)
+    $lines = [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $backlogPath), [System.Text.Encoding]::UTF8)
     $taskRowIndex = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if (Test-BacklogTaskRow -Line $lines[$i] -TaskId $TaskId) {

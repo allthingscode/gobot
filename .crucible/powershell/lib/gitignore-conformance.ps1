@@ -36,7 +36,7 @@ function Get-BundleCommittablePath {
         [Parameter(Mandatory=$true)][string]$BundleRoot
     )
 
-    $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
+    $rootFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
     $collected = New-Object System.Collections.Generic.List[string]
 
     foreach ($entry in Get-CommitByDefaultPath) {
@@ -46,7 +46,7 @@ function Get-BundleCommittablePath {
                 $collected.Add($file.FullName) | Out-Null
             }
         } elseif (Test-Path -LiteralPath $candidate -PathType Leaf) {
-            $collected.Add((Resolve-Path -LiteralPath $candidate).ProviderPath) | Out-Null
+            $collected.Add((Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $candidate))) | Out-Null
         }
     }
 
@@ -105,7 +105,7 @@ function Test-GitignoreConformance {
         return $result
     }
 
-    if (-not (Test-PathWithinDirectory -Path (Resolve-Path -LiteralPath $BundleRoot).ProviderPath -Directory (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath)) {
+    if (-not (Test-PathWithinDirectory -Path (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BundleRoot)) -Directory (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot)))) {
         $result.Status = "skipped"
         $result.Reason = "Bundle at " + $BundleRoot + " is outside the project; the project's ignore rules cannot exclude its files."
         return $result
@@ -119,7 +119,7 @@ function Test-GitignoreConformance {
         return $result
     }
 
-    $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).ProviderPath.Replace("\", "/").TrimEnd("/")
+    $bundleFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BundleRoot)).Replace("\", "/").TrimEnd("/")
     # A plain hashtable, not HashSet[string]: PowerShell 5.1 cannot resolve the
     # HashSet comparer constructor overload, and hashtable lookup is already
     # case-insensitive, which is what a Windows path comparison needs.

@@ -181,15 +181,16 @@ if (-not $Quiet) {
                         }
                     }
                     if ($frameworkSource) {
+                        $frameworkSource = Resolve-FilesystemPath -Path $frameworkSource
                         $frameworkBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $frameworkSource
-                        $gitMainResult = git -C $frameworkSource rev-parse --verify --quiet $frameworkBranch
+                        $gitMainResult = git -C (Resolve-FilesystemPath -Path $frameworkSource) rev-parse --verify --quiet $frameworkBranch
                         $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitMainResult) { ($gitMainResult | Out-String).Trim() } else { "" }
                         if (-not ($frameworkHead -match '^[0-9a-f]{40}$')) {
-                            $gitHeadResult = git -C $frameworkSource rev-parse HEAD 2>$null
+                            $gitHeadResult = git -C (Resolve-FilesystemPath -Path $frameworkSource) rev-parse HEAD 2>$null
                             $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitHeadResult) { ($gitHeadResult | Out-String).Trim() } else { "" }
                         }
                         if ($frameworkHead -match '^[0-9a-f]{40}$' -and $bannerCommit -ne $frameworkHead) {
-                            $null = git -C $frameworkSource merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
+                            $null = git -C (Resolve-FilesystemPath -Path $frameworkSource) merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
                             if ($LASTEXITCODE -eq 0) {
                                 Write-Host ("WARNING: Installed Crucible bundle lags framework HEAD. Installed: " + $bannerCommit.Substring(0, 7) + " | Upstream HEAD: " + $frameworkHead.Substring(0, 7)) -ForegroundColor Yellow
                                 $updateCommand = New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Transport PowerShell -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource

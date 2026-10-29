@@ -26,7 +26,7 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
     exit 2
 }
 
-$ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).ProviderPath
+$ConfigPath = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ConfigPath))
 $content = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
 $entries = @(Get-ConfigEntries -Content $content)
 
@@ -92,7 +92,7 @@ if (-not [string]::IsNullOrWhiteSpace($crucibleRootPath)) {
     if (-not (Test-Path -LiteralPath $resolvedCrucibleRoot)) {
         $errors += "crucible_root path does not exist: $crucibleRootPath"
     } else {
-        $resolvedPath = (Resolve-Path -LiteralPath $resolvedCrucibleRoot).ProviderPath
+        $resolvedPath = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $resolvedCrucibleRoot))
         $docsPath = Join-Path $resolvedPath "docs"
         $promptsPath = Join-Path $resolvedPath "prompts"
         $personasPath = Join-Path $resolvedPath "personas"

@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 function Write-BlockedTaskRecord {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
@@ -46,7 +48,7 @@ function Write-BlockedTaskRecord {
     }
     if ([string]::IsNullOrEmpty($actualProjectRoot)) {
         try {
-            $resolvedBacklog = (Resolve-Path $BacklogDir).Path
+            $resolvedBacklog = (Resolve-FilesystemPath -Path (Resolve-Path $BacklogDir))
             $dir = Split-Path -Parent $resolvedBacklog
             while (-not [string]::IsNullOrEmpty($dir)) {
                 if (Test-Path (Join-Path $dir ".crucible")) {

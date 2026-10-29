@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # I12's one reporting point (docs/policy.md section 8): a pipeline check that did not run is
 # recorded here by the step that skipped it, and every receiving surface reads it back from
 # here: the Reviewer's prompt, run-isolated-checks.ps1's closing list and the Human Gate menu.
@@ -16,14 +18,14 @@ function Get-ChecksNotRunPath {
     )
     $path = Join-Path (Join-Path (Join-Path $SessionDir $TaskId) "verification") "checks-not-run.txt"
     # [IO.File] resolves a relative path against the process directory, not the PowerShell location.
-    return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+    return Resolve-FilesystemPath -Path $path
 }
 
 function Read-ChecksNotRunFile {
     # Internal read: callers hold the record lock for the entire operation.
     param([Parameter(Mandatory = $true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
-    return @([System.IO.File]::ReadAllLines($Path, [System.Text.UTF8Encoding]::new($false)) |
+    return @([System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $Path), [System.Text.UTF8Encoding]::new($false)) |
         ForEach-Object { $_.TrimStart([char]0xFEFF) } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
@@ -89,8 +91,8 @@ function Update-ChecksNotRunRecord {
         }
         $temp = $path + "." + [System.Guid]::NewGuid().ToString("N") + ".tmp"
         try {
-            [System.IO.File]::WriteAllText($temp, (($kept -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
-            [System.IO.File]::Move($temp, $path, $true)
+            [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $temp), (($kept -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
+            [System.IO.File]::Move((Resolve-FilesystemPath -Path $temp), (Resolve-FilesystemPath -Path $path), $true)
         } finally {
             if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
         }

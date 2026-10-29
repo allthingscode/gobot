@@ -22,9 +22,7 @@ function Stage-RunnerScratch {
     New-Item -ItemType Directory -Path $testsDir, $libDir -Force | Out-Null
     Copy-Item -LiteralPath $RUNNER_SCRIPT -Destination (Join-Path $powershellDir "run-all-tests.ps1") -Force
     Copy-Item -Path (Join-Path $PSScriptRoot "_*.ps1") -Destination $testsDir -Force
-    foreach ($lib in @("run-lock.ps1", "normalized-hash.ps1")) {
-        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/$lib") -Destination (Join-Path $libDir $lib) -Force
-    }
+    Copy-TestRunnerLibraries -Destination $libDir
     Set-Content -LiteralPath (Join-Path $testsDir "_fixtures.ps1") -Value 'function Get-SharedAdopterFixture { return $null }' -Encoding UTF8
     return $powershellDir
 }
@@ -61,6 +59,38 @@ function Get-Ticks {
 }
 
 try {
+    $results += Run-Test -Name "The adopter materialization fixture cannot overlap the CI worker pool" -Body {
+        if (-not (Test-Path -LiteralPath (Join-Path $REPO_ROOT "powershell/gates/check-ascii.ps1"))) {
+            Skip-Test "the adopter materialization fixture is framework-only and is not installed in bundles"
+        }
+        $psDir = Stage-RunnerScratch -Dir (Join-Path $tempRoot "adopter-scheduling")
+        $testsDir = Join-Path $psDir "tests"
+        $log = Join-Path $tempRoot "adopter-scheduling-log"
+        New-Item -ItemType Directory -Path $log -Force | Out-Null
+        $name = "adopter-update-materialization.tests.ps1"
+        # Keep the real scheduling declaration, replacing only the expensive fixture body.
+        # Its weight starts it first if the declaration is lost, exposing overlap below.
+        $header = (Get-Content -LiteralPath (Join-Path $PSScriptRoot $name) -TotalCount 20) -join "`n"
+        $comments = ($header -split "`n" | Where-Object { $_ -match '^\s*#' }) -join "`n"
+        Write-RecordingTest -Path (Join-Path $testsDir $name) -Header $comments -SleepMs 1500
+        foreach ($worker in @("bbb", "ccc", "ddd")) {
+            Write-RecordingTest -Path (Join-Path $testsDir "$worker.tests.ps1") -Header "# CI pool worker" -SleepMs 3000
+        }
+        $env:CRUCIBLE_SERIAL_MARKER_LOG = $log
+        try {
+            $r = Invoke-ScratchRunner -Runner (Join-Path $psDir "run-all-tests.ps1") -RunnerArgs @("-ThrottleLimit", "4")
+        } finally {
+            Remove-Item env:CRUCIBLE_SERIAL_MARKER_LOG -ErrorAction SilentlyContinue
+        }
+        Assert-Result -Name "all scheduling probes ran successfully" -Condition ($r.ExitCode -eq 0 -and $r.Output -match 'Passed: 4') -FailureMessage $r.Output
+        $begin = Get-Ticks $log "$name.begin"
+        Assert-Result -Name "adopter probe ran" -Condition ($null -ne $begin) -FailureMessage $r.Output
+        foreach ($worker in @("bbb", "ccc", "ddd")) {
+            $end = Get-Ticks $log "$worker.tests.ps1.end"
+            Assert-Result -Name "adopter starts after $worker finishes" -Condition ($null -ne $end -and $begin -ge $end) -FailureMessage "the silent update fixture shared contention with a CI pool worker"
+        }
+    }
+
     $results += Run-Test -Name "Serial-marked files run one at a time after the pool" -Body {
         $psDir = Stage-RunnerScratch -Dir (Join-Path $tempRoot "runs-alone")
         $testsDir = Join-Path $psDir "tests"

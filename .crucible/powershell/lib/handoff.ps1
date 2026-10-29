@@ -10,8 +10,8 @@ function Normalize-HandoffArtifactPaths {
         [Parameter(Mandatory=$true)][string]$ProjectRoot
     )
 
-    $resolvedWtPath = if (Test-Path $WorktreePath) { (Resolve-Path $WorktreePath).ProviderPath } else { $WorktreePath }
-    $resolvedRepoRoot = if (Test-Path $ProjectRoot) { (Resolve-Path $ProjectRoot).ProviderPath } else { $ProjectRoot }
+    $resolvedWtPath = if (Test-Path $WorktreePath) { (Resolve-FilesystemPath -Path (Resolve-Path $WorktreePath)) } else { Resolve-FilesystemPath -Path $WorktreePath }
+    $resolvedRepoRoot = if (Test-Path $ProjectRoot) { (Resolve-FilesystemPath -Path (Resolve-Path $ProjectRoot)) } else { Resolve-FilesystemPath -Path $ProjectRoot }
 
     $normalizedArtifacts = @()
     foreach ($art in $Artifacts) {
@@ -22,16 +22,16 @@ function Normalize-HandoffArtifactPaths {
             $relativeArtifact = $true
             $wtCheck = Resolve-PathFromRoot -Root $resolvedWtPath -Path $art
             if (Test-Path $wtCheck) {
-                $fullArtPath = (Resolve-Path $wtCheck).ProviderPath
+                $fullArtPath = (Resolve-FilesystemPath -Path (Resolve-Path $wtCheck))
             } else {
                 $repoCheck = Resolve-PathFromRoot -Root $resolvedRepoRoot -Path $art
                 if (Test-Path $repoCheck) {
-                    $fullArtPath = (Resolve-Path $repoCheck).ProviderPath
+                    $fullArtPath = (Resolve-FilesystemPath -Path (Resolve-Path $repoCheck))
                 }
             }
         } else {
             if (Test-Path $art) {
-                $fullArtPath = (Resolve-Path $art).ProviderPath
+                $fullArtPath = (Resolve-FilesystemPath -Path (Resolve-Path $art))
             } else {
                 $fullArtPath = Resolve-FilesystemPath -Path $art
             }

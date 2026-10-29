@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # Which project is this script operating on?
 #
 # The answer is derived from the script's own location, not from the caller's working
@@ -29,14 +31,14 @@ function Resolve-CrucibleProjectRoot {
         if (-not (Test-Path -LiteralPath $ProjectRoot)) {
             throw ($ParameterName + " path does not exist: '" + $ProjectRoot + "'.")
         }
-        return (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
+        return (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
     }
 
     $derivedParent = Split-Path -Path $ScriptRoot -Parent
     if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
         $derivedParent = Split-Path -Path $derivedParent -Parent
     }
-    $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).ProviderPath
+    $derivedRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $derivedParent))
     if (Test-CrucibleProjectRoot -Path $derivedRoot) { return $derivedRoot }
 
     $location = Get-Location

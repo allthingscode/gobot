@@ -46,7 +46,7 @@ function Invoke-CircuitBreakerGates {
     if ($handoff.source_phase -eq "research") {
         $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
         if ($repoRoot -and (Test-Path -LiteralPath $repoRoot)) {
-            $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path
+            $repoRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $repoRoot))
         }
         
         # crucible_root through its one owner (I13): a quoted value with a trailing comment

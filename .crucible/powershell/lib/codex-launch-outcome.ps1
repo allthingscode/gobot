@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # The Codex launcher's outcome: one classifier that turns a run's evidence into one status
 # record, and one emitter that writes that record to stdout and to codex-launch-status.txt.
 # Before item 246 each outcome arm decided and wrote its own STATUS, and each evidence helper
@@ -356,7 +358,7 @@ function Write-CodexLaunchStatus {
         if (-not [string]::IsNullOrWhiteSpace($statusDir) -and -not (Test-Path -LiteralPath $statusDir)) {
             New-Item -ItemType Directory -Path $statusDir -Force | Out-Null
         }
-        [System.IO.File]::WriteAllText($StatusPath, (($fileLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $StatusPath), (($fileLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
     } catch {
         Write-Warning ("Could not write launch status to " + $StatusPath + ": " + $_.Exception.Message)
     }

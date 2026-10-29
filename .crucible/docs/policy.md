@@ -268,11 +268,47 @@ exposes the FileSystem provider's native path instead of the alias-preserving
 `Path`, without adding a second qualification algorithm or resolving again.
 Keep the probe's literal or wildcard semantics (archival expands SpecPath once).
 This applies only to existing FileSystem results; missing paths and general
-qualification still belong to the shared owner. `Convert-Path` and provider
+qualification still belong to the shared owner.
+Pass general Resolve-Path results as PathInfo through Resolve-FilesystemPath so
+the provider identity survives until qualification. Reading ProviderPath first
+from an unverified provider can turn its name into an unrelated native filename. `Convert-Path` and provider
 resolution method calls outside that owner still require reasoned guard
 allowances. The guard also detects `.ProviderPath` property reads; each audited
 existing FileSystem result has a reasoned allowance that fails when stale, and
 new reads require review and their own allowance (item 329 cross-review).
+Item 335 adds AST checks for every instance `.Path` read (including assigned,
+array-indexed and multiline resolution results) and for operands reaching a native
+consumer: static calls, constructors, `New-Object` and casts of File, Directory,
+FileStream, StreamReader, StreamWriter, FileInfo and DirectoryInfo (also named
+through `using namespace`); instance `CopyTo`/`MoveTo`; GetFullPath/GetRelativePath;
+`Parser::ParseFile`; git's global `-C`, `--git-dir` and `--work-tree` (any quoting,
+`git.exe`, literal `Invoke-Git` argv) and `worktree add|remove|move|lock|unlock|repair`
+paths; Codex `-C`, `--cd`, `--add-dir` and output paths; a child `pwsh` or
+`powershell` (by name, `Get-PwshCommand`, or a variable host given `-File` or
+`-NoProfile`) `-File` value and parameters named `*Root`, `*Path`, `*Dir`,
+`*Directory`, `*File`, `*Folder` or `*Worktree`; `WorkingDirectory` assignments,
+hashtable keys and `Start-Process -WorkingDirectory`; splatted argv to those
+commands (except git pathspecs after `--`); and PathInfo text conversions
+(`Select-Object -ExpandProperty Path`, `ForEach-Object Path`, `[string]`,
+interpolation, `ToString()`, `+`, `-f`, `-join`). An operand is qualified only when
+it is itself a `Resolve-FilesystemPath` call, or a variable every assignment of
+which in its function (or script) scope is one, with a top-level assignment through
+the owner that precedes the use. Parameters require that same preceding assignment.
+A call nested inside the operand does not count. A line allowance must explain a
+native producer, a validated full-input contract or a display/provider-only use, and
+fails when stale.
+
+Guard limits, covered by source audit rather than the guard (it is not an
+interprocedural taint analysis): values carried by function results, parameters,
+properties, hashtables or argv arrays built in variables (for example
+`Resolve-ImplementationWorktreePath` output or the launcher's Codex argv builder);
+commands named dynamically (`& $git`, `Invoke-Expression`, a variable host without
+`-File` or `-NoProfile`) and in-process script calls; types named dynamically
+(`New-Object $type`, `$type::Method`, `-as`) and C# compiled by Add-Type; process
+argument strings and file names (`Arguments`, `ArgumentList`, `FileName`,
+`Start-Process -ArgumentList`); other git path operands (`clone`, `init`,
+`config core.hooksPath`); child parameters whose names end in no path word; and
+other PathInfo conversions (for example `Out-String`).
 
 How the list is used:
 

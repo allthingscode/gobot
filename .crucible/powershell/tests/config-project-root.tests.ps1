@@ -108,16 +108,16 @@ orchestration:
             Assert-Result "missing hooks root throws" $threw "Hooks must preserve Resolve-Path's missing-root error."
         }
 
-        $results += Run-Test -Name "Primary branch keeps relative and nonexistent roots for git" -Body {
+        $results += Run-Test -Name "Primary branch qualifies relative and missing roots without probing existence" -Body {
             function git {
                 $script:branchRoot = $args[1]
                 $global:LASTEXITCODE = 0
             }
             $REPO_ROOT = "./project"
             Assert-Result "branch fallback" ((Get-ConfiguredPrimaryBranch) -eq "main") "Primary branch must use REPO_ROOT."
-            Assert-Result "relative repo root" ($script:branchRoot -eq "./project") "Primary branch must not Resolve-Path REPO_ROOT."
+            Assert-Result "relative repo root" ($script:branchRoot -eq (Join-Path $tempRoot "project")) "The native git boundary must qualify REPO_ROOT."
             $null = Get-ConfiguredPrimaryBranch -ProjectRoot "./missing"
-            Assert-Result "missing explicit branch root" ($script:branchRoot -eq "./missing") "Primary branch must pass a missing explicit root to git."
+            Assert-Result "missing explicit branch root" ($script:branchRoot -eq (Join-Path $tempRoot "missing")) "Missing explicit roots must be qualified without an existence probe."
             $REPO_ROOT = "   "
             $null = Get-ConfiguredPrimaryBranch
             Assert-Result "blank branch root" ($script:branchRoot -eq $tempRoot) "A blank REPO_ROOT must fall back to the current directory."

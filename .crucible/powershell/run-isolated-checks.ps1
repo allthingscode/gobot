@@ -23,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     if (-not (Test-Path -LiteralPath $ProjectRoot)) {
         Write-Error ("-ProjectRoot path does not exist: {0}" -f $ProjectRoot)
     }
-    $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
+    $ProjectRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 }
 
 # Item 188: lookup and detached checks share the configured workspaces root.
@@ -55,14 +55,14 @@ if (-not [string]::IsNullOrWhiteSpace($Commit)) {
     if ($addRes.ExitCode -ne 0) {
         Write-Error ("Could not create a worktree at {0} for {1}: {2}" -f $commitWorktree, $commitSha, $addRes.Raw)
     }
-    $worktree = (Resolve-Path -LiteralPath $commitWorktree).ProviderPath
+    $worktree = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $commitWorktree))
     Write-Host ("Running the configured checks for {0} at {1} in a temporary worktree: {2}" -f $TaskId, $commitSha, $worktree)
 } else {
     $worktree = Join-Path $worktreeRoot ("implementation-" + $TaskId)
     if (-not (Test-Path -LiteralPath $worktree)) {
         Write-Error ("Worktree missing: {0}. A task with no implementation worktree (research, for example) passes -Commit <rev> instead." -f $worktree)
     }
-    $worktree = (Resolve-Path -LiteralPath $worktree).ProviderPath
+    $worktree = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $worktree))
 
     $branchRes = Invoke-Git -Directory $worktree rev-parse --abbrev-ref HEAD
     $branch = $branchRes.Raw.Trim()
@@ -313,7 +313,7 @@ function Invoke-ProjectPrePushHook {
     $psi = [System.Diagnostics.ProcessStartInfo]::new($interpreter)
     $psi.ArgumentList.Add($hook)
     foreach ($a in $hookArgs) { $psi.ArgumentList.Add($a) }
-    $psi.WorkingDirectory = $worktree
+    $psi.WorkingDirectory = Resolve-FilesystemPath -Path $worktree
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true
     $psi.Environment["CRUCIBLE_PRE_PUSH_PREFLIGHT"] = "1"

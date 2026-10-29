@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 . (Join-Path $PSScriptRoot "platform.ps1")
 . (Join-Path $PSScriptRoot "crucible-command.ps1")
 . (Join-Path $PSScriptRoot "injection-detector.ps1")
@@ -248,11 +250,11 @@ function Resolve-CrucibleIntegrityBase {
         # function of the repo it was handed, not of wherever the caller is standing.
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        git -C $RepoRoot show-ref --verify --quiet ("refs/heads/" + $branchRef) 2>$null
+        git -C (Resolve-FilesystemPath -Path $RepoRoot) show-ref --verify --quiet ("refs/heads/" + $branchRef) 2>$null
         $hasBranch = ($LASTEXITCODE -eq 0)
         if ($hasBranch) {
             $primaryBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $RepoRoot
-            $mergeBase = (git -C $RepoRoot merge-base $primaryBranch $branchRef 2>$null)
+            $mergeBase = (git -C (Resolve-FilesystemPath -Path $RepoRoot) merge-base $primaryBranch $branchRef 2>$null)
             $mergeBaseExit = $LASTEXITCODE
         }
         $ErrorActionPreference = $previousPreference
@@ -305,7 +307,7 @@ function Get-CrucibleFrameworkStatusChanges {
     # Keep stderr separate: 2>&1 would corrupt column-parsed porcelain output. Item 35.
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $statusLines = @(git -C $repoRoot status --porcelain -- $crucibleRoot 2>$null)
+    $statusLines = @(git -C (Resolve-FilesystemPath -Path $repoRoot) status --porcelain -- $crucibleRoot 2>$null)
     $statusExit = $LASTEXITCODE
     $ErrorActionPreference = $previousPreference
     if ($statusExit -ne 0) {
@@ -327,7 +329,7 @@ function Get-CrucibleFrameworkStatusChanges {
     if ($null -ne $baseCommit) {
         $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $diffLines = @(git -C $repoRoot diff --name-only ($baseCommit + "..HEAD") -- $crucibleRoot 2>$null)
+        $diffLines = @(git -C (Resolve-FilesystemPath -Path $repoRoot) diff --name-only ($baseCommit + "..HEAD") -- $crucibleRoot 2>$null)
         $diffExit = $LASTEXITCODE
         $ErrorActionPreference = $previousPreference
         if ($diffExit -ne 0) {
@@ -488,16 +490,16 @@ function Complete-CrucibleSourceSession {
                         $typeDir = Split-Path -Leaf (Split-Path -Parent (Split-Path -Parent $specInfo.SpecPathInActive))
                         $activeRel = "$typeDir/active/$fileName".Replace("\", "/")
                         $archivedRel = "$typeDir/archived/$fileName".Replace("\", "/")
-                        $blContent = [System.IO.File]::ReadAllText($backlogPath, [System.Text.Encoding]::UTF8)
+                        $blContent = [System.IO.File]::ReadAllText((Resolve-FilesystemPath -Path $backlogPath), [System.Text.Encoding]::UTF8)
                         if ($blContent.Contains("]($archivedRel)")) {
                             Invoke-WithBacklogLock -BacklogPath $backlogPath -ScriptBlock {
-                                $blLines = [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)
+                                $blLines = [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $backlogPath), [System.Text.Encoding]::UTF8)
                                 for ($i = 0; $i -lt $blLines.Count; $i++) {
                                     if ($blLines[$i].Contains("]($archivedRel)")) {
                                         $blLines[$i] = $blLines[$i].Replace("]($archivedRel)", "]($activeRel)")
                                     }
                                 }
-                                [System.IO.File]::WriteAllText($backlogPath, (($blLines) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+                                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $backlogPath), (($blLines) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
                             }
                         }
                     }
@@ -505,7 +507,7 @@ function Complete-CrucibleSourceSession {
             }
 
             if (Test-Path -LiteralPath $backlogPath) {
-                $bytes = [System.IO.File]::ReadAllBytes($backlogPath)
+                $bytes = [System.IO.File]::ReadAllBytes((Resolve-FilesystemPath -Path $backlogPath))
                 $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
                 $rawText = [System.Text.Encoding]::UTF8.GetString($bytes)
                 $hasMojibake = $false
@@ -1085,7 +1087,7 @@ function Invoke-CrucibleScopeGates {
         $repoRoot = if ($Context.ContainsKey("RepoRoot") -and $null -ne $Context["RepoRoot"]) { $Context["RepoRoot"] } else { Resolve-ConfigProjectRoot }
         try {
             # Files, not collapsed directories, so a new stub is judged by its own name.
-            $statusLines = @(git -C $repoRoot status --porcelain --untracked-files=all 2>$null)
+            $statusLines = @(git -C (Resolve-FilesystemPath -Path $repoRoot) status --porcelain --untracked-files=all 2>$null)
             if ($LASTEXITCODE -ne 0) { throw ("git status exited " + $LASTEXITCODE + " in " + $repoRoot) }
             $filingScope = Get-ResearchGateFilingScope -TaskId $handoff.task_id -RepoRoot $repoRoot
             $modifiedFiles = @()
@@ -1423,10 +1425,10 @@ function Assert-CodeTaskWorktree {
         [Parameter(Mandatory=$true)][string]$Check
     )
     $repoRoot = if ($Context.ContainsKey("RepoRoot") -and $null -ne $Context["RepoRoot"]) { $Context["RepoRoot"] } else { Resolve-ConfigProjectRoot }
-    git -C $repoRoot rev-parse --verify --quiet "refs/heads/task/$TaskId" *> $null
+    git -C (Resolve-FilesystemPath -Path $repoRoot) rev-parse --verify --quiet "refs/heads/task/$TaskId" *> $null
     if ($LASTEXITCODE -ne 0) { return }
     if (Test-Path -LiteralPath $WorktreePath) {
-        $wtBranch = (git -C $WorktreePath symbolic-ref --short -q HEAD 2>$null)
+        $wtBranch = (git -C (Resolve-FilesystemPath -Path $WorktreePath) symbolic-ref --short -q HEAD 2>$null)
         if ($LASTEXITCODE -eq 0 -and ([string]$wtBranch).Trim() -eq "task/$TaskId") { return }
         Write-Host "[STOP] $WorktreePath does not have task/$TaskId checked out, so the $Check cannot run against this task's code." -ForegroundColor Red
     } else {
@@ -1808,7 +1810,7 @@ function Resolve-CrucibleTransition {
                 $otherTaskId = Split-Path -Parent (Split-Path -Parent $fullName) | Split-Path -Leaf
                 $sessionOfFile = Split-Path -Parent (Split-Path -Parent $fullName)
                 $isCurrentSession = if ([string]::IsNullOrEmpty($handoff.task_id)) {
-                    [IO.Path]::GetFullPath($sessionOfFile).TrimEnd([char]92, [char]47) -eq [IO.Path]::GetFullPath($sessionDir).TrimEnd([char]92, [char]47)
+                    [IO.Path]::GetFullPath($sessionOfFile).TrimEnd([char]92, [char]47) -eq [IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $sessionDir)).TrimEnd([char]92, [char]47)
                 } else {
                     $otherTaskId -eq $handoff.task_id
                 }

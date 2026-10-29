@@ -130,7 +130,7 @@ $decision = [ordered]@{
 }
 $decisionPath = Join-Path $gateDir ($TaskId + "-" + $timestamp + ".json")
 $decisionJson = $decision | ConvertTo-Json -Depth 6
-[System.IO.File]::WriteAllText($decisionPath, $decisionJson, (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $decisionPath), $decisionJson, (New-Object System.Text.UTF8Encoding($false)))
 
 # --- Generated continuation prompt ---
 function Format-List {
@@ -246,7 +246,7 @@ output. Do NOT spawn successor agents.
 "@
 
 $gateFilingPath = Join-Path $researchSessionDir "gate-filing.md"
-[System.IO.File]::WriteAllText($gateFilingPath, ($gateFilingContent -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $gateFilingPath), ($gateFilingContent -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
 
 # A refused handoff, including one the builder could not write, exits nonzero rather than
 # letting the Researcher advance on a handoff that was never written.
@@ -260,12 +260,12 @@ $handoffRunner = @(
     $handoffCommand,
     $runnerExit
 ) -join "`n"
-[System.IO.File]::WriteAllText($handoffRunnerPath, ($handoffRunner + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $handoffRunnerPath), ($handoffRunner + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 
 # --- Orchestrator guidance ---
 $pointer = "Researcher: $TaskId - read and follow all instructions in $gateFilingPath"
 # TODO item 208: file-sourced prompts survive background pwsh -File argument parsing.
-[System.IO.File]::WriteAllText($pointerPath, ($pointer + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $pointerPath), ($pointer + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 Write-Host ""
 Write-Host "[RESEARCH GATE RECORDED] $TaskId" -ForegroundColor Green
 Write-Host ("  outcome: " + $decision.outcome + "  |  approved: " + $approvedList.Count + "  deferred: " + $deferredList.Count + "  rejected: " + $rejectedList.Count + "  upstream: " + $upstreamList.Count)

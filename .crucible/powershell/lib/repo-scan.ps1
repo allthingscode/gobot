@@ -37,7 +37,7 @@ function Get-RepoScannableFile {
     if (-not (Test-Path -LiteralPath $RepoRoot -PathType Container)) {
         throw ("Get-RepoScannableFile: RepoRoot '" + $RepoRoot + "' is not a directory.")
     }
-    $rootFull = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $rootFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $RepoRoot))
 
     $listed = Invoke-Git @("ls-files", "--cached", "--others", "--exclude-standard") -Directory $rootFull
     if ($listed.ExitCode -ne 0) {

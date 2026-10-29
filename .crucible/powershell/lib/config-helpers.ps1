@@ -378,9 +378,9 @@ function Resolve-ConfigProjectRoot {
 
     if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
     if ($PathResolution -eq "Existing" -and $root -and (Test-Path -LiteralPath $root)) {
-        $root = (Resolve-Path -LiteralPath $root).ProviderPath
+        $root = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $root))
     }
-    if ($PathResolution -eq "Always") { $root = (Resolve-Path -LiteralPath $root).ProviderPath }
+    if ($PathResolution -eq "Always") { $root = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $root)) }
     return $root
 }
 
@@ -455,6 +455,12 @@ function Resolve-PathFromRoot {
     )
 
     if ([System.IO.Path]::IsPathRooted($Path)) { return $Path }
+    if ($Path -match '^([^\\/:]+):') {
+        try {
+            $pathDrive = $ExecutionContext.SessionState.Drive.Get($Matches[1])
+            if ($pathDrive.Provider.Name -eq 'FileSystem') { return $Path }
+        } catch [System.Management.Automation.DriveNotFoundException] { }
+    }
     return (Join-Path $Root $Path)
 }
 
@@ -463,7 +469,16 @@ function Resolve-PathFromRoot {
 function Resolve-FilesystemPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    if ([System.IO.Path]::IsPathFullyQualified($Path)) { return $Path }
+    if ([System.IO.Path]::IsPathFullyQualified($Path)) {
+        $mappedDrive = $null
+        if ($Path -match '^([A-Za-z]):') {
+            try { $mappedDrive = $ExecutionContext.SessionState.Drive.Get($Matches[1]) }
+            catch [System.Management.Automation.DriveNotFoundException] { }
+        }
+        # A PowerShell-only drive can look native to .NET without naming that disk.
+        if ($null -eq $mappedDrive -or ($mappedDrive.Provider.Name -eq 'FileSystem' -and
+                $mappedDrive.Root -eq ($mappedDrive.Name + ':\'))) { return $Path }
+    }
     $provider = $null
     $drive = $null
     $fullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path, [ref]$provider, [ref]$drive)
@@ -613,7 +628,7 @@ function Resolve-ProjectHooksDirValue {
 
     $val = $Value
     $root = $ProjectRoot
-    if ([System.IO.Path]::IsPathRooted($val) -or $val -match '^([A-Za-z]:|[\\/])') {
+    if ((Resolve-PathFromRoot -Root $root -Path $val) -ceq $val -or $val -match '^([A-Za-z]:|[\\/])') {
         throw ("hooks.project_dir must be a relative path inside the project (got '" + $val + "').")
     }
     if ($val -match '^\.\.' -or $val -match '[\\/]\.\.') {
@@ -628,7 +643,7 @@ function Resolve-ProjectHooksDirValue {
     if (-not (Test-Path -LiteralPath $full -PathType Container)) {
         throw ("hooks.project_dir names a directory that does not exist: " + $val)
     }
-    return (Resolve-Path -LiteralPath $full).Path
+    return (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $full))
 }
 
 # project.default_branch names the branch tasks are cut from, rebased onto and merged into.
@@ -638,7 +653,7 @@ function Resolve-ProjectHooksDirValue {
 function Get-ConfiguredPrimaryBranch {
     param([string]$ProjectRoot = "")
 
-    $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -PathResolution None
+    $root = Resolve-FilesystemPath -Path (Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -PathResolution None)
 
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (Test-Path -LiteralPath $configPath) {
@@ -646,16 +661,16 @@ function Get-ConfiguredPrimaryBranch {
         $val = Get-ConfigBlockValue -Content $content -Path @("project", "default_branch") -Source $configPath
         if (-not [string]::IsNullOrWhiteSpace($val)) {
             $branch = $val.Trim()
-            git -C $root show-ref --verify --quiet "refs/heads/$branch" 2>$null
+            git -C (Resolve-FilesystemPath -Path $root) show-ref --verify --quiet "refs/heads/$branch" 2>$null
             if ($LASTEXITCODE -ne 0) {
-                $current = (git -C $root symbolic-ref --short -q HEAD 2>$null)
+                $current = (git -C (Resolve-FilesystemPath -Path $root) symbolic-ref --short -q HEAD 2>$null)
                 throw ("project.default_branch in " + $configPath + " is '" + $branch + "', but " + $root + " has no such branch. Set it to the branch tasks merge into" + $(if ($current) { " (the checkout is on '" + ([string]$current).Trim() + "')" } else { "" }) + ".")
             }
             return $branch
         }
     }
 
-    git -C $root show-ref --verify --quiet refs/heads/main 2>$null
+    git -C (Resolve-FilesystemPath -Path $root) show-ref --verify --quiet refs/heads/main 2>$null
     if ($LASTEXITCODE -eq 0) { return "main" }
     return "master"
 }

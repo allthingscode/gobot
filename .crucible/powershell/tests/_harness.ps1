@@ -5,6 +5,16 @@
 # _worktree-fixture.ps1 load it too without loading this file. See its header.
 . (Join-Path $PSScriptRoot "_ownership.ps1")
 
+# Runner fixtures need transitive dependencies as well as the runner's direct imports.
+# Copy the library tree as a unit so a new dot-source needs no fixture file-list edit.
+function Copy-TestRunnerLibraries {
+    param([Parameter(Mandatory = $true)][string]$Destination)
+
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '../lib') -Force |
+        Copy-Item -Destination $Destination -Recurse -Force
+}
+
 function Get-ProcessDeathDescription {
     param(
         [Parameter(Mandatory=$true)]

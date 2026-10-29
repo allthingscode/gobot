@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 function Write-EventLog {
     param(
         [Parameter(Mandatory=$true)][string]$Event,
@@ -19,6 +21,8 @@ function Write-EventLog {
         [Parameter(Mandatory=$true)][string]$CircuitBreakerHistoryFile
     )
 
+    # A closure cannot see functions loaded in a caller-local scope.
+    $LogFile = Resolve-FilesystemPath -Path $LogFile
     $timestamp = Get-UtcTimestamp
     
     $eventObj = [ordered]@{
@@ -52,6 +56,7 @@ function Write-EventLog {
     }.GetNewClosure()
 
     if ($Event -eq "circuit_breaker") {
+        $CircuitBreakerHistoryFile = Resolve-FilesystemPath -Path $CircuitBreakerHistoryFile
         $parentCB = Split-Path -Parent $CircuitBreakerHistoryFile
         if (-not (Test-Path -LiteralPath $parentCB)) {
             New-Item -ItemType Directory -Path $parentCB -Force | Out-Null

@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # Handoff intake: everything that turns an on-disk handoff into validated in-memory state
 # before any gate decides anything. Selection, misplaced-file recovery, the one reader that
 # binds the handoff to the task, schema and binding preflight, and input normalization.
@@ -153,7 +155,7 @@ function Resolve-CrucibleInputHandoff {
                 # Log session_start for operator bootstrap to prevent "missing_start_event" anomaly
                 Write-EventLog -Event "session_start" -TaskId $TaskId -Phase "deployment" -HandoffCount 1 -CycleId "initial" -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 [System.IO.File]::WriteAllText(
-                    $bootstrapFile,
+                    (Resolve-FilesystemPath -Path $bootstrapFile),
                     ($bootstrapHandoff | ConvertTo-Json -Depth 12),
                     (New-Object System.Text.UTF8Encoding $false)
                 )
@@ -351,8 +353,8 @@ function Read-CrucibleHandoffContext {
     $Context.InvalidBudgetTier = $invalidBudgetTier
     $Context.CumulativeHandoffCount = [int]$handoff.cumulative_handoff_count
     $Context.HandoffLogParseFailureCount = $logParseFailureCount
-    $resolvedRoot = (Resolve-Path -LiteralPath $Context.RepoRoot).Path.TrimEnd("\", "/")
-    $resolvedPath = (Resolve-Path -LiteralPath $handoffFile).Path
+    $resolvedRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $Context.RepoRoot)).TrimEnd("\", "/")
+    $resolvedPath = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $handoffFile))
     $Context.RelativeHandoffPath = Get-RootRelativePath -Root $resolvedRoot -Path $resolvedPath
 }
 
@@ -645,7 +647,7 @@ function Normalize-CrucibleInputState {
             $handoff.artifacts = [string[]]$normalizedArtifacts
             # Serialize cleanly with no unrolling/scalar conversions (explicitly cast $handoff if needed)
             $handoffJson = $handoff | ConvertTo-Json -Depth 100
-            [System.IO.File]::WriteAllText($handoffFile, $handoffJson, (New-Object System.Text.UTF8Encoding $false))
+            [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $handoffFile), $handoffJson, (New-Object System.Text.UTF8Encoding $false))
         }
     }
 

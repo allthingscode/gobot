@@ -22,7 +22,7 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red
         exit 1
     }
-    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
+    $REPO_ROOT = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 }
 # Item 188: health and cleanup inspect and archive the same configured session.
 $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
@@ -192,7 +192,7 @@ try {
         $implementationWtPaths = @(git worktree list --porcelain | Where-Object { $_ -match '^worktree .*implementation-' } | ForEach-Object { $_ -replace '^worktree ', '' })
         
         foreach ($wt in $implementationWtPaths) {
-            $hooksPath = git -C $wt config core.hooksPath
+            $hooksPath = git -C (Resolve-FilesystemPath -Path $wt) config core.hooksPath
             # Git resolves inherited relative hooksPath against the worktree root.
             # A directory without pre-commit leaves the worktree unprotected. Item 155.
             $ok = $false
@@ -215,7 +215,7 @@ try {
             Write-Quiet "  None." -ForegroundColor Gray
         } else {
             $misconfiguredWorktrees | ForEach-Object { 
-                $current = git -C $_ config core.hooksPath
+                $current = git -C (Resolve-FilesystemPath -Path $_) config core.hooksPath
                 Write-Quiet ("  - " + $_ + " - core.hooksPath: " + $current) -ForegroundColor Yellow
             }
             Write-Quiet "  A legacy per-worktree override clears with: git -C <worktree> config --worktree --unset core.hooksPath" -ForegroundColor Gray

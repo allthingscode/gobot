@@ -301,7 +301,11 @@ Write-Host "GATE_COMPLETED"
         $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
         $ctx.IsBootstrap = $false
 
-        $logText = (& { Resolve-CrucibleTransition -Context $ctx } 6>&1) -join "`n"
+        New-PSDrive -Name Item333 -PSProvider FileSystem -Root $caseRoot | Out-Null
+        try {
+            $ctx.SessionDir = 'Item333:/session'
+            $logText = (& { Resolve-CrucibleTransition -Context $ctx } 6>&1) -join "`n"
+        } finally { Remove-PSDrive Item333 }
 
         Assert-Result -Name "other task session is reported" -Condition ($logText -match "R-10[/\\]grooming[/\\]task\.md") -FailureMessage "expected R-10 reported. Output: $logText"
         Assert-Result -Name "root session is the current one and is excluded" -Condition ($logText -notmatch "session[/\\]grooming[/\\]task\.md") -FailureMessage "the current root session was reported as concurrent. Output: $logText"

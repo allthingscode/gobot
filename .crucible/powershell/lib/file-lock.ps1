@@ -1,3 +1,5 @@
+if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # The exclusive-handle file lock (I5), shared by crucible-lib.ps1 and scripts that do not load it,
 # such as run-isolated-checks.ps1. Item 258.
 
@@ -22,7 +24,7 @@ function Invoke-FileLock {
             # OpenOrCreate makes an orphaned pathname immediately acquirable:
             # a file without an open handle holds no lock.
             $fileStream = New-Object System.IO.FileStream(
-                $LockPath,
+                (Resolve-FilesystemPath -Path $LockPath),
                 [System.IO.FileMode]::OpenOrCreate,
                 [System.IO.FileAccess]::ReadWrite,
                 [System.IO.FileShare]::None,

@@ -21,7 +21,7 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red
         exit 1
     }
-    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).ProviderPath
+    $REPO_ROOT = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 }
 # Native git cannot use a PowerShell drive alias, including one selected by the CWD.
 $REPO_ROOT = Resolve-FilesystemPath -Path $REPO_ROOT
@@ -35,7 +35,7 @@ try {
     $ErrorActionPreference = "Continue"
     $global:LASTEXITCODE = $null
     $taskRefOutput = @(Invoke-GitChecked {
-        git -C $REPO_ROOT show-ref --verify --quiet "refs/heads/task/$TaskId"
+        git -C (Resolve-FilesystemPath -Path $REPO_ROOT) show-ref --verify --quiet "refs/heads/task/$TaskId"
     } 2>&1)
     $taskRefExitCode = $LASTEXITCODE
     $taskRefMissing = ($taskRefExitCode -eq 1 -and $taskRefOutput.Count -eq 0)
@@ -45,7 +45,7 @@ try {
         # The scoped probe diagnoses corruption; an absent ref is still a silent 1.
         $global:LASTEXITCODE = $null
         $taskRefOutput = @(Invoke-GitChecked {
-            git -C $REPO_ROOT show-ref --quiet "refs/heads/task/$TaskId"
+            git -C (Resolve-FilesystemPath -Path $REPO_ROOT) show-ref --quiet "refs/heads/task/$TaskId"
         } 2>&1)
         $taskRefExitCode = $LASTEXITCODE
         $taskRefMissing = ($taskRefExitCode -eq 1 -and $taskRefOutput.Count -eq 0)
@@ -78,10 +78,10 @@ if ($taskRefMissing) {
 # conflict, so the Operator does not send the task back for a rebase. Item 179.
 $null = Test-GitDiscardSafe -Directory $REPO_ROOT -Operation "merge simulation and abort" -IncludeUntracked:$false -Refuse
 
-$currentBranch = git -C $REPO_ROOT rev-parse --abbrev-ref HEAD
+$currentBranch = git -C (Resolve-FilesystemPath -Path $REPO_ROOT) rev-parse --abbrev-ref HEAD
 if ($currentBranch -ne $mainBranch) {
     Write-Host "Warning: Not on $mainBranch branch. Switching to $mainBranch..." -ForegroundColor Yellow
-    git -C $REPO_ROOT checkout $mainBranch
+    git -C (Resolve-FilesystemPath -Path $REPO_ROOT) checkout $mainBranch
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Error: Could not checkout $mainBranch." -ForegroundColor Red
         exit 1
@@ -92,11 +92,11 @@ if ($currentBranch -ne $mainBranch) {
 Write-Host "Updating $mainBranch..." -ForegroundColor Gray
 $previousPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-$originUrl = git -C $REPO_ROOT remote get-url origin 2>$null
+$originUrl = git -C (Resolve-FilesystemPath -Path $REPO_ROOT) remote get-url origin 2>$null
 $remoteExitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousPreference
 if ($remoteExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($originUrl)) {
-    git -C $REPO_ROOT pull origin $mainBranch --quiet
+    git -C (Resolve-FilesystemPath -Path $REPO_ROOT) pull origin $mainBranch --quiet
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Error: Could not pull origin/$mainBranch." -ForegroundColor Red
         exit 1
@@ -112,14 +112,14 @@ Write-Host "Simulating merge from task/$TaskId..." -ForegroundColor Gray
 
 $previousPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-$mergeResult = git -C $REPO_ROOT merge --no-commit --no-ff "task/$TaskId"
+$mergeResult = git -C (Resolve-FilesystemPath -Path $REPO_ROOT) merge --no-commit --no-ff "task/$TaskId"
 $gitExitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousPreference
 
 if ($gitExitCode -ne 0) {
     Write-Host "!!! CONFLICT DETECTED !!!" -ForegroundColor Red
     
-    $conflictingFiles = git -C $REPO_ROOT diff --name-only --diff-filter=U
+    $conflictingFiles = git -C (Resolve-FilesystemPath -Path $REPO_ROOT) diff --name-only --diff-filter=U
     Write-Host "Conflicting files:" -ForegroundColor White
     $conflictingFiles | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
 
@@ -140,14 +140,14 @@ if ($gitExitCode -ne 0) {
     Write-Host "Report written to $reportFile" -ForegroundColor Gray
 
     # Abort the merge to return to clean state
-    git -C $REPO_ROOT merge --abort
+    git -C (Resolve-FilesystemPath -Path $REPO_ROOT) merge --abort
     exit 1
 } else {
     Write-Host "CLEAN MERGE SIMULATED. No conflicts detected." -ForegroundColor Green
     # An already-merged branch leaves no merge in progress, so there is nothing to abort.
-    git -C $REPO_ROOT rev-parse -q --verify MERGE_HEAD *> $null
+    git -C (Resolve-FilesystemPath -Path $REPO_ROOT) rev-parse -q --verify MERGE_HEAD *> $null
     if ($LASTEXITCODE -eq 0) {
-        git -C $REPO_ROOT merge --abort
+        git -C (Resolve-FilesystemPath -Path $REPO_ROOT) merge --abort
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Error: could not abort the simulated merge; run 'git merge --abort' in $REPO_ROOT." -ForegroundColor Red
             exit 2

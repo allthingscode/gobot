@@ -36,8 +36,7 @@ $testsDir = Join-Path $PSScriptRoot "tests"
 $testFiles = Get-ChildItem -Path $testsDir -Filter '*test*.ps1' | Sort-Object Name
 
 if ($Changed) {
-    # Scratch runners used by existing tests carry an explicit lib list; load the
-    # selector only in this mode so those full-suite copies still work. Item 201.
+    # Full-suite runs do not need selection or its git diff probes. Item 201.
     . (Join-Path $PSScriptRoot 'lib/test-selection.ps1')
     $selectionRoot = Split-Path -Parent $PSScriptRoot
     $selected = @(Get-AffectedTestFiles -Root $selectionRoot -Base $Base)
@@ -228,6 +227,23 @@ try {
         return $Pending
     }
 
+    function Stop-TestProcess {
+        param($Item)
+
+        $proc = $Item.Proc
+        $proc.Refresh()
+        if (-not $proc.HasExited) { $proc.Kill($true) }
+        $proc.WaitForExit()
+        # Normal exits remain the hygiene check's responsibility. Only records in
+        # this killed process's subtree authorize runner cleanup. Item 337.
+        $records = @(Get-ChildItem -LiteralPath $Item.LedgerRoot -Filter '*.worktree' -File -Recurse)
+        if ($records.Count -gt 0) {
+            . (Join-Path $PSScriptRoot 'tests/_worktree-fixture.ps1')
+            Write-Host "Cleaning fixture worktrees owned by the terminated test..."
+            Remove-FrameworkTestWorktreeLedger -LedgerRoot $Item.LedgerRoot
+        }
+    }
+
     function Start-TestProcess {
         param($file, [switch]$StreamStandardOutput)
 
@@ -239,6 +255,13 @@ try {
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.CreateNoWindow = $true
+
+        $ledgerParent = if ($env:CRUCIBLE_TEST_WORKTREE_LEDGER) {
+            $env:CRUCIBLE_TEST_WORKTREE_LEDGER
+        } else { Get-TestRunRoot }
+        $ledgerRoot = Join-Path $ledgerParent ('worktrees-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $ledgerRoot | Out-Null
+        $psi.Environment['CRUCIBLE_TEST_WORKTREE_LEDGER'] = $ledgerRoot
 
         $p = New-Object System.Diagnostics.Process
         $p.StartInfo = $psi
@@ -258,6 +281,7 @@ try {
 
         return [PSCustomObject]@{
             File = $file
+            LedgerRoot = $ledgerRoot
             Proc = $p
             OutRead = $outRead
             ErrRead = $errRead
@@ -265,6 +289,7 @@ try {
             ErrLines = (New-Object System.Collections.Generic.List[string])
             Stopwatch = $sw
             Idle = [System.Diagnostics.Stopwatch]::StartNew()
+            StopAttempted = $false
         }
     }
 
@@ -279,6 +304,7 @@ try {
 
             $item = Start-TestProcess -file $file -StreamStandardOutput
             $proc = $item.Proc
+            try {
 
             # Echo each line as the child produces it, so a test that is still running is
             # visible while it runs rather than only once it finishes. Both streams are
@@ -291,6 +317,7 @@ try {
             $idle = [System.Diagnostics.Stopwatch]::StartNew()
             $pollMs = 250
             $isTimeout = $false
+            $cleanupError = ''
 
             while ($null -ne $outRead -or $null -ne $errRead) {
                 $pending = New-Object System.Collections.Generic.List[System.Threading.Tasks.Task]
@@ -305,15 +332,13 @@ try {
                 if ($completedIndex -eq -1) {
                     if (-not $NoTimeout -and $idle.Elapsed.TotalSeconds -ge $IdleTimeoutSeconds) {
                         $isTimeout = $true
-                        try {
-                            $proc.Kill()
-                            $proc.WaitForExit()
-                        } catch {}
+                        $item.StopAttempted = $true
+                        try { Stop-TestProcess -Item $item }
+                        catch { $cleanupError = [string]$_ }
                         # Stop reading rather than waiting for the pending reads to end.
-                        # Killing the child does not close the pipes if it had spawned a
-                        # process of its own that inherited the handles, so those reads
-                        # can stay pending indefinitely and this loop would spin forever
-                        # on the very hang the timeout exists to break.
+                        # A descendant may have escaped process-tree termination while
+                        # retaining inherited handles. Do not let pending reads defeat
+                        # the timeout even in that case.
                         break
                     }
                     continue
@@ -347,7 +372,7 @@ try {
                     }
                 }
             }
-            $proc.WaitForExit()
+            if (-not $isTimeout) { $proc.WaitForExit() }
             $idle.Stop()
 
             $outText = ($outLines -join "`n")
@@ -363,13 +388,20 @@ try {
 
             if ($isTimeout) {
                 Write-Host "FAIL  $($file.Name) (TIMEOUT after $($IdleTimeoutSeconds)s)" -ForegroundColor Red
+                if ($cleanupError) {
+                    Write-Host "Cleanup failed for $($file.Name): $cleanupError" -ForegroundColor Red
+                }
             }
-            $proc.Dispose()
 
             if ($testFailed) {
                 $failedTests += $file.Name
             } else {
                 $passCount++
+            }
+            } finally {
+                try {
+                    if (-not $item.StopAttempted -and -not $proc.HasExited) { Stop-TestProcess -Item $item }
+                } finally { $proc.Dispose() }
             }
         }
 
@@ -471,6 +503,7 @@ try {
 
         $running = @()
         $completed = @()
+        $runError = $null
 
         try {
             # 1. Run the pool, then each serial-marked file alone with the same loop.
@@ -507,6 +540,7 @@ try {
 
                         $exited = $false
                         $isTimeout = $false
+                        $cleanupError = ''
 
                         $item.OutRead = Read-PendingLines -Pending $item.OutRead -Reader $proc.StandardOutput -Lines $item.OutLines -Idle $item.Idle
                         $item.ErrRead = Read-PendingLines -Pending $item.ErrRead -Reader $proc.StandardError -Lines $item.ErrLines -Idle $item.Idle
@@ -525,11 +559,10 @@ try {
                             # Either way the pending reads are abandoned rather than waited
                             # out, since waiting on them is the hang this exists to break.
                             if (-not $proc.HasExited) {
-                                try {
-                                    $proc.Kill()
-                                    $proc.WaitForExit()
-                                } catch {}
                                 $isTimeout = $true
+                                $item.StopAttempted = $true
+                                try { Stop-TestProcess -Item $item }
+                                catch { $cleanupError = [string]$_ }
                             }
                             $item.OutRead = $null
                             $item.ErrRead = $null
@@ -573,9 +606,13 @@ try {
                                 Duration = $duration
                                 IsTimeout = $isTimeout
                                 Timeout = $IdleTimeoutSeconds
+                                CleanupError = $cleanupError
                             }
 
                             $proc.Dispose()
+                            # The old pool array survives until the end of this tick. An
+                            # exception on a later child must not stop this disposed one.
+                            $item.Proc = $null
                         } else {
                             $stillRunning += $item
                         }
@@ -608,21 +645,23 @@ try {
                 }
             }
         }
-        finally {
-            # Clean up any remaining processes from unfinished runs
+        catch {
+            $runError = $_
+            throw
+        } finally {
+            $cleanupErrors = @()
             foreach ($item in $running) {
                 if ($null -ne $item.Proc) {
                     try {
-                        $item.Proc.Refresh()
-                        if (-not $item.Proc.HasExited) {
-                            $item.Proc.Kill()
-                            $item.Proc.WaitForExit()
-                        }
-                    } catch {}
-                    try {
-                        $item.Proc.Dispose()
-                    } catch {}
+                        if (-not $item.StopAttempted -and -not $item.Proc.HasExited) { Stop-TestProcess -Item $item }
+                    } catch { $cleanupErrors += ($item.File.Name + ': ' + [string]$_) }
+                    finally { $item.Proc.Dispose() }
                 }
+            }
+            if ($cleanupErrors.Count -gt 0) {
+                if ($null -eq $runError) { throw ($cleanupErrors -join "`n") }
+                # Report secondary cleanup errors without replacing the original error.
+                Write-Host ("Cleanup failed: " + ($cleanupErrors -join "`n")) -ForegroundColor Red
             }
         }
 
@@ -642,6 +681,10 @@ try {
                     Write-Host "Status: Failed with output failure signature (Exit Code 0) in $($item.Duration)s" -ForegroundColor Red
                 }
                 Write-Host "--------------------------------------------------" -ForegroundColor Red
+
+                if ($item.CleanupError) {
+                    Write-Host "Cleanup failed for $($item.File.Name): $($item.CleanupError)" -ForegroundColor Red
+                }
 
                 if (-not [string]::IsNullOrWhiteSpace($item.Output)) {
                     Write-Host "--- Standard Output ---" -ForegroundColor Yellow

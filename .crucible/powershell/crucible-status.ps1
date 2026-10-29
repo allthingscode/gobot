@@ -37,16 +37,16 @@ if ($Drift) {
 
     $resolvedBundleRoot = $BundleRoot
     if ([string]::IsNullOrWhiteSpace($resolvedBundleRoot)) {
-        $resolvedBundleRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+        $resolvedBundleRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")))
     } else {
-        $resolvedBundleRoot = (Resolve-Path -LiteralPath $resolvedBundleRoot).Path
+        $resolvedBundleRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $resolvedBundleRoot))
     }
 
     $frameworkRoot = $FrameworkSource
     if ([string]::IsNullOrWhiteSpace($frameworkRoot)) {
         $frameworkRoot = $resolvedBundleRoot
     } else {
-        $frameworkRoot = (Resolve-Path -LiteralPath $frameworkRoot).Path
+        $frameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $frameworkRoot))
     }
 
     $installManifest = Get-InstallManifest -FrameworkRoot $frameworkRoot
@@ -69,7 +69,7 @@ if ($Drift) {
 
         $hasCommit = $false
         try {
-            $null = git -C $frameworkRoot rev-parse --quiet --verify ($installCommit + "^{commit}") 2>$null
+            $null = git -C (Resolve-FilesystemPath -Path $frameworkRoot) rev-parse --quiet --verify ($installCommit + "^{commit}") 2>$null
             if ($LASTEXITCODE -eq 0) { $hasCommit = $true }
         } catch {}
 

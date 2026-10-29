@@ -143,7 +143,7 @@ function Write-ValidatedHandoff {
     $tempPath = $Path + ".tmp"
     try {
         $json = $Payload | ConvertTo-Json -Depth 12
-        [System.IO.File]::WriteAllText($tempPath, $json, (New-Object System.Text.UTF8Encoding $false))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $tempPath), $json, (New-Object System.Text.UTF8Encoding $false))
 
         $validatorPath = Join-Path $PSScriptRoot "validate-handoff.ps1"
         if (-not (Test-Path -LiteralPath $validatorPath)) {
@@ -208,7 +208,7 @@ if ($Rebaseline) {
         throw "No active handoff for $TaskId in $handoffDir, so there is nothing to re-baseline. A task with no handoff yet takes its base from the primary branch when its first handoff is written."
     }
 
-    $newBase = (git -C $REPO_ROOT rev-parse --verify --quiet ($BaseCommit + "^{commit}") 2>$null)
+    $newBase = (git -C (Resolve-FilesystemPath -Path $REPO_ROOT) rev-parse --verify --quiet ($BaseCommit + "^{commit}") 2>$null)
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($newBase)) {
         throw "-BaseCommit '$BaseCommit' does not name a commit in $REPO_ROOT."
     }
@@ -221,7 +221,7 @@ if ($Rebaseline) {
         }
         # Forward only. Moving the base sideways or back would also drop task commits
         # from the integrity diff, which is a different decision from accepting an update.
-        git -C $REPO_ROOT merge-base --is-ancestor $oldBase $newBase 2>$null
+        git -C (Resolve-FilesystemPath -Path $REPO_ROOT) merge-base --is-ancestor $oldBase $newBase 2>$null
         if ($LASTEXITCODE -ne 0) {
             throw "-BaseCommit $newBase does not descend from the current base_commit $oldBase in $($rebaselineFile.Name). A re-baseline moves a task forward onto a bundle update committed after its base; it does not move the base sideways or back."
         }
@@ -246,7 +246,7 @@ if ($Rebaseline) {
     $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded_by -Value (Split-Path -Leaf $rebaselinePath) -Force
     $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded_at -Value (Get-UtcTimestamp) -Force
     $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded_reason -Value "rebaseline" -Force
-    [System.IO.File]::WriteAllText($rebaselineFile.FullName, ($rebaselineObj | ConvertTo-Json -Depth 12), (New-Object System.Text.UTF8Encoding $false))
+    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $rebaselineFile.FullName), ($rebaselineObj | ConvertTo-Json -Depth 12), (New-Object System.Text.UTF8Encoding $false))
 
     [ordered]@{
         ok                       = $true
@@ -390,7 +390,7 @@ if ($isGitRepo) {
     # inherited hashes were resolved when their handoff was written. Item 170.
     foreach ($passed in @(@{ Name = "CommitHash"; Value = $CommitHash }, @{ Name = "BaseCommit"; Value = $BaseCommit })) {
         if ([string]::IsNullOrWhiteSpace($passed.Value)) { continue }
-        $fullSha = (git -C $REPO_ROOT rev-parse --verify --quiet ($passed.Value.Trim() + "^{commit}") 2>$null)
+        $fullSha = (git -C (Resolve-FilesystemPath -Path $REPO_ROOT) rev-parse --verify --quiet ($passed.Value.Trim() + "^{commit}") 2>$null)
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($fullSha)) {
             throw ("-" + $passed.Name + " [" + $passed.Value + "] does not name a commit in " + $REPO_ROOT + ". Pass the commit's SHA, for example from git rev-parse HEAD in the implementation worktree.")
         }
@@ -438,8 +438,8 @@ if ($isGitRepo) {
 $workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $REPO_ROOT
 $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
 
-$resolvedWtPath = if (Test-Path $wtPath) { (Resolve-Path $wtPath).ProviderPath } else { $wtPath }
-$resolvedRepoRoot = if (Test-Path $REPO_ROOT) { (Resolve-Path $REPO_ROOT).ProviderPath } else { $REPO_ROOT }
+$resolvedWtPath = if (Test-Path $wtPath) { (Resolve-FilesystemPath -Path (Resolve-Path $wtPath)) } else { Resolve-FilesystemPath -Path $wtPath }
+$resolvedRepoRoot = if (Test-Path $REPO_ROOT) { (Resolve-FilesystemPath -Path (Resolve-Path $REPO_ROOT)) } else { Resolve-FilesystemPath -Path $REPO_ROOT }
 $normalizedArtifacts = @(Normalize-HandoffArtifactPaths -Artifacts $resolvedArtifacts -WorktreePath $resolvedWtPath -ProjectRoot $resolvedRepoRoot)
 $resolvedArtifacts = $normalizedArtifacts
 

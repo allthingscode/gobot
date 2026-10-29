@@ -64,10 +64,7 @@ function Stage-SelectionRunner {
     New-Item -ItemType Directory -Path $testsDir, $libDir -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $REPO_ROOT 'powershell/run-all-tests.ps1') -Destination $psDir
     Copy-Item -Path (Join-Path $PSScriptRoot '_*.ps1') -Destination $testsDir
-    foreach ($lib in @('run-lock.ps1', 'normalized-hash.ps1', 'platform.ps1', 'test-selection.ps1')) {
-        $path = Join-Path $REPO_ROOT "powershell/lib/$lib"
-        if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $libDir }
-    }
+    Copy-TestRunnerLibraries -Destination $libDir
     Write-SelectionFile $root 'powershell/tests/_fixtures.ps1' 'function Get-SharedAdopterFixture { return $null }'
     Write-SelectionFile $root 'powershell/source.ps1' $sourceText
     foreach ($name in @('alpha', 'beta')) {

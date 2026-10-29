@@ -50,7 +50,7 @@ function Write-Utf8NoBomFile {
         [Parameter(Mandatory=$true)][string]$Path,
         [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Content
     )
-    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $Path), $Content, [System.Text.UTF8Encoding]::new($false))
 }
 
 function Get-CrucibleSourceStamp {
@@ -132,7 +132,7 @@ function Copy-TemplateDirectory {
         New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     }
 
-    $sourceRoot = (Resolve-Path -LiteralPath $Source).ProviderPath
+    $sourceRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $Source))
     $frameworkRoot = Resolve-FilesystemPath -Path $REPO_ROOT
     $entries = Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse
     foreach ($entry in $entries) {
@@ -195,10 +195,10 @@ if (-not $scaffoldCheck.IsAuthoritative) {
 
 $resolvedProjectRoot = $ProjectRoot
 if (Test-Path -LiteralPath $ProjectRoot) {
-    $resolvedProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $resolvedProjectRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 } else {
     New-Item -ItemType Directory -Path $ProjectRoot -Force | Out-Null
-    $resolvedProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $resolvedProjectRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 }
 
 if ([string]::IsNullOrWhiteSpace($ProjectName)) {
@@ -270,7 +270,7 @@ $config = $config -replace '(?m)^  description: .+$', ('  description: ' + (Conv
 # Crucible merges into project.default_branch and stops when it does not exist, so the
 # default is the branch the project is on, not a guess. Item 189.
 if ([string]::IsNullOrWhiteSpace($DefaultBranch)) {
-    $currentBranch = (git -C $resolvedProjectRoot symbolic-ref --short -q HEAD 2>$null)
+    $currentBranch = (git -C (Resolve-FilesystemPath -Path $resolvedProjectRoot) symbolic-ref --short -q HEAD 2>$null)
     $DefaultBranch = if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentBranch)) { ([string]$currentBranch).Trim() } else { "main" }
 }
 $config = $config -replace '(?m)^  default_branch: .+$', ('  default_branch: ' + (ConvertTo-YamlScalar -Value $DefaultBranch))
