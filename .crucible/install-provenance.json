@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "9eeebcdc51e7242da0deca80b13eacedbee31a65",
+  "source_commit": "a421fbe612d3d10acca3e94cbacb7097ff6c899c",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -375,8 +375,8 @@
       "base_hash": "f23b30e19e1b67620a15295be56f78e16acdc416ee875233c0c20517261e5e99"
     },
     "powershell/tests/_harness.ps1": {
-      "hash": "cdebf3c7e430ba910c55d7d89d019e06454ecec7225e91ff00d9348324d4201a",
-      "base_hash": "cdebf3c7e430ba910c55d7d89d019e06454ecec7225e91ff00d9348324d4201a"
+      "hash": "4dea511ffd66c51bdaad3e97da10e7d1c1caefa4305a1e3356c17595b7bc7a4b",
+      "base_hash": "4dea511ffd66c51bdaad3e97da10e7d1c1caefa4305a1e3356c17595b7bc7a4b"
     },
     "powershell/tests/_ownership.ps1": {
       "hash": "04f8e2650c41bf7f4c9ec5102c658f27dc1f047a145dc141db2cbe3c8a87e023",
@@ -423,8 +423,8 @@
       "base_hash": "7f024331c76c72a73276135cdb2bd209b21814ea1739ebf4698a7c4da3dbdd15"
     },
     "powershell/tests/check-merge-conflicts.tests.ps1": {
-      "hash": "3e5da2a51ffc1b397eb37d95c9e0c759ce4c9a739d887550a97f45e9a44ced56",
-      "base_hash": "3e5da2a51ffc1b397eb37d95c9e0c759ce4c9a739d887550a97f45e9a44ced56"
+      "hash": "baba78c6600e5e2e224431d03dcb7580560a8d7a47b233dc3e3a35e0020162a1",
+      "base_hash": "baba78c6600e5e2e224431d03dcb7580560a8d7a47b233dc3e3a35e0020162a1"
     },
     "powershell/tests/check-mojibake.tests.ps1": {
       "hash": "d37296f55dd40655c21bbcc4d07bead512e200de95b29288064b2f5f425c20b5",
@@ -699,8 +699,8 @@
       "base_hash": "dc189bfa9dba8c2ba9c8bed3cee39ba5e99371a2c7584056722df875d4716bc5"
     },
     "powershell/tests/project-native-roots.tests.ps1": {
-      "hash": "eb248c3408fa8431987908e764fbc6917efa95bf2277cd76957c988c45ad3009",
-      "base_hash": "eb248c3408fa8431987908e764fbc6917efa95bf2277cd76957c988c45ad3009"
+      "hash": "ff5928f30552151f9d89c2aad2798e195acff4ce8dc0801bd15c6142ef505810",
+      "base_hash": "ff5928f30552151f9d89c2aad2798e195acff4ce8dc0801bd15c6142ef505810"
     },
     "powershell/tests/project-root.tests.ps1": {
       "hash": "36992a5ad828ec403fcac0c1c0aa133d7cb20a7a8ddffdd208f3fc2a3140f998",

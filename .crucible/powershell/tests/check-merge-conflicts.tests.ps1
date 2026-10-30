@@ -102,6 +102,7 @@ try {
             $headBefore = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim()
             $quotedRoot = $projectRoot.Replace("'", "''")
             $quotedScript = $CHECK_SCRIPT.Replace("'", "''")
+            $quotedHarness = (Join-Path $PSScriptRoot '_harness.ps1').Replace("'", "''")
             $quotedParent = (Split-Path -Parent $projectRoot).Replace("'", "''")
             $quotedLeaf = (Split-Path -Leaf $projectRoot).Replace("'", "''")
             $rootArgument = switch ($rootMode) {
@@ -113,8 +114,11 @@ try {
             $child = @"
 `$ErrorActionPreference = 'Stop'
 New-PSDrive -Name Rev329 -PSProvider FileSystem -Root '$quotedParent' | Out-Null
-`$letter = @('D'..'Z' | Where-Object { -not (Get-PSDrive -Name `$_ -ErrorAction SilentlyContinue) })[0]
-New-PSDrive -Name `$letter -PSProvider FileSystem -Root '$quotedRoot' | Out-Null
+. '$quotedHarness'
+if ('$rootMode' -eq 'explicit one-letter') {
+    `$letter = New-TestPSDriveLetter -Root '$quotedRoot'
+    if (-not `$letter) { 'TEST-DRIVE-UNAVAILABLE'; exit 0 }
+}
 Set-Location -LiteralPath 'Rev329:\$quotedLeaf'
 & '$quotedScript' -TaskId '$taskId' $rootArgument
 exit `$LASTEXITCODE
@@ -122,6 +126,7 @@ exit `$LASTEXITCODE
             $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($child))
             $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -NonInteractive -EncodedCommand $encoded }
             $output = $res.Output -join "`n"
+            Skip-TestForPSDriveExhaustion -Output $output
             Assert-Result -Name 'actual clean simulation' -Condition ($res.ExitCode -eq 0 -and $output -match 'CLEAN MERGE SIMULATED' -and $output -notmatch 'No-Code Closure|cannot change to') -FailureMessage "expected a real merge, got exit $($res.ExitCode): $output"
             Assert-Result -Name 'head unchanged' -Condition ((Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim() -eq $headBefore) -FailureMessage 'simulation moved HEAD'
             git -C $projectRoot rev-parse -q --verify MERGE_HEAD *> $null
@@ -131,6 +136,7 @@ exit `$LASTEXITCODE
             Set-Content -LiteralPath (Join-Path $projectRoot 'app.txt') -Value 'human edit' -Encoding UTF8
             $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -NonInteractive -EncodedCommand $encoded }
             $output = $res.Output -join "`n"
+            Skip-TestForPSDriveExhaustion -Output $output
             Assert-Result -Name 'dirty refusal is exit 2' -Condition ($res.ExitCode -eq 2 -and $output -match 'uncommitted changes' -and $output -match 'app\.txt') -FailureMessage "expected refusal, got exit $($res.ExitCode): $output"
             Assert-Result -Name 'dirty edit preserved' -Condition ((Get-Content -LiteralPath (Join-Path $projectRoot 'app.txt') -Raw).Trim() -eq 'human edit') -FailureMessage 'human edit changed'
         }

@@ -135,6 +135,42 @@ function Skip-Test {
     throw ($CRUCIBLE_SKIP_SENTINEL + $Reason)
 }
 
+# Claim in the process that uses the alias. A parent's PSDrive table cannot
+# predict a child's system drives, and a separate availability check races.
+# Script scope keeps the mapping alive after this helper returns. Callers own
+# cleanup; null means exhaustion and must be reported with Skip-Test (I12).
+function New-TestPSDriveLetter {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    foreach ($candidate in 'D'..'Z') {
+        # Do not shadow a drive inherited from an outer script or global scope.
+        # New-PSDrive detects PSDrive collisions, but can alias an unmapped volume.
+        # Check the native filesystem after claiming to catch a newly arrived volume.
+        if (Get-PSDrive -Name $candidate -ErrorAction SilentlyContinue) { continue }
+        try {
+            $drive = New-PSDrive -Name $candidate -PSProvider FileSystem -Root $Root -Scope Script -ErrorAction Stop
+            if ([IO.Directory]::Exists("${candidate}:\")) {
+                Remove-PSDrive -Name $candidate -Scope Script -ErrorAction Stop
+                continue
+            }
+            return $drive.Name
+        } catch {
+            if ($_.FullyQualifiedErrorId -ne 'DriveAlreadyExists,Microsoft.PowerShell.Commands.NewPSDriveCommand') { throw }
+        }
+    }
+    return $null
+}
+
+# Children cannot throw into their parent's Run-Test. Carry exhaustion across
+# stdout, then let the parent report the named case through the normal sentinel.
+function Skip-TestForPSDriveExhaustion {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output)
+
+    if ($Output -match '(?m)^TEST-DRIVE-UNAVAILABLE\s*$') {
+        Skip-Test 'No free D..Z PowerShell drive letter is available.'
+    }
+}
+
 function Run-Test {
     param(
         [Parameter(Position=0, Mandatory=$true)][string]$Name,

@@ -28,17 +28,22 @@ try {
     $worktree = Join-Path $project '.crucible/.agent-workspaces/implementation-T-334'
     & git -C $project worktree add -b task/T-334 $worktree --quiet
     New-PSDrive -Name Item334 -PSProvider FileSystem -Root $root | Out-Null
-    $aliasDrive = @('D'..'Z' | Where-Object { -not (Get-PSDrive $_ -ErrorAction SilentlyContinue) })[0]
-    New-PSDrive -Name $aliasDrive -PSProvider FileSystem -Root $root | Out-Null
+    $aliasDrive = New-TestPSDriveLetter -Root $root
     $runner = Join-Path $root 'caller.ps1'
     Write-RootFixtureFile $runner @'
-param($Framework, $Fixture, $Spelling, $Caller, $AliasDrive)
+param($Framework, $Fixture, $Spelling, $Caller)
 $ErrorActionPreference = 'Stop'
 $global:LASTEXITCODE = 0
 $env:CRUCIBLE_DEV_ROOT = ''
 $env:CRUCIBLE_FRAMEWORK_DIR = ''
 New-PSDrive -Name Item334 -PSProvider FileSystem -Root $Fixture | Out-Null
-New-PSDrive -Name $AliasDrive -PSProvider FileSystem -Root $Fixture | Out-Null
+. (Join-Path $Framework 'powershell/tests/_harness.ps1')
+if ($Spelling -match '^[D-Z]:/project$') {
+    $AliasDrive = New-TestPSDriveLetter -Root $Fixture
+    if (-not $AliasDrive) { 'TEST-DRIVE-UNAVAILABLE'; exit 0 }
+    Write-Output ('TEST-DRIVE-CLAIMED: ' + $AliasDrive)
+    $Spelling = $AliasDrive + ':/project'
+}
 Set-Location Item334:/
 function gh {
     $global:LASTEXITCODE = 0
@@ -74,11 +79,35 @@ switch ($Caller) {
 }
 exit $LASTEXITCODE
 '@
+    $occupiedRunner = Join-Path $root 'occupied-root-caller.ps1'
+    Write-RootFixtureFile $occupiedRunner @'
+param($Framework, $Fixture, $Runner, [switch]$Exhaust)
+$ErrorActionPreference = 'Stop'
+. (Join-Path $Framework 'powershell/tests/_harness.ps1')
+$occupied = New-TestPSDriveLetter -Root $Fixture
+if (-not $occupied) { 'TEST-DRIVE-UNAVAILABLE'; exit 0 }
+if ($Exhaust) { while (New-TestPSDriveLetter -Root $Fixture) {} }
+Write-Output ('TEST-PREMAPPED: ' + $occupied)
+# The extra argument reproduces the baseline runner's parent-selected letter.
+. $Runner $Framework $Fixture ($occupied + ':/project') validate-config $occupied
+'@
+    $results += Run-Test 'Native root caller retries a pre-mapped letter' {
+        $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $occupiedRunner $frameworkRoot $root $runner }
+        Skip-TestForPSDriveExhaustion -Output $res.Output
+        $premapped = [regex]::Match($res.Output, '(?m)^TEST-PREMAPPED: ([D-Z])\s*$')
+        $claimed = [regex]::Match($res.Output, '(?m)^TEST-DRIVE-CLAIMED: ([D-Z])\s*$')
+        Assert-Result 'pre-mapped collision still validates successfully' ($res.ExitCode -eq 0 -and $res.Output -match 'CONFIG VALIDATION PASSED' -and $premapped.Success -and $claimed.Success -and $premapped.Groups[1].Value -cne $claimed.Groups[1].Value) $res.Output
+    }
+    $results += Run-Test 'Native root caller reports letter exhaustion without validation' {
+        $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $occupiedRunner $frameworkRoot $root $runner -Exhaust }
+        Assert-Result 'exhaustion is explicit and never validates' ($res.ExitCode -eq 0 -and $res.Output -match '(?m)^TEST-DRIVE-UNAVAILABLE\s*$' -and $res.Output -notmatch 'TEST-DRIVE-CLAIMED|CONFIG VALIDATION PASSED') $res.Output
+    }
     # Local config commands must be inert, regardless of the scaffold's current toolchain.
     $checkConfig = "project:`n  default_branch: main`nverification:`n  quick:`n    - name: local marker`n      command: Write-Output 'ITEM334 CHECK RAN'`n"
     [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $checkConfig, $utf8)
     foreach ($variant in @('native', 'alias', 'letter', 'relative', 'slash', 'backslash')) {
         $results += Run-Test "Project owners return native roots: $variant" {
+            if ($variant -eq 'letter' -and -not $aliasDrive) { Skip-Test 'No free D..Z PowerShell drive letter is available.' }
             if ($variant -in @('slash', 'backslash') -and -not $IsWindows) { Skip-Test 'Windows root-relative paths require a filesystem drive.' }
             Push-Location Item334:/
             try {
@@ -93,11 +122,14 @@ exit $LASTEXITCODE
         foreach ($caller in @('run-isolated-checks', 'commit-checks', 'crucible-doctor', 'crucible-health', 'validate-config', 'watch-adopter-ci')) {
             $results += Run-Test "Native caller $caller root: $variant" {
                 if ($variant -in @('slash', 'backslash') -and -not $IsWindows) { Skip-Test 'Windows root-relative paths require a filesystem drive.' }
-                $spelling = switch ($variant) { native { $project } alias { 'Item334:/project' } letter { $aliasDrive + ':/project' } relative { 'project' } slash { '/project' } backslash { '\project' } }
+                # The placeholder identifies the spelling, not a parent's claim.
+                $spelling = switch ($variant) { native { $project } alias { 'Item334:/project' } letter { 'D:/project' } relative { 'project' } slash { '/project' } backslash { '\project' } }
                 $isValidation = $caller -in @('validate-config', 'crucible-doctor')
                 [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $(if ($isValidation) { $config } else { $checkConfig }), $utf8)
-                $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root $spelling $caller $aliasDrive }
+                $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root $spelling $caller }
                 $output = $res.Output -join "`n"
+                Skip-TestForPSDriveExhaustion -Output $output
+                if ($variant -eq 'letter') { Assert-Result 'child reports a one-letter mapping' ($output -match '(?m)^TEST-DRIVE-CLAIMED: [D-Z]\s*$') $output }
                 $expected = switch ($caller) {
                     'run-isolated-checks' { 'ITEM334 CHECK RAN' }
                     'commit-checks' { 'ITEM334 CHECK RAN' }
@@ -123,7 +155,7 @@ exit $LASTEXITCODE
             Assert-Result 'missing config spelling' ((Resolve-ConfigProjectRoot 'Item334:/absent') -ceq 'Item334:/absent') 'missing spelling changed'
         } finally { Pop-Location }
         [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $checkConfig, $utf8)
-        $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root 'Item334:/project' default-checks $aliasDrive }
+        $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root 'Item334:/project' default-checks }
         Assert-Result 'default caller ran' ($res.ExitCode -eq 0 -and ($res.Output -join "`n") -match 'ITEM334 CHECK RAN') ($res.Output -join "`n")
     }
     foreach ($caller in @('run-isolated-checks', 'commit-checks')) {
@@ -131,14 +163,14 @@ exit $LASTEXITCODE
             if (-not $IsWindows) { Skip-Test 'Windows root-relative paths require a filesystem drive.' }
             $aliasConfig = $checkConfig + "paths:`n  workspaces: /project/.crucible/.agent-workspaces`n"
             [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $aliasConfig, $utf8)
-            $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root $project $caller $aliasDrive }
+            $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root $project $caller }
             Assert-Result 'configured worktree ran' ($res.ExitCode -eq 0 -and ($res.Output -join "`n") -match 'ITEM334 CHECK RAN') ($res.Output -join "`n")
             Assert-Result 'detached worktree removed' (@(Invoke-ExternalCommand -AsLines { & git -C $project worktree list --porcelain } | Where-Object { $_ -match 'checks-C-334' }).Count -eq 0) 'temporary worktree retained'
         }
     }
     foreach ($refusal in @('missing-doctor', 'missing-health', 'missing-config', 'invalid-commit')) {
         $results += Run-Test "Native root caller refuses: $refusal" {
-            $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root 'Item334:/project' $refusal $aliasDrive }
+            $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root 'Item334:/project' $refusal }
             $expectedExit = switch ($refusal) { missing-config { 2 } invalid-commit { 7 } default { 1 } }
             Assert-Result 'refusal exit' ($res.ExitCode -eq $expectedExit) ($res.Output -join "`n")
         }
