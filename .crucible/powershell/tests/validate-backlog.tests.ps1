@@ -81,6 +81,70 @@ function Invoke-Validator {
 $tempRoot = New-TestFixtureRoot -NameHint "validate-backlog-test"
 
 try {
+    $results += Run-Test -Name "Validator helper initialization performs no command discovery" -Body {
+        # Item 262: an absent helper is a function-table lookup, not a search of
+        # modules and executable PATH entries. Count the expensive operation rather
+        # than timing it: WSL's inherited Windows PATH makes misses especially slow.
+        $probe = Join-Path $tempRoot 'helper-initialization.ps1'
+        $probeScript = @'
+param([string]$LibraryPath, [string]$DependencyNames, [string]$IsolatedHelper)
+$ErrorActionPreference = 'Stop'
+$helpers = $DependencyNames -split ','
+foreach ($helper in $helpers) {
+    if (Test-Path -LiteralPath "Function:$helper") {
+        throw "fresh child unexpectedly already defines $helper"
+    }
+}
+# Sibling imports can transitively supply the missing dependency (git.ps1, for
+# example, loads config-helpers.ps1). Stub their guards to isolate each import.
+if ($IsolatedHelper) {
+    foreach ($helper in $helpers) {
+        if ($helper -ne $IsolatedHelper) {
+            Set-Item -LiteralPath "Function:$helper" -Value { }
+        }
+    }
+}
+$lookups = [Collections.Generic.List[string]]::new()
+function Get-Command {
+    [CmdletBinding()]
+    param([Parameter(Position = 0)][string]$Name)
+    $lookups.Add($Name)
+    Microsoft.PowerShell.Core\Get-Command @PSBoundParameters
+}
+. $LibraryPath
+foreach ($helper in $helpers) {
+    if (-not (Test-Path -LiteralPath "Function:$helper")) {
+        throw "guarded dependency $helper was not loaded by $LibraryPath"
+    }
+}
+if ($lookups.Count -ne 0) {
+    throw ("expected 0 dependency command-discovery calls, got " + $lookups.Count + ": " + ($lookups -join ', '))
+}
+Write-Output 'guarded dependencies loaded; zero dependency command-discovery calls'
+'@
+        [IO.File]::WriteAllText($probe, $probeScript, [Text.UTF8Encoding]::new($false))
+        $dependencies = [ordered]@{
+            'backlog-io' = @('Get-ConfiguredPath', 'Get-PwshCommand')
+            'crucible-command' = @('Get-ConfiguredCrucibleRoot')
+            'worktree' = @('Invoke-GitChecked', 'Resolve-PathFromRoot')
+            'archive-task' = @('Invoke-WithBacklogLock', 'Test-PathWithinDirectory')
+            'project-root' = @('Resolve-FilesystemPath')
+        }
+        foreach ($library in $dependencies.Keys) {
+            # One entirely cold child per library, then a fresh child per guard.
+            foreach ($isolatedHelper in (@('') + $dependencies[$library])) {
+                $libraryPath = Join-Path $REPO_ROOT "powershell/lib/$library.ps1"
+                $names = $dependencies[$library] -join ','
+                $output = @(Invoke-ExternalCommand -AsLines {
+                    & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $probe -LibraryPath $libraryPath -DependencyNames $names -IsolatedHelper $isolatedHelper 2>&1
+                })
+                $exitCode = $LASTEXITCODE
+                $mode = if ($isolatedHelper) { "isolated $isolatedHelper" } else { 'cold' }
+                Assert-Result -Name "$library ($mode) loads dependencies with zero discovery calls" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got ${exitCode}: " + ($output -join "`n"))
+            }
+        }
+    }
+
     # --- Test 1: clean tree with one valid link passes ---
     $results += Run-Test -Name "Clean tree with valid Active Items link passes" -Body {
         $root = Join-Path $tempRoot "clean"
@@ -518,6 +582,7 @@ priority: P1
 
     # --- Test 10: file_affinity path-existence check ---
     $results += Run-Test -Name "file_affinity validation: valid, wildcard, and nonexistent paths" -Body {
+        $affinityTimer = [Diagnostics.Stopwatch]::StartNew()
         $root = Join-Path $tempRoot "affinity-validation"
         New-MinimalBacklogTree -Root $root
         
@@ -635,6 +700,7 @@ priority: P1
         $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
         Assert-Result -Name "bad wildcard warning passes" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0 (warn-only), got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "bad wildcard warning message" -Condition ($r.Output.Contains("internal/doctor/*.py")) -FailureMessage ("expected warning message referencing the bad wildcard path. Output: " + $r.Output)
+        Write-Host ("Affinity validation cases completed in {0:F2}s." -f $affinityTimer.Elapsed.TotalSeconds)
     }
 
     # --- Test 11: file_affinity is ProjectRoot-aware from different CWD ---

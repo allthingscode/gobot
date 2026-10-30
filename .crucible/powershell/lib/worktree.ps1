@@ -1,10 +1,10 @@
 # Declare the moved setup's wrapper dependency without relying on sibling load order. TODO item 197.
 # Requires: Get-ConfiguredPrimaryBranch and Write-Quiet (loaded by crucible-lib.ps1).
-if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Invoke-GitChecked)) {
     . (Join-Path $PSScriptRoot "git.ps1")
 }
 
-if (-not (Get-Command Resolve-PathFromRoot -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Resolve-PathFromRoot)) {
     . (Join-Path $PSScriptRoot "config-helpers.ps1")
 }
 

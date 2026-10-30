@@ -16,7 +16,7 @@
 if (-not (Test-Path -Path variable:script:CrucibleCommandParameterCache)) {
     $script:CrucibleCommandParameterCache = @{}
 }
-if (-not (Get-Command Get-ConfiguredCrucibleRoot -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-ConfiguredCrucibleRoot)) {
     . (Join-Path $PSScriptRoot "config-helpers.ps1")
 }
 

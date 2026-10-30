@@ -112,6 +112,8 @@ function Test-FrameworkDevOnlyFile {
         # deliberately carries none of those rules, so a shipped copy would fail for the
         # adopter. The adopter-facing half of item 84 is docs/git-policy.md, not a rule.
         "powershell/tests/framework-gitignore.tests.ps1",
+        # Guards the framework's hosted CI policy; .github/ is not installed.
+        "powershell/tests/ci-docs-only.tests.ps1",
         # Asserts against the worktree registrations of the Crucible repo itself, and its shared
         # fixture registers worktrees of it. In an adopter bundle $REPO_ROOT is the bundle root,
         # whose worktree list is not the framework's; both are dead weight there.

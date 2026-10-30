@@ -4,12 +4,12 @@ $ErrorActionPreference = 'Stop'
 # Get-BacklogItemPathForTaskProjectRoot below needs Get-ConfiguredPath. crucible-lib.ps1
 # loads config-helpers.ps1 first, so this normally does nothing; it exists so a caller
 # that dot-sources this file on its own gets a working function rather than a missing one.
-if (-not (Get-Command Get-ConfiguredPath -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-ConfiguredPath)) {
     . (Join-Path $PSScriptRoot "config-helpers.ps1")
 }
 
 # TODO item 197: standalone restore callers also need the validator's shell resolver.
-if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-PwshCommand)) {
     . (Join-Path $PSScriptRoot "platform.ps1")
 }
 

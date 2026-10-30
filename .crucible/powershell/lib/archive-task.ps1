@@ -1,10 +1,10 @@
-if (-not (Get-Command "Invoke-WithBacklogLock" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Invoke-WithBacklogLock)) {
     $backlogIoPath = Join-Path $PSScriptRoot "backlog-io.ps1"
     if (Test-Path -LiteralPath $backlogIoPath) {
         . $backlogIoPath
     }
 }
-if (-not (Get-Command "Test-PathWithinDirectory" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Test-PathWithinDirectory)) {
     . (Join-Path $PSScriptRoot "config-helpers.ps1")
 }
 
