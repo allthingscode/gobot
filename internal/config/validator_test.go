@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/allthingscode/gobot/internal/testutil"
 )
 
 // helper to create a base valid config for testing.
@@ -64,14 +66,16 @@ func cleanEnv(t *testing.T) {
 		"TELEGRAM_BOT_TOKEN",
 	}
 	for _, v := range vars {
-		orig := os.Getenv(v)
-		t.Cleanup(func() { os.Setenv(v, orig) })
-		os.Unsetenv(v)
+		t.Setenv(v, "")
 	}
 }
 
+//nolint:paralleltest // supplies an existing storage fallback with t.Setenv
 func TestValidator_Validate_StorageRoot(t *testing.T) {
-	t.Parallel()
+	fallback := testutil.IsolateEnvironment(t)
+	if err := os.MkdirAll(fallback, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name        string
 		storageRoot string
@@ -82,11 +86,12 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 			name:        "valid storage root",
 			storageRoot: t.TempDir(),
 			wantError:   false,
+			errorField:  "runtime.storage_root",
 		},
 		{
-			name:        "empty storage root",
+			name:        "empty storage root uses isolated fallback",
 			storageRoot: "",
-			wantError:   true,
+			wantError:   false,
 			errorField:  "runtime.storage_root",
 		},
 		{
@@ -107,21 +112,16 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 			validator := NewValidator(cfg)
 			result := validator.Validate()
 
-			if tt.wantError && tt.storageRoot == "" && cfg.StorageRoot() != "" {
-				t.Logf("Skipping empty storage root test because fallback returned %s", cfg.StorageRoot())
-				return
-			}
 			assertFieldError(t, result, tt.errorField, tt.wantError)
 		})
 	}
 }
 
+//nolint:paralleltest // isolates provider keys with t.Setenv
 func TestValidator_Validate_APIKeys(t *testing.T) {
-	t.Parallel()
 	for _, tt := range getAPIKeyTestCases() {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			cleanEnv(t)
 
 			cfg := baseValidConfig(t)
@@ -427,33 +427,9 @@ func TestValidationError_Error(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // isolates provider keys with t.Setenv
 func TestReportValidation(t *testing.T) {
-	t.Parallel()
-	// Isolate test from environment variables that could affect validation
-	origGemini := os.Getenv("GEMINI_API_KEY")
-	origAnthropic := os.Getenv("ANTHROPIC_API_KEY")
-	origOpenAI := os.Getenv("OPENAI_API_KEY")
-	origOpenAIBaseURL := os.Getenv("OPENAI_BASE_URL")
-	origGoogleKey := os.Getenv("GOOGLE_API_KEY")
-	origGoogleCX := os.Getenv("GOOGLE_CX")
-	origTelegram := os.Getenv("TELEGRAM_BOT_TOKEN")
-	defer func() {
-		os.Setenv("GEMINI_API_KEY", origGemini)
-		os.Setenv("ANTHROPIC_API_KEY", origAnthropic)
-		os.Setenv("OPENAI_API_KEY", origOpenAI)
-		os.Setenv("OPENAI_BASE_URL", origOpenAIBaseURL)
-		os.Setenv("GOOGLE_API_KEY", origGoogleKey)
-		os.Setenv("GOOGLE_CX", origGoogleCX)
-		os.Setenv("TELEGRAM_BOT_TOKEN", origTelegram)
-	}()
-	// Unset all relevant environment variables for clean test
-	os.Unsetenv("GEMINI_API_KEY")
-	os.Unsetenv("ANTHROPIC_API_KEY")
-	os.Unsetenv("OPENAI_API_KEY")
-	os.Unsetenv("OPENAI_BASE_URL")
-	os.Unsetenv("GOOGLE_API_KEY")
-	os.Unsetenv("GOOGLE_CX")
-	os.Unsetenv("TELEGRAM_BOT_TOKEN")
+	cleanEnv(t)
 
 	// Valid config should return nil
 	validCfg := baseValidConfig(t)
@@ -464,13 +440,7 @@ func TestReportValidation(t *testing.T) {
 
 	// Invalid config with critical error should return error
 	invalidCfg := baseValidConfig(t)
-	invalidCfg.Runtime.StorageRoot = ""
-
-	// Special case for Windows fallback again
-	if invalidCfg.StorageRoot() != "" {
-		t.Log("Skipping empty storage root test in ReportValidation due to fallback")
-		return
-	}
+	invalidCfg.Runtime.StorageRoot = filepath.Join(t.TempDir(), "missing")
 
 	if err := ReportValidation(invalidCfg); err == nil {
 		t.Error("expected error for invalid config, got nil")

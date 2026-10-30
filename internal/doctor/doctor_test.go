@@ -16,6 +16,7 @@ import (
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/testutil"
 )
 
 // TestMain runs the doctor suite, then fails if any checkpoint-manager handle
@@ -24,10 +25,14 @@ import (
 // checkpoints.db pins its temp dir and fails TempDir cleanup nondeterministically;
 // this turns that latent leak into a deterministic failure on every platform.
 func TestMain(m *testing.M) {
-	code := m.Run()
+	var leaked int
+	code := testutil.RunHermeticTests(m, func() {
+		leaked = agentctx.CachedCheckpointManagerCountForTest()
+		agentctx.ResetCheckpointManagerInstancesForTest()
+	})
 	if code == 0 {
-		if n := agentctx.CachedCheckpointManagerCountForTest(); n != 0 {
-			fmt.Fprintf(os.Stderr, "doctor: %d checkpoint-manager handle(s) leaked after tests; build test cfgs via doctorTestCfg (or call registerCheckpointCleanup) so checkpoints.db is closed\n", n)
+		if leaked != 0 {
+			fmt.Fprintf(os.Stderr, "doctor: %d checkpoint-manager handle(s) leaked after tests; build test cfgs via doctorTestCfg (or call registerCheckpointCleanup) so checkpoints.db is closed\n", leaked)
 			code = 1
 		}
 	}

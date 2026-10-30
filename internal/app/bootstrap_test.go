@@ -3,24 +3,31 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/allthingscode/gobot/internal/config"
 	"github.com/allthingscode/gobot/internal/provider"
+	"github.com/allthingscode/gobot/internal/secrets"
+	"github.com/allthingscode/gobot/internal/testutil"
 )
 
+//nolint:paralleltest // isolates process environment with t.Setenv
 func TestInitProviders_OpenRouterRouting(t *testing.T) {
+	root := testutil.IsolateEnvironment(t)
 	registry := provider.NewRegistry()
-	t.Parallel()
 
 	// Register a mock openrouter provider.
-	if err := registry.Register(&MockProvider{name: "openrouter"}); err != nil {
+	mock := &MockProvider{name: "openrouter"}
+	if err := registry.Register(mock); err != nil {
 		t.Fatal(err)
 	}
 
 	ctx := context.Background()
 	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = root
 	cfg.Agents.Defaults.Provider = "gemini"
 	cfg.Agents.Defaults.Model = "openrouter/mistralai/mistral-7b-instruct"
 
@@ -29,18 +36,42 @@ func TestInitProviders_OpenRouterRouting(t *testing.T) {
 		t.Fatalf("InitProviders failed: %v", err)
 	}
 
-	if prov.Name() != "openrouter" {
-		t.Errorf("got provider %q, want %q", prov.Name(), "openrouter")
+	if prov != mock {
+		t.Errorf("got provider %v, want registered mock openrouter", prov)
 	}
 	if model != "openrouter/mistralai/mistral-7b-instruct" {
 		t.Errorf("got model %q, want %q", model, "openrouter/mistralai/mistral-7b-instruct")
 	}
 }
 
+//nolint:paralleltest // simulates host credentials before the child installs its fixture
+func TestInitProviders_IgnoresAmbientCredentials(t *testing.T) {
+	// These stand in for operator paths; the routing test must replace them.
+	ambient := t.TempDir()
+	for _, key := range []string{"HOME", "USERPROFILE", "GOBOT_HOME", "GOBOT_STORAGE"} {
+		t.Setenv(key, ambient)
+	}
+	for _, key := range []string{"GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"} {
+		t.Setenv(key, "dummy-ambient-key")
+	}
+	for _, key := range []string{"OPENAI_BASE_URL", "OPENROUTER_BASE_URL"} {
+		t.Setenv(key, "http://127.0.0.1:1")
+	}
+	t.Setenv("GOBOT_ENCRYPTION_KEY_FILE", filepath.Join(ambient, "encryption.key"))
+	// A fixture key also catches accidental use of the ambient storage root.
+	store := secrets.NewSecretsStore(ambient)
+	if err := store.Set("openrouter_api_key", "dummy-stored-key"); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("routing", TestInitProviders_OpenRouterRouting)
+}
+
+//nolint:paralleltest // isolates process environment with t.Setenv
 func TestInitProviders_ManagerModel(t *testing.T) {
-	t.Parallel()
+	root := testutil.IsolateEnvironment(t)
 	ctx := context.Background()
 	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = root
 
 	// Test that it handles missing providers gracefully
 	cfg.Agents.Defaults.Provider = "nonexistent"
@@ -50,8 +81,9 @@ func TestInitProviders_ManagerModel(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // isolates process environment with t.Setenv
 func TestInitProviders_CostRouting(t *testing.T) {
-	t.Parallel()
+	root := testutil.IsolateEnvironment(t)
 	registry := provider.NewRegistry()
 	// Register mock providers.
 	if err := registry.Register(&MockProvider{name: "gemini"}); err != nil {
@@ -63,6 +95,7 @@ func TestInitProviders_CostRouting(t *testing.T) {
 
 	ctx := context.Background()
 	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = root
 	cfg.Agents.Defaults.Provider = "gemini"
 	cfg.Runtime.Routing.Enabled = true
 	cfg.Runtime.Routing.ManagerProvider = "anthropic"
@@ -83,12 +116,18 @@ func TestInitProviders_CostRouting(t *testing.T) {
 func TestInitMemory_Failures(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{}
-	// Use a path that is unlikely to be writable or valid, but don't strictly assert nil if NewMemoryStore is too resilient.
-	cfg.Runtime.StorageRoot = ""
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocked, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Runtime.StorageRoot = filepath.Join(blocked, "storage")
 	runner := &AgentRunner{}
 
-	_, cleanup := InitMemory(cfg, runner)
+	store, cleanup := InitMemory(cfg, runner)
 	cleanup()
+	if store != nil || runner.MemStore != nil {
+		t.Fatal("expected unavailable memory store for a path beneath a regular file")
+	}
 }
 
 func TestInitMemory_Success(t *testing.T) {
