@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/allthingscode/gobot/internal/testutil"
 )
 
 // helper to create a base valid config for testing.
@@ -68,8 +70,12 @@ func cleanEnv(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // supplies an existing storage fallback with t.Setenv
 func TestValidator_Validate_StorageRoot(t *testing.T) {
-	t.Parallel()
+	fallback := testutil.IsolateEnvironment(t)
+	if err := os.MkdirAll(fallback, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name        string
 		storageRoot string
@@ -80,11 +86,12 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 			name:        "valid storage root",
 			storageRoot: t.TempDir(),
 			wantError:   false,
+			errorField:  "runtime.storage_root",
 		},
 		{
-			name:        "empty storage root",
+			name:        "empty storage root uses isolated fallback",
 			storageRoot: "",
-			wantError:   true,
+			wantError:   false,
 			errorField:  "runtime.storage_root",
 		},
 		{
@@ -105,10 +112,6 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 			validator := NewValidator(cfg)
 			result := validator.Validate()
 
-			if tt.wantError && tt.storageRoot == "" && cfg.StorageRoot() != "" {
-				t.Logf("Skipping empty storage root test because fallback returned %s", cfg.StorageRoot())
-				return
-			}
 			assertFieldError(t, result, tt.errorField, tt.wantError)
 		})
 	}
@@ -437,13 +440,7 @@ func TestReportValidation(t *testing.T) {
 
 	// Invalid config with critical error should return error
 	invalidCfg := baseValidConfig(t)
-	invalidCfg.Runtime.StorageRoot = ""
-
-	// Special case for Windows fallback again
-	if invalidCfg.StorageRoot() != "" {
-		t.Log("Skipping empty storage root test in ReportValidation due to fallback")
-		return
-	}
+	invalidCfg.Runtime.StorageRoot = filepath.Join(t.TempDir(), "missing")
 
 	if err := ReportValidation(invalidCfg); err == nil {
 		t.Error("expected error for invalid config, got nil")

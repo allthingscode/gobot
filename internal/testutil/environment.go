@@ -10,6 +10,11 @@ import (
 // RunHermeticTests isolates package-wide fallbacks before any parallel tests run.
 // Test executables exit after this returns, so no ambient values need restoring.
 func RunHermeticTests(m *testing.M) int {
+	// MCP protocol helpers inherit the parent's fixture and may call os.Exit or
+	// be killed. They must not allocate a root whose deferred cleanup cannot run.
+	if os.Getenv("GO_WANT_MCP_HELPER") == "1" {
+		return m.Run()
+	}
 	root, err := os.MkdirTemp("", "gobot-tests-*")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "create test environment:", err)
@@ -41,6 +46,9 @@ func testEnvironment(root string) map[string]string {
 		"HOME":                      root,
 		"USERPROFILE":               root,
 		"XDG_CONFIG_HOME":           filepath.Join(root, "config"),
+		"XDG_DATA_HOME":             filepath.Join(root, "data"),
+		"APPDATA":                   filepath.Join(root, "config"),
+		"LOCALAPPDATA":              filepath.Join(root, "local"),
 		"GOBOT_HOME":                root,
 		"GOBOT_STORAGE":             filepath.Join(root, "storage"),
 		"GOBOT_ENCRYPTION_KEY_FILE": filepath.Join(root, "encryption.key"),
