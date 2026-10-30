@@ -64,9 +64,7 @@ func cleanEnv(t *testing.T) {
 		"TELEGRAM_BOT_TOKEN",
 	}
 	for _, v := range vars {
-		orig := os.Getenv(v)
-		t.Cleanup(func() { os.Setenv(v, orig) })
-		os.Unsetenv(v)
+		t.Setenv(v, "")
 	}
 }
 
@@ -116,12 +114,11 @@ func TestValidator_Validate_StorageRoot(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // isolates provider keys with t.Setenv
 func TestValidator_Validate_APIKeys(t *testing.T) {
-	t.Parallel()
 	for _, tt := range getAPIKeyTestCases() {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			cleanEnv(t)
 
 			cfg := baseValidConfig(t)
@@ -427,33 +424,9 @@ func TestValidationError_Error(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // isolates provider keys with t.Setenv
 func TestReportValidation(t *testing.T) {
-	t.Parallel()
-	// Isolate test from environment variables that could affect validation
-	origGemini := os.Getenv("GEMINI_API_KEY")
-	origAnthropic := os.Getenv("ANTHROPIC_API_KEY")
-	origOpenAI := os.Getenv("OPENAI_API_KEY")
-	origOpenAIBaseURL := os.Getenv("OPENAI_BASE_URL")
-	origGoogleKey := os.Getenv("GOOGLE_API_KEY")
-	origGoogleCX := os.Getenv("GOOGLE_CX")
-	origTelegram := os.Getenv("TELEGRAM_BOT_TOKEN")
-	defer func() {
-		os.Setenv("GEMINI_API_KEY", origGemini)
-		os.Setenv("ANTHROPIC_API_KEY", origAnthropic)
-		os.Setenv("OPENAI_API_KEY", origOpenAI)
-		os.Setenv("OPENAI_BASE_URL", origOpenAIBaseURL)
-		os.Setenv("GOOGLE_API_KEY", origGoogleKey)
-		os.Setenv("GOOGLE_CX", origGoogleCX)
-		os.Setenv("TELEGRAM_BOT_TOKEN", origTelegram)
-	}()
-	// Unset all relevant environment variables for clean test
-	os.Unsetenv("GEMINI_API_KEY")
-	os.Unsetenv("ANTHROPIC_API_KEY")
-	os.Unsetenv("OPENAI_API_KEY")
-	os.Unsetenv("OPENAI_BASE_URL")
-	os.Unsetenv("GOOGLE_API_KEY")
-	os.Unsetenv("GOOGLE_CX")
-	os.Unsetenv("TELEGRAM_BOT_TOKEN")
+	cleanEnv(t)
 
 	// Valid config should return nil
 	validCfg := baseValidConfig(t)
