@@ -9,7 +9,8 @@ import (
 
 // RunHermeticTests isolates package-wide fallbacks before any parallel tests run.
 // Test executables exit after this returns, so no ambient values need restoring.
-func RunHermeticTests(m *testing.M) int {
+// Cleanup callbacks run after the tests, before removing the fixture root.
+func RunHermeticTests(m *testing.M, cleanup ...func()) (code int) {
 	// MCP protocol helpers inherit the parent's fixture and may call os.Exit or
 	// be killed. They must not allocate a root whose deferred cleanup cannot run.
 	if os.Getenv("GO_WANT_MCP_HELPER") == "1" {
@@ -20,7 +21,15 @@ func RunHermeticTests(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "create test environment:", err)
 		return 1
 	}
-	defer os.RemoveAll(root)
+	defer func() {
+		for _, closeResources := range cleanup {
+			closeResources()
+		}
+		if err := os.RemoveAll(root); err != nil {
+			fmt.Fprintln(os.Stderr, "remove test environment:", err)
+			code = 1
+		}
+	}()
 	for key, value := range testEnvironment(root) {
 		if err := os.Setenv(key, value); err != nil {
 			fmt.Fprintln(os.Stderr, "set test environment:", err)

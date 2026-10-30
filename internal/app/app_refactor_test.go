@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,13 +156,18 @@ func TestRecoverWithStack_App(t *testing.T) {
 	RecoverWithStack("test")
 }
 
+//nolint:paralleltest // RunAgent changes the global logger
 func TestRunAgent_BuildStackFail_App(t *testing.T) {
-	t.Parallel()
+	oldLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
 	cfg := &config.Config{}
 	cfg.Agents.Defaults.Provider = "invalid-provider"
 	err := RunAgent(context.Background(), cfg)
 	if err == nil {
 		t.Error("expected error from RunAgent with invalid provider")
+	}
+	if err := os.Remove(cfg.LogPath("gobot.log")); err != nil {
+		t.Fatalf("RunAgent left its log file open: %v", err)
 	}
 }
 
