@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "73969c3e9d63433b74a52b81ea2d6949feb9f52e",
+  "source_commit": "6b545e286f4614a450fac189400e7b906461e7ed",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -307,8 +307,8 @@
       "base_hash": "6d144b44af6177947cedf14ba6b87bba62303a45a231ad4e7fd35aa9ee3bc434"
     },
     "powershell/lib/repo-scan.ps1": {
-      "hash": "57acb86920046d6d29c7ed2023a211402fa50ab31d425c99a1578f998c81803f",
-      "base_hash": "57acb86920046d6d29c7ed2023a211402fa50ab31d425c99a1578f998c81803f"
+      "hash": "378b83e3d67c9cba7bbd3217e713406d0cad72268f85518b2e364b60648870d8",
+      "base_hash": "378b83e3d67c9cba7bbd3217e713406d0cad72268f85518b2e364b60648870d8"
     },
     "powershell/lib/run-lock.ps1": {
       "hash": "6053b4ce35e30f0f65c91731fe996b33763c843378e1511738c749e62372d278",
@@ -371,8 +371,8 @@
       "base_hash": "23b2f7c76ed66c8c259cdf7796bcc22239259f853a9cb3dcef3170ce1b25c3f8"
     },
     "powershell/tests/_fixtures.ps1": {
-      "hash": "f23b30e19e1b67620a15295be56f78e16acdc416ee875233c0c20517261e5e99",
-      "base_hash": "f23b30e19e1b67620a15295be56f78e16acdc416ee875233c0c20517261e5e99"
+      "hash": "15593980a033c0ea160fdfed0204724eeb17b4416824d3d269f7cd097159c624",
+      "base_hash": "15593980a033c0ea160fdfed0204724eeb17b4416824d3d269f7cd097159c624"
     },
     "powershell/tests/_harness.ps1": {
       "hash": "4dea511ffd66c51bdaad3e97da10e7d1c1caefa4305a1e3356c17595b7bc7a4b",
@@ -391,8 +391,8 @@
       "base_hash": "b5a813e9971f40e05bf608be1a23063fb29e6e311bd7ae48f8bcc347b9229c46"
     },
     "powershell/tests/adopter-smoke.tests.ps1": {
-      "hash": "16e69d7350cdfdbeb15b7db2481d4795bd99df47649413f604c52f8756c2beda",
-      "base_hash": "16e69d7350cdfdbeb15b7db2481d4795bd99df47649413f604c52f8756c2beda"
+      "hash": "675f136fd4ee78731d7656fdfbdad0e22ea053641599a03f5edd802c576c9dd2",
+      "base_hash": "675f136fd4ee78731d7656fdfbdad0e22ea053641599a03f5edd802c576c9dd2"
     },
     "powershell/tests/analyze-evals.tests.ps1": {
       "hash": "fdbec4e71195489159e5015db001a832f80e457a2d25a5468d8f2aa06af1f16f",
@@ -627,8 +627,8 @@
       "base_hash": "997249444a9926230a59ecd2a84281110da226b67018b76de3ae7260a9909cc0"
     },
     "powershell/tests/install-manifest.tests.ps1": {
-      "hash": "7204b44515f0b8d2aac00e8baba3c100fdad9537497efb5c0a6e181dbd8e0022",
-      "base_hash": "7204b44515f0b8d2aac00e8baba3c100fdad9537497efb5c0a6e181dbd8e0022"
+      "hash": "9e2e7bcbafae282c1ef8b474972c1bc509d02c02ecad3e5c5159fa2d1582910f",
+      "base_hash": "9e2e7bcbafae282c1ef8b474972c1bc509d02c02ecad3e5c5159fa2d1582910f"
     },
     "powershell/tests/item284-review.tests.ps1": {
       "hash": "c4f92b1965607aa4b4a1e3cd62a0e18fb0c2574f8bda664a68b230821a316e10",
@@ -727,8 +727,8 @@
       "base_hash": "0b11062173183442fd09935540b8211bd84235fd81d2085b31fe88791473163d"
     },
     "powershell/tests/repo-scan.tests.ps1": {
-      "hash": "6bf5f1505dc748b33d5411df036ecfda0da1f358c58b59d3691086371f20cd1a",
-      "base_hash": "6bf5f1505dc748b33d5411df036ecfda0da1f358c58b59d3691086371f20cd1a"
+      "hash": "1a36c83c23a4652ec4db136d26b9d16186dd54ce4cc085eaab5efaca499b0df9",
+      "base_hash": "1a36c83c23a4652ec4db136d26b9d16186dd54ce4cc085eaab5efaca499b0df9"
     },
     "powershell/tests/research-findings.tests.ps1": {
       "hash": "36dc51ea368a23a48fd5a3a58a42c42d64f3545e7e297eb9c9b049e7f100a0db",

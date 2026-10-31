@@ -3,6 +3,7 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
+. (Join-Path $PSScriptRoot '_fixtures.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $HELPER = Join-Path $REPO_ROOT "powershell/lib/install-manifest.ps1"
 . $HELPER
@@ -66,24 +67,25 @@ try {
     }
 
     $results += Run-Test -Name "Nested .crucible runtime directories remain excluded from shipping" -Body {
-        $junkDir = Join-Path $REPO_ROOT "powershell\.crucible"
+        # Seeded in a copy: the real powershell/.crucible/ is not ignored, so junk there
+        # is listed by parallel repository scans and can vanish before they read it.
+        $framework = New-InstallSourceCopy -Destination (Join-Path $tempRoot "junk-framework")
+        $junkDir = Join-Path $framework "powershell\.crucible"
         $junkFile = Join-Path $junkDir "junk.txt"
         New-Item -ItemType Directory -Path $junkDir -Force | Out-Null
         Set-Content -LiteralPath $junkFile -Value "runtime junk" -Encoding UTF8
-        try {
-            $ownedFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $REPO_ROOT)
-            Assert-Result -Name "junk excluded from Get-FrameworkOwnedFiles" -Condition ($ownedFiles -notcontains "powershell/.crucible/junk.txt") -FailureMessage "expected powershell/.crucible/junk.txt to be excluded from framework-owned files"
 
-            $guardInstallRoot = Join-Path $tempRoot "guard-install-check"
-            $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-            $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $guardInstallRoot -ProjectName "Guard Check" -Quiet 2>&1 })
-            Assert-Result -Name "guard install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("guard check install failed: " + ($output -join "`n"))
+        $ownedFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $framework)
+        Assert-Result -Name "copy enumerates framework files" -Condition ($ownedFiles -contains "powershell/init-project.ps1") -FailureMessage "the copied framework enumerated no installer, so the exclusion below proves nothing"
+        Assert-Result -Name "junk excluded from Get-FrameworkOwnedFiles" -Condition ($ownedFiles -notcontains "powershell/.crucible/junk.txt") -FailureMessage "expected powershell/.crucible/junk.txt to be excluded from framework-owned files"
 
-            $installedJunkPath = Join-Path $guardInstallRoot ".crucible/powershell/.crucible/junk.txt"
-            Assert-Result -Name "junk excluded from fresh install" -Condition (-not (Test-Path -LiteralPath $installedJunkPath)) -FailureMessage "expected powershell/.crucible/junk.txt to not be copied during initialization"
-        } finally {
-            Remove-Item -LiteralPath $junkFile -Force -ErrorAction SilentlyContinue
-        }
+        $guardInstallRoot = Join-Path $tempRoot "guard-install-check"
+        $script = Join-Path $framework "powershell/init-project.ps1"
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $guardInstallRoot -ProjectName "Guard Check" -Quiet 2>&1 })
+        Assert-Result -Name "guard install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("guard check install failed: " + ($output -join "`n"))
+
+        $installedJunkPath = Join-Path $guardInstallRoot ".crucible/powershell/.crucible/junk.txt"
+        Assert-Result -Name "junk excluded from fresh install" -Condition (-not (Test-Path -LiteralPath $installedJunkPath)) -FailureMessage "expected powershell/.crucible/junk.txt to not be copied during initialization"
     }
 
     $results += Run-Test -Name "Framework-owned files map to files produced by a fresh install" -Body {

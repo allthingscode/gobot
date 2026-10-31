@@ -95,6 +95,22 @@ function Get-RepoScannableFile {
     })
 }
 
+# Enumeration and reading are separate moments. A file removed between them is in the state
+# the Test-Path filter above already drops, so it reads as $null and the caller skips it. Only
+# not-found with the path confirmed gone qualifies; any other read failure still throws, so
+# an unreadable source cannot pass a check unread. Item 358.
+function Read-RepoScannableFileText {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$File)
+
+    try {
+        return [System.IO.File]::ReadAllText($File.FullName)
+    } catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] {
+        if (Test-Path -LiteralPath $File.FullName) { throw }
+        return $null
+    }
+}
+
 function Get-NormalizedScanPrefix {
     param([Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Prefix)
     return @($Prefix |

@@ -5,6 +5,7 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
+. (Join-Path $PSScriptRoot '_fixtures.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1")
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $INIT_SCRIPT = Join-Path $REPO_ROOT "powershell/init-project.ps1"
@@ -165,29 +166,25 @@ try {
     }
 
     $results += Run-Test -Name "Install does not copy a framework dir's nested .crucible runtime leak" -Body {
-        # Seed a gitignored runtime leak under a framework source dir (as happens
-        # when the framework is exercised in place), then assert the installer
-        # does not drag it into the adopter bundle. The seed path is gitignored,
-        # so this does not dirty the source tree.
-        $seedDir = Join-Path $REPO_ROOT "powershell/.crucible/session/global"
+        # Seed a runtime leak under a framework source dir (as happens when the
+        # framework is exercised in place), then assert the installer does not drag
+        # it into the adopter bundle. The seed goes into a copy: the real
+        # powershell/.crucible/ is not ignored, so seeding it races other scans.
+        $framework = New-InstallSourceCopy -Destination (Join-Path $tempRoot "leak-framework")
+        $seedDir = Join-Path $framework "powershell/.crucible/session/global"
         $seedFile = Join-Path $seedDir "session_state.json"
         $leakApp = Join-Path $tempRoot "leak-guard-app"
-        try {
-            New-Item -ItemType Directory -Path $seedDir -Force | Out-Null
-            Set-Content -LiteralPath $seedFile -Value '{"seeded":"leak"}' -Encoding UTF8
+        New-Item -ItemType Directory -Path $seedDir -Force | Out-Null
+        Set-Content -LiteralPath $seedFile -Value '{"seeded":"leak"}' -Encoding UTF8
 
-            New-Item -ItemType Directory -Path $leakApp -Force | Out-Null
-            $out = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT -ProjectRoot $leakApp -ProjectName "Leak Guard" -Quiet 2>&1 })
-            Assert-Result -Name "init exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("init failed: " + ($out -join "`n"))
+        New-Item -ItemType Directory -Path $leakApp -Force | Out-Null
+        $copiedInit = Join-Path $framework "powershell/init-project.ps1"
+        $out = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $copiedInit -ProjectRoot $leakApp -ProjectName "Leak Guard" -Quiet 2>&1 })
+        Assert-Result -Name "init exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("init failed: " + ($out -join "`n"))
 
-            $nested = Join-Path $leakApp ".crucible/powershell/.crucible"
-            Assert-Result -Name "no nested .crucible copied" -Condition (-not (Test-Path -LiteralPath $nested)) -FailureMessage ("installer copied a nested .crucible leak into the bundle: " + $nested)
-        } finally {
-            $srcLeak = Join-Path $REPO_ROOT "powershell/.crucible"
-            if (Test-Path -LiteralPath $srcLeak) {
-                Remove-Item -LiteralPath $srcLeak -Recurse -Force -ErrorAction SilentlyContinue
-            }
-        }
+        Assert-Result -Name "bundle installed from the copy" -Condition (Test-Path -LiteralPath (Join-Path $leakApp ".crucible/powershell/init-project.ps1")) -FailureMessage "the copied framework did not install a bundle, so the leak assertion below proves nothing"
+        $nested = Join-Path $leakApp ".crucible/powershell/.crucible"
+        Assert-Result -Name "no nested .crucible copied" -Condition (-not (Test-Path -LiteralPath $nested)) -FailureMessage ("installer copied a nested .crucible leak into the bundle: " + $nested)
     }
 }
 finally {

@@ -78,6 +78,26 @@ function Get-SharedAdopterFixture {
     return $tempPath
 }
 
+# A writable copy of what an install reads, for tests that seed runtime residue under a
+# framework source directory. Seeding the real checkout left untracked files that parallel
+# scans listed and then lost before reading them. Item 358.
+function New-InstallSourceCopy {
+    param([Parameter(Mandatory=$true)][string]$Destination)
+    . (Join-Path $REPO_ROOT "powershell/lib/install-manifest.ps1")
+    . (Join-Path $REPO_ROOT "powershell/lib/repo-scan.ps1")
+    $roots = @(Get-InstallSourceRoot -Manifest (Get-InstallManifest -FrameworkRoot $REPO_ROOT))
+    $files = @(Get-RepoScannableFile -RepoRoot $REPO_ROOT -IncludePrefix $roots)
+    if ($files.Count -eq 0) {
+        throw "New-InstallSourceCopy: no install source files were found under $REPO_ROOT"
+    }
+    foreach ($file in $files) {
+        $target = Join-Path $Destination $file.RelativePath
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        [System.IO.File]::Copy($file.FullName, $target)
+    }
+    return $Destination
+}
+
 function Invoke-GitCommit {
     param(
         [Parameter(Mandatory=$true)][string]$Repo,
