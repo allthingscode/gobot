@@ -142,7 +142,9 @@ function Skip-Test {
 function New-TestPSDriveLetter {
     param([Parameter(Mandatory = $true)][string]$Root)
 
-    foreach ($candidate in 'D'..'Z') {
+    $pin = Get-Variable -Name TestPSDriveLetterPin -Scope Script -ErrorAction Ignore
+    $candidates = if ($null -ne $pin) { @($pin.Value) } else { 'D'..'Z' }
+    foreach ($candidate in $candidates) {
         # Do not shadow a drive inherited from an outer script or global scope.
         # New-PSDrive detects PSDrive collisions, but can alias an unmapped volume.
         # Check the native filesystem after claiming to catch a newly arrived volume.
@@ -159,6 +161,71 @@ function New-TestPSDriveLetter {
         }
     }
     return $null
+}
+
+# An exhaustion fixture asserts that a later claim finds no letter. A letter
+# skipped here belongs to a volume or mapping that another process can release
+# at any moment (item 359), so later claims in this process try only the letters
+# held here. The pin survives re-dot-sourcing because nothing above sets it.
+function Lock-TestPSDriveExhaustion {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $held = [Collections.Generic.List[string]]::new()
+    while ($letter = New-TestPSDriveLetter -Root $Root) { $held.Add($letter) }
+    $script:TestPSDriveLetterPin = $held.ToArray()
+}
+
+# A subst mapping is visible to the whole logon session, so a letter can be
+# taken between any availability check and the claim (item 353). Claim first,
+# then classify a failure: a letter that is now defined is a collision and the
+# next letter is tried; any other failure propagates. Null means exhaustion.
+function New-TestSubstDrive {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string[]]$Candidate = @('D'..'Z')
+    )
+
+    foreach ($letter in $Candidate) {
+        if (Test-TestDriveLetterDefined -Letter $letter) { continue }
+        $drive = $letter + ':'
+        $res = Invoke-ExternalCommand { & subst $drive $Path }
+        if ($res.ExitCode -eq 0) { return $drive }
+        if (-not (Test-TestDriveLetterDefined -Letter $letter)) {
+            throw ("subst $drive failed (exit $($res.ExitCode)): " + $res.Output.Trim())
+        }
+    }
+    return $null
+}
+
+function Test-TestDriveLetterDefined {
+    param([Parameter(Mandatory = $true)][string]$Letter)
+
+    return [Environment]::GetLogicalDrives() -contains ($Letter + ':\')
+}
+
+function Remove-TestSubstDrive {
+    param([Parameter(Mandatory = $true)][string]$Drive)
+
+    $res = Invoke-ExternalCommand { & subst $Drive /D }
+    if ($res.ExitCode -ne 0) { throw ("subst $Drive /D failed (exit $($res.ExitCode)): " + $res.Output.Trim()) }
+}
+
+# Runs Body with the mapped drive root and always removes the mapping. A failed
+# removal is reported because a leaked mapping outlives this process.
+function Use-TestSubstDrive {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][scriptblock]$Body
+    )
+
+    $drive = $null
+    try {
+        $drive = New-TestSubstDrive -Path $Path
+        if (-not $drive) { Skip-Test 'No free D..Z drive letter is available for subst.' }
+        & $Body ($drive + '\')
+    } finally {
+        if ($drive) { Remove-TestSubstDrive -Drive $drive }
+    }
 }
 
 # Children cannot throw into their parent's Run-Test. Carry exhaustion across

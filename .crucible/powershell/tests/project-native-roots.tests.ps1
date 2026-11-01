@@ -86,7 +86,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $Framework 'powershell/tests/_harness.ps1')
 $occupied = New-TestPSDriveLetter -Root $Fixture
 if (-not $occupied) { 'TEST-DRIVE-UNAVAILABLE'; exit 0 }
-if ($Exhaust) { while (New-TestPSDriveLetter -Root $Fixture) {} }
+if ($Exhaust) { Lock-TestPSDriveExhaustion -Root $Fixture }
 Write-Output ('TEST-PREMAPPED: ' + $occupied)
 # The extra argument reproduces the baseline runner's parent-selected letter.
 . $Runner $Framework $Fixture ($occupied + ':/project') validate-config $occupied
@@ -101,6 +101,40 @@ Write-Output ('TEST-PREMAPPED: ' + $occupied)
     $results += Run-Test 'Native root caller reports letter exhaustion without validation' {
         $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $occupiedRunner $frameworkRoot $root $runner -Exhaust }
         Assert-Result 'exhaustion is explicit and never validates' ($res.ExitCode -eq 0 -and $res.Output -match '(?m)^TEST-DRIVE-UNAVAILABLE\s*$' -and $res.Output -notmatch 'TEST-DRIVE-CLAIMED|CONFIG VALIDATION PASSED') $res.Output
+    }
+    $releaseRunner = Join-Path $root 'release-root-caller.ps1'
+    Write-RootFixtureFile $releaseRunner @'
+$script:busyLetter = ''
+Write-Output ('TEST-DRIVE-RELEASED: ' + $script:releasedLetter)
+. $script:churnTarget @args
+'@
+    $churnRunner = Join-Path $root 'churn-root-caller.ps1'
+    Write-RootFixtureFile $churnRunner @'
+param($Framework, $Fixture, $Exhauster, $Target, $Release)
+$ErrorActionPreference = 'Stop'
+# Item 359: another holder keeps one letter through exhaustion and releases it
+# before the asserted claim, as a parallel test's subst volume can.
+$script:churnTarget = $Target
+$script:busyLetter = @('D'..'Z' | Where-Object { -not (Get-PSDrive -Name $_ -ErrorAction SilentlyContinue) -and -not [IO.Directory]::Exists($_ + ':\') })[0]
+if (-not $script:busyLetter) { 'TEST-DRIVE-UNAVAILABLE'; exit 0 }
+$script:releasedLetter = $script:busyLetter
+function New-PSDrive {
+    [CmdletBinding()]
+    param($Name, $PSProvider, $Root, $Scope)
+    if (-not $PSBoundParameters.ContainsKey('Scope')) { $PSBoundParameters['Scope'] = '1' }
+    if ($Name -eq $script:busyLetter) {
+        Microsoft.PowerShell.Management\New-PSDrive @PSBoundParameters | Out-Null
+        try { Microsoft.PowerShell.Management\New-PSDrive @PSBoundParameters }
+        finally { Microsoft.PowerShell.Management\Remove-PSDrive -Name $Name -Scope $PSBoundParameters['Scope'] }
+    }
+    Microsoft.PowerShell.Management\New-PSDrive @PSBoundParameters
+}
+. $Exhauster $Framework $Fixture $Release -Exhaust
+'@
+    $results += Run-Test 'Native root caller exhaustion survives a letter released after exhaustion' {
+        $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $churnRunner $frameworkRoot $root $occupiedRunner $runner $releaseRunner }
+        if ($res.Output -notmatch 'TEST-DRIVE-RELEASED') { Skip-TestForPSDriveExhaustion -Output $res.Output }
+        Assert-Result 'released letter is not claimed' ($res.ExitCode -eq 0 -and $res.Output -match '(?m)^TEST-DRIVE-RELEASED: [D-Z]\s*$' -and $res.Output -match '(?m)^TEST-DRIVE-UNAVAILABLE\s*$' -and $res.Output -notmatch 'TEST-DRIVE-CLAIMED|CONFIG VALIDATION PASSED') $res.Output
     }
     # Local config commands must be inert, regardless of the scaffold's current toolchain.
     $checkConfig = "project:`n  default_branch: main`nverification:`n  quick:`n    - name: local marker`n      command: Write-Output 'ITEM334 CHECK RAN'`n"
