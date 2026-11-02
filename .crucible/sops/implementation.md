@@ -1,4 +1,4 @@
-<!-- prompt_version: architect-sop-v7 -->
+<!-- prompt_version: architect-sop-v8 -->
 # SOP: Implementation
 
 Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
@@ -49,13 +49,20 @@ When the prompt identifies a No-Code Review-Fix, the task has no task branch or 
 
 ## Rebase Workflow
 
-When the prompt identifies a rebase, use its Primary branch task fact as `{primary_branch}` in these commands:
+When the prompt identifies a rebase, stay in the assigned task worktree. Use its Primary branch task fact as `{primary_branch}`. Rebase onto that local branch, the same tip used by merge simulation; if it needs updating, have the orchestrator update it in the main checkout first.
 
-1. Check out the primary branch: `git checkout {primary_branch}`.
-2. Update it: `git pull origin {primary_branch}`.
-3. Rebase the task branch: `git rebase {primary_branch} task/{task_id}`.
-4. Resolve the files in conflict_report.json, mark resolutions with `git add`, then `git rebase --continue`.
-5. Run the full test suite, set the task status to Ready for Review, and hand off to verification with the rebase result in the reason. The tool carries `rebase_count` forward; do not edit handoff JSON.
+Run this recipe from the task worktree. It refuses staged, unstaged, or untracked work; commit the intended task changes or preserve them separately before retrying. Do not automatically stash or discard them.
+
+```powershell
+$branch = git branch --show-current
+if ($LASTEXITCODE -ne 0 -or $branch -ne 'task/{task_id}') { throw 'Run from the assigned task worktree.' }
+$pending = git status --porcelain
+if ($LASTEXITCODE -ne 0 -or $pending) { throw 'Preserve uncommitted work before rebasing.' }
+git rebase {primary_branch}
+if ($LASTEXITCODE -ne 0) { throw 'Rebase stopped; inspect conflicts before continuing.' }
+```
+
+Resolve the files in conflict_report.json, mark resolutions with `git add`, then `git rebase --continue`. Run the full test suite, set the task status to Ready for Review, and hand off to verification with the rebase result in the reason. The tool carries `rebase_count` forward; do not edit handoff JSON.
 
 ## Decision Tree (For New Features/Bugs - Not Review Fixes)
 

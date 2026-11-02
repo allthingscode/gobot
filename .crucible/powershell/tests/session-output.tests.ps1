@@ -287,26 +287,117 @@ Ceiling {budget_ceiling}
         Assert-Result -Name "handoff file absolute" -Condition ($handoffLine -eq ("Handoff " + $ctx.LatestHandoff.FullName)) -FailureMessage ("got: " + $handoffLine)
     }
 
-    $results += Run-Test -Name "A rebase prompt on a main-only repository names main, not master" -Body {
-        # Item 189.
-        $caseRoot = Join-Path $tempRoot "rebase-main"
-        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-916" -TargetPhase "implementation"
-        $ctx.RepoRoot = $caseRoot
-        $ctx.Handoff | Add-Member -NotePropertyName rebase_count -NotePropertyValue 1 -Force
-        & git -C $caseRoot init --quiet -b main
-        & git -C $caseRoot -c user.name=T -c user.email=t@example.com commit --allow-empty -m init --quiet
-        "<!-- prompt_version: 1 -->`n{rebase_section}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
+    foreach ($scenario in @('untracked-only', 'autostash-dirty', 'wrong-branch', 'mixed-dirty', 'clean')) {
+        $results += Run-Test -Name "The rendered rebase recipe handles $scenario work in its assigned checkout" -Body {
+            # Items 189 and 273. Each refusal must depend on its owning SOP guard.
+            $caseRoot = Join-Path $tempRoot "rebase-main-$scenario"
+            $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-916" -TargetPhase "implementation"
+            $ctx.RepoRoot = $caseRoot
+            $ctx.Handoff | Add-Member -NotePropertyName rebase_count -NotePropertyValue 1 -Force
+            & git -C $caseRoot init --quiet -b main
+            & git -C $caseRoot -c user.name=T -c user.email=t@example.com commit --allow-empty -m init --quiet
+            "<!-- prompt_version: 1 -->`n{rebase_section}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
 
-        $text = New-CruciblePromptText -Context $ctx
+            $text = New-CruciblePromptText -Context $ctx
 
-        Assert-Result -Name "rebase prompt names configured branch fact and SOP" -Condition ($text -match 'Primary branch: main' -and $text.Contains('/sops/implementation.md#rebase-workflow')) -FailureMessage $text
-        $sop = Get-Content (Join-Path $REPO_ROOT 'sops/implementation.md') -Raw -Encoding UTF8
-        # Render the owning recipe through the same fact substitution path.
-        $section = [regex]::Match($sop, '(?s)## Rebase Workflow.*?(?=## Decision Tree)').Value
-        [IO.File]::WriteAllText((Join-Path $ctx.PromptLib 'implementation_prompt.md'), $section)
-        $text += New-CruciblePromptText -Context $ctx
-        Assert-Result -Name "rebases onto main" -Condition ($text -match 'git rebase main task/F-916' -and $text -match 'git pull origin main') -FailureMessage ("prompt: " + $text)
-        Assert-Result -Name "no master" -Condition (-not ($text -match 'master')) -FailureMessage ("prompt still names master: " + $text)
+            Assert-Result -Name "rebase prompt names configured branch fact and SOP" -Condition ($text -match 'Primary branch: main' -and $text.Contains('/sops/implementation.md#rebase-workflow')) -FailureMessage $text
+            $sop = Get-Content (Join-Path $REPO_ROOT 'sops/implementation.md') -Raw -Encoding UTF8
+            $section = [regex]::Match($sop, '(?s)## Rebase Workflow.*?(?=## Decision Tree)').Value
+            [IO.File]::WriteAllText((Join-Path $ctx.PromptLib 'implementation_prompt.md'), $section)
+            $recipe = New-CruciblePromptText -Context $ctx
+            $fence = [regex]::Match($recipe, '(?s)```powershell\r?\n(.*?)```')
+            Assert-Result 'rebase recipe has a PowerShell fence' $fence.Success $recipe
+            $body = $fence.Groups[1].Value
+            Assert-Result 'rebase recipe is executable' (-not [string]::IsNullOrWhiteSpace($body)) $recipe
+            $scriptPath = Join-Path $caseRoot 'recipe.ps1'
+            [IO.File]::WriteAllText($scriptPath, $body)
+            $wt = Join-Path $caseRoot 'assigned'
+            foreach ($args in @(
+                @('config', 'user.name', 'Rebase Test'),
+                @('config', 'user.email', 'rebase@example.com'),
+                @('config', 'commit.gpgSign', 'false'),
+                @('worktree', 'add', '--quiet', '-b', 'task/F-916', $wt)
+            )) {
+                $r = Invoke-Git -Directory $caseRoot -GitArgs $args
+                Assert-Result 'rebase fixture setup succeeds' ($r.ExitCode -eq 0) $r.Raw
+            }
+            [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "task work`n")
+            $r = Invoke-Git -Directory $wt -GitArgs @('add', 'task.txt')
+            $r = Invoke-Git -Directory $wt -GitArgs @('commit', '--quiet', '-m', 'task work')
+            Assert-Result 'task commit exists' ($r.ExitCode -eq 0) $r.Raw
+            $taskTip = (Invoke-Git -Directory $wt -GitArgs @('rev-parse', 'HEAD')).Raw.Trim()
+            [IO.File]::WriteAllText((Join-Path $caseRoot 'primary.txt'), "primary work`n")
+            $r = Invoke-Git -Directory $caseRoot -GitArgs @('add', 'primary.txt')
+            $r = Invoke-Git -Directory $caseRoot -GitArgs @('commit', '--quiet', '-m', 'advance main')
+            Assert-Result 'primary advanced independently' ($r.ExitCode -eq 0) $r.Raw
+            $primaryTip = (Invoke-Git -Directory $caseRoot -GitArgs @('rev-parse', 'HEAD')).Raw.Trim()
+            if ($scenario -eq 'untracked-only') {
+                [IO.File]::WriteAllText((Join-Path $wt 'untracked.txt'), "untracked work`n")
+            } elseif ($scenario -eq 'autostash-dirty') {
+                $r = Invoke-Git -Directory $wt -GitArgs @('config', 'rebase.autoStash', 'true')
+                Assert-Result 'autostash configured' ($r.ExitCode -eq 0) $r.Raw
+                [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "dirty work`n")
+            } elseif ($scenario -eq 'wrong-branch') {
+                $r = Invoke-Git -Directory $wt -GitArgs @('checkout', '--quiet', '-b', 'other-task')
+                Assert-Result 'wrong branch fixture ready' ($r.ExitCode -eq 0) $r.Raw
+            } elseif ($scenario -eq 'mixed-dirty') {
+                [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "staged work`n")
+                $r = Invoke-Git -Directory $wt -GitArgs @('add', 'task.txt')
+                Assert-Result 'dirty index fixture ready' ($r.ExitCode -eq 0) $r.Raw
+                [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "unstaged work`n")
+                [IO.File]::WriteAllText((Join-Path $wt 'untracked.txt'), "untracked work`n")
+            }
+            if ($scenario -in @('untracked-only', 'autostash-dirty')) {
+                # Prove Git alone accepts these inputs, so refusal depends on the SOP guard.
+                $plain = Invoke-Git -Directory $wt -GitArgs @('rebase', 'main')
+                Assert-Result "$scenario plain rebase succeeds" ($plain.ExitCode -eq 0) $plain.Raw
+                $r = Invoke-Git -Directory $wt -GitArgs @('reset', '--hard', $taskTip)
+                Assert-Result 'plain rebase probe reset' ($r.ExitCode -eq 0) $r.Raw
+                if ($scenario -eq 'autostash-dirty') {
+                    [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "dirty work`n")
+                }
+            }
+            $before = (Invoke-Git -Directory $wt -GitArgs @('diff', 'HEAD')).Raw
+            $indexBefore = (Invoke-Git -Directory $wt -GitArgs @('diff', '--cached')).Raw
+            $statusBefore = (Invoke-Git -Directory $wt -GitArgs @('status', '--porcelain')).Raw
+            $stashBefore = (Invoke-Git -Directory $wt -GitArgs @('stash', 'list')).Raw
+            if ($scenario -ne 'clean') {
+                Push-Location $wt
+                try { $dirty = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $scriptPath } }
+                finally { Pop-Location }
+                $refusal = if ($scenario -eq 'wrong-branch') { 'Run from the assigned task worktree.' } else { 'Preserve uncommitted work before rebasing.' }
+                Assert-Result "$scenario guard refuses to proceed" ($dirty.ExitCode -ne 0 -and ($dirty.Output -join "`n").Contains($refusal)) ($dirty.Output -join "`n")
+                Assert-Result 'dirty worktree and index preserved' (
+                    (Invoke-Git -Directory $wt -GitArgs @('diff', 'HEAD')).Raw -ceq $before -and
+                    (Invoke-Git -Directory $wt -GitArgs @('diff', '--cached')).Raw -ceq $indexBefore -and
+                    (Invoke-Git -Directory $wt -GitArgs @('status', '--porcelain')).Raw -ceq $statusBefore -and
+                    (Invoke-Git -Directory $wt -GitArgs @('stash', 'list')).Raw -ceq $stashBefore -and
+                    (Invoke-Git -Directory $wt -GitArgs @('rev-parse', 'HEAD')).Raw.Trim() -ceq $taskTip
+                ) 'recipe changed pending work or HEAD'
+                if ($scenario -in @('untracked-only', 'mixed-dirty')) {
+                    Assert-Result 'untracked bytes preserved' ([IO.File]::ReadAllText((Join-Path $wt 'untracked.txt')) -ceq "untracked work`n") 'untracked file changed'
+                    Remove-Item -LiteralPath (Join-Path $wt 'untracked.txt')
+                }
+                $r = Invoke-Git -Directory $wt -GitArgs @('restore', '--staged', '--worktree', 'task.txt')
+                if ($scenario -eq 'wrong-branch') {
+                    Assert-Result 'wrong branch stays selected' ((Invoke-Git -Directory $wt -GitArgs @('branch', '--show-current')).Raw.Trim() -ceq 'other-task') 'recipe switched branches'
+                    $r = Invoke-Git -Directory $wt -GitArgs @('checkout', '--quiet', 'task/F-916')
+                    Assert-Result 'assigned branch restored' ($r.ExitCode -eq 0) $r.Raw
+                }
+            }
+            Push-Location $wt
+            try { $clean = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $scriptPath } }
+            finally { Pop-Location }
+            Assert-Result 'rebase recipe succeeds in assigned worktree' ($clean.ExitCode -eq 0) ($clean.Output -join "`n")
+            $ancestry = Invoke-Git -Directory $wt -GitArgs @('merge-base', '--is-ancestor', $primaryTip, 'HEAD')
+            Assert-Result 'task now contains configured primary tip' ($ancestry.ExitCode -eq 0) $ancestry.Raw
+            Assert-Result 'task and primary stay in assigned checkouts' (
+                (Invoke-Git -Directory $wt -GitArgs @('branch', '--show-current')).Raw.Trim() -ceq 'task/F-916' -and
+                (Invoke-Git -Directory $caseRoot -GitArgs @('rev-parse', 'HEAD')).Raw.Trim() -ceq $primaryTip -and
+                (Invoke-Git -Directory $caseRoot -GitArgs @('branch', '--show-current')).Raw.Trim() -ceq 'main'
+            ) 'recipe moved the primary checkout or changed task branch'
+
+        }
     }
 
     $results += Run-Test -Name "A no-code review-fix gets no worktree, no branch, and the project root as its workdir" -Body {

@@ -67,7 +67,7 @@ Crucible also echoes the full assembled prompt and a CI banner; copy the `agent 
 
 ## Prerequisites
 
-- [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS. Windows PowerShell 5.1 is not supported. The runtime is CI-verified on Windows and Linux; macOS is supported via `pwsh`. See [ROADMAP.md](../ROADMAP.md) for the planned Go rewrite.
+- [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS. Windows PowerShell 5.1 is not supported. The runtime is CI-verified on Windows and Linux; macOS is supported via `pwsh`. See [ROADMAP.md](../ROADMAP.md) for runtime direction.
 - Git
 - Your project's normal build/test toolchain (in this example: Node + npm)
 

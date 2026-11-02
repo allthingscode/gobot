@@ -628,6 +628,17 @@ pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -
 
 Optional flags: `-HandoffArtifacts`, `-HandoffFileAffinity`, `-HandoffReviewerChecksPassed`. The script validates against the schema before writing, so any error surfaces immediately rather than at the next `crucible.ps1 -Init -ProjectRoot "{project_root}"`.
 
+### Deployment Commit Identity
+
+For `deployment -> done`, `commit_hash` identifies the code being deployed. The default identity is the task tip recorded before the Human Gate merges:
+
+- **Before merge:** `new-handoff.ps1` records the current `task/{task_id}` branch tip when `-CommitHash` is omitted. An explicit `-CommitHash` may name a different existing commit representing the task work. The commit must exist; it need not yet be on the configured primary branch. The first deployment reaches the pending Human Gate with this task tip.
+- **After merge:** a handoff written before the merge retains the recorded task tip. If the gate has deleted `task/{task_id}`, re-running `new-handoff.ps1` without `-CommitHash` writes null, and a code task fails with "missing commit_hash". To regenerate the handoff, pass the original task tip explicitly with `-CommitHash`. Once an accepted or redirected decision exists, completion verification requires it to be an ancestor of the configured primary branch and not an ancestor of `base_commit`. It need not equal the merge commit. Do not replace it with a merge hash merely because the gate accepted.
+- **No-Code Closure:** a research/grooming spec (or R-* task ID) with no task branch has null/absent `commit_hash`; the shared No-Code Closure predicate controls this exemption.
+- **Deployment to grooming:** omit `commit_hash` for a pre-merge dependency block. For a production incident, supply the deployed commit responsible for the issue; it must already be merged and must not be a baseline commit.
+
+`validate-handoff.ps1` enforces presence for code deployments; `lib/crucible-gates-handoff.ps1` defers operator commit verification to `lib/crucible-gates.ps1`, which checks existence before the Human Gate and ancestry after an advancing decision. `lib/no-code-closure.ps1` owns the shared exemption. The Human Gate's `Get-GateReviewRange` uses the live task branch for review and falls back to `commit_hash` only when that branch is unavailable. The gate merges and cleans up the task; it does not rewrite the handoff's commit identity.
+
 ---
 
 ## Worktree Protocol (per-task)

@@ -226,6 +226,44 @@ $tempRoot = New-TestFixtureRoot -NameHint "operator-merge-test"
 $mainSupported = Test-GitInitMainSupported
 
 try {
+    $results += Run-Test -Name "First documented deployment carries task tip through the Human Gate" -Body {
+        $projectRoot = Join-Path $tempRoot "first-deployment"
+        $taskId = "C-OP-FIRST"
+        $baseHash = Initialize-ProjectRepo -ProjectRoot $projectRoot -TaskId $taskId -Branch main
+        Push-Location $projectRoot
+        try {
+            git checkout -b task/$taskId --quiet
+            Set-Content -LiteralPath "work.txt" -Value "first deployment" -Encoding UTF8
+            git add work.txt
+            git commit -m "task work" --quiet
+            $taskTip = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
+            git checkout main --quiet
+        } finally { Pop-Location }
+        $producer = Join-Path $REPO_ROOT 'powershell/new-handoff.ps1'
+        $env:CRUCIBLE_CYCLE_ID = 'test-cycle'
+        $written = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -File $producer -TaskId $taskId -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved." -ProjectRoot $projectRoot -SessionCycleId test-cycle -CycleId test-cycle -PromptVersion test-v1 -BaseCommit $baseHash -FileAffinity work.txt
+        }
+        Assert-Result 'documented deployment producer succeeds' ($written.ExitCode -eq 0) ($written.Output -join "`n")
+        $handoffs = @(Get-ChildItem (Join-Path $projectRoot '.crucible/session/handoffs') -Filter "$taskId-*.json")
+        Assert-Result 'first deployment writes one handoff' ($handoffs.Count -eq 1) ($handoffs | Out-String)
+        $handoff = Get-Content $handoffs[0].FullName -Raw | ConvertFrom-Json
+        Assert-Result 'before gate hash is the unmerged task tip' ($handoff.commit_hash -ceq $taskTip -and $taskTip -cne $baseHash) ($handoff | ConvertTo-Json)
+        $decisions = Join-Path $projectRoot '.crucible/session/global/gate_decisions'
+        Assert-Result 'first deployment has no decision history' (@(Get-ChildItem $decisions -Filter "$taskId-*.json" -ErrorAction SilentlyContinue).Count -eq 0) $decisions
+        $pending = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId
+        Assert-Result 'unmerged task tip reaches the pending Human Gate' ($pending.ExitCode -eq 0 -and ($pending.Output -join "`n") -match 'HUMAN GATE') ($pending.Output -join "`n")
+        Assert-Result 'pending gate leaves primary unmerged' ((Invoke-Git -Directory $projectRoot -GitArgs @('rev-parse', 'main')).Raw.Trim() -ceq $baseHash) 'primary moved before acceptance'
+        $accepted = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        Assert-Result 'first deployment gate accepts task-tip handoff' ($accepted.ExitCode -eq 0) ($accepted.Output -join "`n")
+        $merged = (Invoke-Git -Directory $projectRoot -GitArgs @('rev-parse', 'main')).Raw.Trim()
+        $ancestry = Invoke-Git -Directory $projectRoot -GitArgs @('merge-base', '--is-ancestor', $taskTip, 'main')
+        Assert-Result 'after gate task tip is an ancestor of a distinct merge commit' ($ancestry.ExitCode -eq 0 -and $merged -cne $taskTip -and $merged -cne $baseHash) $merged
+        $schema = Get-Content (Join-Path $REPO_ROOT 'schemas/handoff.schema.json') -Raw | ConvertFrom-Json
+        $sop = Get-Content (Join-Path $REPO_ROOT 'sops/deployment.md') -Raw
+        $owner = 'docs/operating-manual.md#deployment-commit-identity'
+        Assert-Result 'schema and SOP defer deployment identity to its owning contract' ($schema.properties.commit_hash.description.Contains($owner) -and $sop.Contains('../' + $owner) -and $sop -notmatch 'matches the merge commit on the primary branch') $schema.properties.commit_hash.description
+    }
     $results += Run-Test -Name "Missing commit_hash is rejected" -Body {
         $projectRoot = Join-Path $tempRoot "missing"
         $taskId = "C-OP-MISSING"

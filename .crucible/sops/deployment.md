@@ -1,4 +1,4 @@
-<!-- prompt_version: operator-sop-v9 -->
+<!-- prompt_version: operator-sop-v10 -->
 # SOP: Deployment
 
 Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
@@ -130,7 +130,7 @@ So finalizing early does not save a step. It trips the first check, and recovery
 (Note: no manual Git cleanup or pipeline log archiving is required either; on an `accepted` or `redirected` decision the Human Gate merges `task/{task_id}`, deletes the worktree and branch, and archives the pipeline log. It pushes to origin only when `review.auto_push` is true.)
 
 ### Step 7 - Run new-handoff.ps1 & Advance Pipeline
-Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done". Omit `-CommitHash` and the tool records the tip of `task/{task_id}` itself; pass it only to record a different commit:
+Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly). Set target_phase to "done". Follow the [deployment commit identity contract](../docs/operating-manual.md#deployment-commit-identity). Omit `-CommitHash` and the tool records the tip of `task/{task_id}` itself before the Human Gate merges; that existing handoff retains its identity after acceptance. If regenerating it after the gate deletes the task branch, pass the original task tip with `-CommitHash`; omitting it then writes null and a code task fails with "missing commit_hash":
 ```bash
 pwsh -ExecutionPolicy Bypass \
   -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId {task_id} -Source deployment -Target done -Reason "Deployment complete. Pipeline resolved." -ProjectRoot "{project_root}"
@@ -230,7 +230,7 @@ Pre-flight gate - confirm all are true before writing handoff:
 - [ ] Working tree is clean (`git status --short` shows nothing unexpected)
 - [ ] Routing to one legal successor: `done`, `grooming` (production issue threshold met), or `implementation` (rework only)
 - [ ] `task_id` in handoff matches the task I was given
-- [ ] `commit_hash` rule: for `deployment -> done` with code changes, it matches the merge commit on the primary branch; for No-Code Closures (type: research/grooming or R-* task ID, no task branch, no commit_hash), it is null/absent; for `deployment -> grooming` incident handoffs, it identifies the merged commit that caused the production issue
+- [ ] `commit_hash` rule: for `deployment -> done` with code changes, it satisfies the [deployment commit identity contract](../docs/operating-manual.md#deployment-commit-identity) before and after the Human Gate merge; for No-Code Closures (type: research/grooming or R-* task ID, no task branch, no commit_hash), it is null/absent; for `deployment -> grooming` incident handoffs, it identifies the merged commit that caused the production issue
 - [ ] Eval record written to `.crucible/session/eval/eval-{task_id}.json`
 
 - [ ] Every required `## Task List` item in `task.md` is `[x]`, or `[-]` if genuinely skipped, or moved under `## Optional Steps` - a `[ ]` or `[/]` item left in that section fails the gate and exits the run with code 2
