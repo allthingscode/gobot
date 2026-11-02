@@ -6,7 +6,7 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 # Get-TestRunRoot decides where this fixture is built. Guarded because a caller that
 # dot-sources only this file would otherwise fail on the first fixture request;
 # _harness.ps1 is idempotent, so loading it twice costs nothing.
-if (-not (Get-Command "Get-TestRunRoot" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-TestRunRoot)) {
     . (Join-Path $PSScriptRoot "_harness.ps1")
 }
 

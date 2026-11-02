@@ -9,7 +9,7 @@ $CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $Quiet = $true
 . $CRUCIBLE_LIB
 
-if (-not (Get-Command Check-Dependencies -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Check-Dependencies)) {
     function Check-Dependencies {
         param([string]$BacklogItemPath, [string]$TargetSpecialist, [string]$TaskId)
     }

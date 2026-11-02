@@ -1,6 +1,6 @@
-# Item 355: a local helper's presence is a function-table lookup, never command discovery.
+# Items 355/363: a local helper's presence is a function-table lookup, never command discovery.
 # Get-Command on a missing name searches modules and every executable PATH entry; on WSL's
-# inherited Windows PATH each miss took about 1.4s. Production code asks the Function:
+# inherited Windows PATH each miss took about 1.4s. Presence guards ask the Function:
 # drive instead. Get-Command stays for genuine external tools (git, gh, the configured
 # editor), so the scan below separates the two shapes rather than banning the cmdlet.
 
@@ -22,7 +22,15 @@ $EXTERNAL_DISCOVERY_ALLOWLIST = @(
     @{ RelativePath = "powershell/crucible-doctor.ps1"; NameText = '$Command'; Reason = "Invoke-ToolCheck probes an external executable before running it." },
     @{ RelativePath = "powershell/crucible-doctor.ps1"; NameText = '$pwshName'; Reason = "Resolves the PowerShell host executable Get-PwshCommand names." },
     @{ RelativePath = "powershell/crucible-doctor.ps1"; NameText = '$tool'; Reason = "Resolves configured verification tools on PATH." },
-    @{ RelativePath = "powershell/lib/config-helpers.ps1"; NameText = '$EditorOrToolName'; Reason = "Resolves the configured editor or tool command." }
+    @{ RelativePath = "powershell/lib/config-helpers.ps1"; NameText = '$EditorOrToolName'; Reason = "Resolves the configured editor or tool command." },
+    @{ RelativePath = "powershell/tests/check-linux-leg.tests.ps1"; NameText = '$tool'; Reason = "Checks provisioned external Linux tools before integration cases." },
+    @{ RelativePath = "powershell/tests/crucible-doctor.tests.ps1"; NameText = '$tool'; Reason = "Builds a PATH fixture from external tool executables." },
+    @{ RelativePath = "powershell/tests/launch-codex-specialist.tests.ps1"; NameText = '(Get-PwshCommand)'; Reason = "Resolves the host executable for a PATH fixture." }
+)
+
+$PRESENCE_ASSERTION_ALLOWLIST = @(
+    @{ RelativePath = "powershell/tests/install-manifest.tests.ps1"; Assertion = 'Assert-Result -Name "function $functionName" -Condition ($null -ne (Get-Command $functionName -ErrorAction SilentlyContinue)) -FailureMessage "missing helper function"' },
+    @{ RelativePath = "powershell/tests/research-findings.tests.ps1"; Assertion = "Assert-Result -Name 'findings owner exists' -Condition (`$null -ne (Get-Command Get-ResearchFindingsArtifact -ErrorAction SilentlyContinue)) -FailureMessage 'the shared findings reader is missing'" }
 )
 
 $GET_COMMAND_NAMES = @('Get-Command', 'gcm', 'Microsoft.PowerShell.Core\Get-Command')
@@ -35,9 +43,23 @@ function New-ScanEntry {
     return [pscustomobject]@{ FullName = $FullName; RelativePath = $RelativePath }
 }
 
-function Get-ProductionPs1Files {
+function Get-HelperScanFiles {
     param([string]$RepoRoot)
-    return @(Get-RepoScannableFile -RepoRoot $RepoRoot -Extension ".ps1" -ExcludePrefix @("powershell/tests", "examples", "vendor"))
+    return @(Get-RepoScannableFile -RepoRoot $RepoRoot -Extension ".ps1" -ExcludePrefix @("examples", "vendor"))
+}
+
+function Get-ApplicableDiscoveryAllowlist {
+    param([string]$Root)
+    return @(Get-ApplicableHelperAllowlist -Root $Root -Allowlist $EXTERNAL_DISCOVERY_ALLOWLIST)
+}
+
+function Get-ApplicableHelperAllowlist {
+    param([string]$Root, [array]$Allowlist)
+    $isFrameworkTree = Test-Path -LiteralPath (Join-Path $Root 'powershell/sync-example-mirror.ps1')
+    return @($Allowlist | Where-Object {
+        $isFrameworkTree -or (Test-Path -LiteralPath (Join-Path $Root $_.RelativePath)) -or
+        -not (Test-FrameworkDevOnlyFile -Path $_.RelativePath)
+    })
 }
 
 function Get-ParsedScript {
@@ -55,6 +77,8 @@ function Get-DefinedFunctionNames {
     foreach ($f in $Files) {
         $ast = Get-ParsedScript -Path $f.FullName
         foreach ($fn in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+            # These test doubles stand in for executables, not local helper dependencies.
+            if ($f.RelativePath.StartsWith('powershell/tests/') -and $fn.Name -in @('git', 'codex', 'gh', 'subst')) { continue }
             [void]$names.Add($fn.Name)
         }
     }
@@ -77,7 +101,45 @@ function Get-GetCommandNameArgument {
         $typeAst = $binding.BoundParameters['CommandType'].Value
         $applicationOnly = $typeAst -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $typeAst.Value -eq 'Application'
     }
-    return [pscustomobject]@{ NameAsts = $nameAsts; ApplicationOnly = $applicationOnly }
+    return [pscustomobject]@{ NameAsts = $nameAsts; ApplicationOnly = $applicationOnly; HasErrorAction = $binding.BoundParameters.ContainsKey('ErrorAction') }
+}
+
+function Test-DeliberateHelperDiscovery {
+    param(
+        [System.Management.Automation.Language.CommandAst]$Command,
+        [string]$RelativePath,
+        $NameArgument
+    )
+    if (-not $RelativePath.StartsWith('powershell/tests/', [StringComparison]::Ordinal)) { return $false }
+    if ($NameArgument.HasErrorAction) { return $false }
+    $pipeline = $Command.Parent
+    $paren = $pipeline.Parent
+    $member = $paren.Parent
+    if ($pipeline -is [System.Management.Automation.Language.PipelineAst] -and $pipeline.PipelineElements.Count -eq 1 -and
+        $paren -is [System.Management.Automation.Language.ParenExpressionAst] -and
+        $member -is [System.Management.Automation.Language.MemberExpressionAst] -and $member.Expression -eq $paren -and
+        $member.Member -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+        $member.Member.Value -in @('ScriptBlock', 'Parameters')) { return $true }
+    return $false
+}
+
+function Test-AllowlistedPresenceAssertion {
+    param(
+        [System.Management.Automation.Language.CommandAst]$Command,
+        [string]$RelativePath,
+        [array]$Allowlist,
+        [System.Collections.Generic.HashSet[string]]$MatchedAllowlist
+    )
+    $ancestor = $Command.Parent
+    while ($null -ne $ancestor -and $ancestor -isnot [System.Management.Automation.Language.CommandAst]) { $ancestor = $ancestor.Parent }
+    if ($null -eq $ancestor) { return $false }
+    $entries = @($Allowlist | Where-Object {
+        $_.RelativePath -eq $RelativePath -and $_.Assertion -ceq $ancestor.Extent.Text
+    })
+    foreach ($entry in $entries) {
+        if ($null -ne $MatchedAllowlist) { [void]$MatchedAllowlist.Add($entry.RelativePath + "|" + $entry.Assertion) }
+    }
+    return $entries.Count -gt 0
 }
 
 function Find-LocalHelperDiscoveryViolation {
@@ -85,7 +147,9 @@ function Find-LocalHelperDiscoveryViolation {
         [array]$Files,
         $LocalFunctions,
         [array]$Allowlist,
-        [System.Collections.Generic.HashSet[string]]$MatchedAllowlist = $null
+        [System.Collections.Generic.HashSet[string]]$MatchedAllowlist = $null,
+        [array]$PresenceAllowlist = $PRESENCE_ASSERTION_ALLOWLIST,
+        [System.Collections.Generic.HashSet[string]]$MatchedPresenceAllowlist = $null
     )
     $verbs = [Collections.Generic.HashSet[string]]::new([string[]]@((Get-Verb).Verb), [StringComparer]::OrdinalIgnoreCase)
     $violations = @()
@@ -96,10 +160,13 @@ function Find-LocalHelperDiscoveryViolation {
             $n -is [System.Management.Automation.Language.CommandAst] -and $GET_COMMAND_NAMES -contains $n.GetCommandName()
         }, $true)
         foreach ($call in $calls) {
+            if (Test-AllowlistedPresenceAssertion -Command $call -RelativePath $f.RelativePath -Allowlist $PresenceAllowlist -MatchedAllowlist $MatchedPresenceAllowlist) { continue }
             $where = $f.RelativePath + ":" + $call.Extent.StartLineNumber + ": " + $call.Extent.Text
             $argument = Get-GetCommandNameArgument -Command $call
+            $introspection = Test-DeliberateHelperDiscovery -Command $call -RelativePath $f.RelativePath -NameArgument $argument
             foreach ($nameAst in $argument.NameAsts) {
                 if ($nameAst -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                    if ($introspection) { continue }
                     $name = $nameAst.Value
                     $verbNoun = $name -match '^([A-Za-z]+)-[A-Za-z0-9]+$' -and $verbs.Contains($Matches[1])
                     if ($LocalFunctions.Contains($name) -or $verbNoun) {
@@ -121,17 +188,23 @@ function Find-LocalHelperDiscoveryViolation {
     return $violations
 }
 
-$results += Run-Test -Name "Production code never uses command discovery for local helper presence" -Body {
-    $prodFiles = @(Get-ProductionPs1Files -RepoRoot $REPO_ROOT)
-    Assert-Result -Name "the production scan is non-empty" -Condition ($prodFiles.Count -ge 50) -FailureMessage (
-        "the scan found " + $prodFiles.Count + " production .ps1 files; the assertions below would pass vacuously")
-    $localFunctions = Get-DefinedFunctionNames -Files $prodFiles
-    Assert-Result -Name "local function inventory is populated" -Condition ($localFunctions.Contains('Resolve-FilesystemPath') -and $localFunctions.Count -ge 200) -FailureMessage ("found only " + $localFunctions.Count + " production function definitions")
+$results += Run-Test -Name "Production and test-support code never use command discovery for local helper presence" -Body {
+    $files = @(Get-HelperScanFiles -RepoRoot $REPO_ROOT)
+    $supportFiles = @($files | Where-Object { $_.RelativePath.StartsWith('powershell/tests/') })
+    Assert-Result -Name "test-support scan includes helpers and test scripts" -Condition ($supportFiles.Count -ge 100 -and '_fixtures.ps1' -in @($supportFiles | ForEach-Object { Split-Path -Leaf $_.FullName }) -and '_harness.ps1' -in @($supportFiles | ForEach-Object { Split-Path -Leaf $_.FullName })) -FailureMessage "test-support files are missing from the scan"
+    Assert-Result -Name "the production scan is non-empty" -Condition (@($files | Where-Object { -not $_.RelativePath.StartsWith('powershell/tests/') }).Count -ge 50) -FailureMessage "production .ps1 files are missing from the scan"
+    $localFunctions = Get-DefinedFunctionNames -Files $files
+    Assert-Result -Name "local function inventory is populated" -Condition ($localFunctions.Contains('Resolve-FilesystemPath') -and $localFunctions.Contains('Get-TestRunRoot') -and $localFunctions.Count -ge 200) -FailureMessage ("found only " + $localFunctions.Count + " function definitions or missing shared helpers")
     $matched = [Collections.Generic.HashSet[string]]::new()
-    $violations = @(Find-LocalHelperDiscoveryViolation -Files $prodFiles -LocalFunctions $localFunctions -Allowlist $EXTERNAL_DISCOVERY_ALLOWLIST -MatchedAllowlist $matched)
+    $allowlist = @(Get-ApplicableDiscoveryAllowlist -Root $REPO_ROOT)
+    $presenceAllowlist = @(Get-ApplicableHelperAllowlist -Root $REPO_ROOT -Allowlist $PRESENCE_ASSERTION_ALLOWLIST)
+    $matchedPresence = [Collections.Generic.HashSet[string]]::new()
+    $violations = @(Find-LocalHelperDiscoveryViolation -Files $files -LocalFunctions $localFunctions -Allowlist $allowlist -MatchedAllowlist $matched -PresenceAllowlist $presenceAllowlist -MatchedPresenceAllowlist $matchedPresence)
     Assert-Result -Name "no Get-Command local helper presence checks" -Condition ($violations.Count -eq 0) -FailureMessage ("found " + $violations.Count + " violation(s):`n" + ($violations -join "`n"))
-    $stale = @($EXTERNAL_DISCOVERY_ALLOWLIST | Where-Object { -not $matched.Contains($_.RelativePath + "|" + $_.NameText) } | ForEach-Object { $_.RelativePath + " " + $_.NameText })
+    $stale = @($allowlist | Where-Object { -not $matched.Contains($_.RelativePath + "|" + $_.NameText) } | ForEach-Object { $_.RelativePath + " " + $_.NameText })
     Assert-Result -Name "every external-discovery allowlist entry still matches" -Condition ($stale.Count -eq 0) -FailureMessage ("stale allowlist entries:`n" + ($stale -join "`n"))
+    $stalePresence = @($presenceAllowlist | Where-Object { -not $matchedPresence.Contains($_.RelativePath + "|" + $_.Assertion) } | ForEach-Object { $_.RelativePath + " " + $_.Assertion })
+    Assert-Result -Name "every presence-assertion allowlist entry still matches" -Condition ($stalePresence.Count -eq 0) -FailureMessage ("stale presence-assertion entries:`n" + ($stalePresence -join "`n"))
 }
 
 $results += Run-Test -Name "MUT: scanner separates local helper checks from external tool discovery" -Body {
@@ -149,6 +222,21 @@ $results += Run-Test -Name "MUT: scanner separates local helper checks from exte
             'Get-Command -Syntax Resolve-FilesystemPath' = $true
             'Microsoft.PowerShell.Core\Get-Command -Verbose $someName' = $true
             'Get-Command git, Resolve-FilesystemPath -ErrorAction SilentlyContinue' = $true
+            'if (-not (Get-Command "Get-TestRunRoot" -ErrorAction SilentlyContinue)) { }' = $true
+            'if ($null -eq (Get-Command Test-PlatformIsWindows -ErrorAction SilentlyContinue)) { }' = $true
+            'if (-not (Get-Command Check-Dependencies -ErrorAction SilentlyContinue)) { }' = $true
+            'if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) { }' = $true
+            'if (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue) { exit 0 }' = $true
+            'if (-not (Get-Command Check-Dependencies -ErrorAction SilentlyContinue).ScriptBlock) { }' = $true
+            'if ($null -eq (Get-Command Check-Dependencies -ErrorAction SilentlyContinue).Parameters) { }' = $true
+            '(Get-Command -Name $anything -ErrorAction SilentlyContinue).ScriptBlock' = $true
+            '(Get-Command Check-Dependencies -EA SilentlyContinue).Parameters' = $true
+            '(Get-Command -Name $anything).ScriptBlock' = $true
+            '$body = (Get-Command Write-LocalThing).ScriptBlock' = $false
+            '$params = (Get-Command Write-LocalThing).Parameters' = $false
+            '$body = (Get-Command Write-LocalThing).Source' = $true
+            '$body = (Get-Command Write-LocalThing | Out-Null).ScriptBlock' = $true
+            'Assert-Result -Name "exists" -Condition ($null -ne (Get-Command Write-LocalThing))' = $true
             'Get-Command -Verbose git' = $false
             'if (-not (Get-Command git -ErrorAction SilentlyContinue)) { }' = $false
             '$c = Get-Command "wsl.exe" -ErrorAction SilentlyContinue' = $false
@@ -156,18 +244,76 @@ $results += Run-Test -Name "MUT: scanner separates local helper checks from exte
             '$c = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue' = $false
             'if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { }' = $false
         }
-        $local = [Collections.Generic.HashSet[string]]::new([string[]]@('Write-LocalThing'), [StringComparer]::OrdinalIgnoreCase)
+        $local = [Collections.Generic.HashSet[string]]::new([string[]]@('Write-LocalThing', 'Check-Dependencies'), [StringComparer]::OrdinalIgnoreCase)
         $index = 0
+        $mismatches = @()
         foreach ($source in $cases.Keys) {
             $index++
             $path = Join-Path $tempDir ("case" + $index + ".ps1")
             [IO.File]::WriteAllText($path, $source + "`n", [Text.UTF8Encoding]::new($false))
-            $found = @(Find-LocalHelperDiscoveryViolation -Files @(New-ScanEntry -FullName $path -RelativePath ("case" + $index + ".ps1")) -LocalFunctions $local -Allowlist @())
+            $found = @(Find-LocalHelperDiscoveryViolation -Files @(New-ScanEntry -FullName $path -RelativePath ("powershell/tests/case" + $index + ".ps1")) -LocalFunctions $local -Allowlist @())
             $expected = $cases[$source]
-            Assert-Result -Name ("case " + $index + " flagged=" + $expected) -Condition (($found.Count -gt 0) -eq $expected) -FailureMessage ("scanner returned " + $found.Count + " violation(s) for: " + $source)
+            if (($found.Count -gt 0) -ne $expected) {
+                $mismatches += ("case " + $index + " expected flagged=" + $expected + ": scanner returned " + $found.Count + " violation(s) for: " + $source)
+            }
+        }
+        Assert-Result -Name "every mutation has the expected result" -Condition ($mismatches.Count -eq 0) -FailureMessage ($mismatches -join "`n")
+    } finally {
+        Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$results += Run-Test -Name "Generated standalone dependency probe uses the function namespace" -Body {
+    $ast = Get-ParsedScript -Path (Join-Path $PSScriptRoot 'native-stderr-idiom.tests.ps1')
+    $probes = @($ast.FindAll({
+        param($n)
+        $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $n.Left.Extent.Text -eq '$probe' -and $n.Right.Extent.Text.Contains('Invoke-GitChecked')
+    }, $true))
+    Assert-Result -Name "standalone probe is present and uses Function:" -Condition ($probes.Count -eq 1 -and $probes[0].Right.Extent.Text.Contains('Test-Path -LiteralPath Function:Invoke-GitChecked')) -FailureMessage "the generated dependency probe must check Function:Invoke-GitChecked"
+}
+
+$results += Run-Test -Name "Deliberate presence assertions do not exempt guards in the same file" -Body {
+    $tempDir = New-TestFixtureRoot -NameHint "helper-assertion-rule"
+    try {
+        foreach ($entry in $PRESENCE_ASSERTION_ALLOWLIST) {
+            $path = Join-Path $tempDir 'assertion.ps1'
+            $source = $entry.Assertion + "`nif (-not (Get-Command Get-ResearchFindingsArtifact -ErrorAction SilentlyContinue)) { }`n"
+            [IO.File]::WriteAllText($path, $source, [Text.UTF8Encoding]::new($false))
+            $matched = [Collections.Generic.HashSet[string]]::new()
+            $found = @(Find-LocalHelperDiscoveryViolation -Files @(New-ScanEntry -FullName $path -RelativePath $entry.RelativePath) -LocalFunctions ([Collections.Generic.HashSet[string]]::new()) -Allowlist @() -MatchedPresenceAllowlist $matched)
+            Assert-Result -Name $entry.RelativePath -Condition ($found.Count -eq 1 -and $found[0] -match ':2:') -FailureMessage ($found -join "`n")
+            Assert-Result -Name "exact assertion match is recorded" -Condition ($matched.Count -eq 1 -and $matched.Contains($entry.RelativePath + "|" + $entry.Assertion)) -FailureMessage "presence assertion match was not recorded"
+            $matched.Clear()
+            [IO.File]::WriteAllText($path, $source.Replace($entry.Assertion, '# assertion removed'), [Text.UTF8Encoding]::new($false))
+            $null = @(Find-LocalHelperDiscoveryViolation -Files @(New-ScanEntry -FullName $path -RelativePath $entry.RelativePath) -LocalFunctions ([Collections.Generic.HashSet[string]]::new()) -Allowlist @() -MatchedPresenceAllowlist $matched)
+            Assert-Result -Name "removed assertion leaves a stale entry" -Condition (-not $matched.Contains($entry.RelativePath + "|" + $entry.Assertion)) -FailureMessage "removed assertion still matched"
+            [IO.File]::WriteAllText($path, $source, [Text.UTF8Encoding]::new($false))
+            $found = @(Find-LocalHelperDiscoveryViolation -Files @(New-ScanEntry -FullName $path -RelativePath 'powershell/tests/other.tests.ps1') -LocalFunctions ([Collections.Generic.HashSet[string]]::new()) -Allowlist @())
+            Assert-Result -Name "assertion exemption is file-specific" -Condition ($found.Count -eq 2) -FailureMessage ($found -join "`n")
         }
     } finally {
         Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$results += Run-Test -Name "Presence assertion applicability preserves stale entries except absent dev-only adopter files" -Body {
+    $fixtureRoot = New-TestFixtureRoot -NameHint "presence-assertion-allowlist"
+    try {
+        $devPath = 'powershell/tests/check-linux-leg.tests.ps1'
+        Assert-Result -Name "fixture entry is dev-only" -Condition (Test-FrameworkDevOnlyFile -Path $devPath) -FailureMessage "fixture premise changed"
+        $entries = @($PRESENCE_ASSERTION_ALLOWLIST) + @(@{ RelativePath = $devPath; Assertion = 'fixture assertion' })
+        $adopter = @(Get-ApplicableHelperAllowlist -Root $fixtureRoot -Allowlist $entries)
+        Assert-Result -Name "adopter retains shipped assertions even if absent" -Condition ($adopter.Count -eq $PRESENCE_ASSERTION_ALLOWLIST.Count) -FailureMessage "adopter hid stale shipped entries or retained an omitted dev-only entry"
+        $devFile = Join-Path $fixtureRoot $devPath
+        New-Item -ItemType Directory -Path (Split-Path -Parent $devFile) -Force | Out-Null
+        [IO.File]::WriteAllText($devFile, "`n", [Text.UTF8Encoding]::new($false))
+        Assert-Result -Name "adopter retains present dev-only entries" -Condition (@(Get-ApplicableHelperAllowlist -Root $fixtureRoot -Allowlist $entries).Count -eq $entries.Count) -FailureMessage "present dev-only entry was hidden"
+        Remove-Item -LiteralPath $devFile
+        [IO.File]::WriteAllText((Join-Path $fixtureRoot 'powershell/sync-example-mirror.ps1'), "`n", [Text.UTF8Encoding]::new($false))
+        Assert-Result -Name "framework retains every absent entry" -Condition (@(Get-ApplicableHelperAllowlist -Root $fixtureRoot -Allowlist $entries).Count -eq $entries.Count) -FailureMessage "framework hid stale entries"
+    } finally {
+        Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -262,12 +408,15 @@ $results += Run-Test -Name "Guard registration tolerates dev-only libraries an a
             if ($file.Name -ne 'linux-leg-stamp.ps1') { Copy-Item -LiteralPath $file.FullName -Destination $libDir }
         }
         $adopter = Get-LoadTimeGuardRegistration -Root $fixtureRoot -Registry $LOAD_TIME_GUARDS
+        $adopterAllowlist = @(Get-ApplicableDiscoveryAllowlist -Root $fixtureRoot)
+        Assert-Result -Name "adopter omits only the absent dev-only discovery entry" -Condition ($adopterAllowlist.Count -eq ($EXTERNAL_DISCOVERY_ALLOWLIST.Count - 1) -and 'powershell/tests/check-linux-leg.tests.ps1' -notin @($adopterAllowlist.RelativePath)) -FailureMessage "adopter discovery allowlist does not match bundle omissions"
         Assert-Result -Name "adopter shape: no stale registration" -Condition ($adopter.Extra.Count -eq 0) -FailureMessage ("registered guard not found: " + ($adopter.Extra -join ', '))
         Assert-Result -Name "adopter shape: no unregistered guard" -Condition ($adopter.Missing.Count -eq 0) -FailureMessage ("unregistered: " + ($adopter.Missing -join ', '))
         Assert-Result -Name "adopter shape: omitted library is not probed" -Condition ((@($adopter.Omitted) -join ',') -eq 'linux-leg-stamp' -and -not $adopter.Applicable.Contains('linux-leg-stamp')) -FailureMessage ("omitted: " + (@($adopter.Omitted) -join ','))
 
         [IO.File]::WriteAllText((Join-Path $fixtureRoot "powershell/sync-example-mirror.ps1"), "`n", [Text.UTF8Encoding]::new($false))
         $framework = Get-LoadTimeGuardRegistration -Root $fixtureRoot -Registry $LOAD_TIME_GUARDS
+        Assert-Result -Name "framework keeps every discovery entry, including absent files" -Condition (@(Get-ApplicableDiscoveryAllowlist -Root $fixtureRoot).Count -eq $EXTERNAL_DISCOVERY_ALLOWLIST.Count) -FailureMessage "framework discovery allowlist hid an absent file"
         Assert-Result -Name "framework shape: an absent dev-only library is stale" -Condition ((@($framework.Extra) -join ',') -eq 'linux-leg-stamp:Resolve-FilesystemPath') -FailureMessage ("extra: " + (@($framework.Extra) -join ','))
     } finally {
         Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -305,7 +305,7 @@ function Write-TestFileSummary {
 function Start-HiddenHostProcess {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    if ($null -eq (Get-Command Test-PlatformIsWindows -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath Function:Test-PlatformIsWindows)) {
         throw "Start-HiddenHostProcess: dot-source lib/platform.ps1 before calling this."
     }
 

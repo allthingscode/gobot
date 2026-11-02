@@ -245,7 +245,7 @@ $results += Run-Test -Name "Every lib that calls Invoke-GitChecked resolves it w
     $undeclared = @()
     foreach ($caller in $callers) {
         $libPath = $caller.FullName
-        $probe = ". `"$libPath`"; if (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue) { exit 0 } else { exit 3 }"
+        $probe = ". `"$libPath`"; if (Test-Path -LiteralPath Function:Invoke-GitChecked) { exit 0 } else { exit 3 }"
         $run = Invoke-ExternalCommand -Command { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command $probe }
         if ($run.ExitCode -ne 0) {
             $undeclared += ("powershell/lib/" + $caller.Name + ": exit " + $run.ExitCode + " - " + $run.Output)

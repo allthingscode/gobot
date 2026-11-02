@@ -627,7 +627,7 @@ created_at: "2026-06-04"
         # Legacy/old behavior: archive the task BEFORE the gate runs
         # Load archive-task helper
         $archiveLibPath = Join-Path $FRAMEWORK_POWERSHELL "lib/archive-task.ps1"
-        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+        if (-not (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive)) {
             . $archiveLibPath
         }
         Invoke-BacklogTaskArchive -BacklogPath (Join-Path $backlogDir "BACKLOG.md") -SpecPath (Join-Path $backlogDir "features/active/F-888_Test_Spec.md") -Status "Production" | Out-Null
@@ -1288,7 +1288,7 @@ created_at: "2026-06-04"
 
         # Legacy path: archive the task as Production BEFORE the gate runs.
         $archiveLibPath = Join-Path $FRAMEWORK_POWERSHELL "lib/archive-task.ps1"
-        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+        if (-not (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive)) {
             . $archiveLibPath
         }
         Invoke-BacklogTaskArchive -BacklogPath (Join-Path $backlogDir "BACKLOG.md") -SpecPath (Join-Path $backlogDir "features/active/F-444_Test_Spec.md") -Status "Production" | Out-Null
