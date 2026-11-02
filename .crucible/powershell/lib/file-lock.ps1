@@ -1,4 +1,4 @@
-if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
 
 # The exclusive-handle file lock (I5), shared by crucible-lib.ps1 and scripts that do not load it,
 # such as run-isolated-checks.ps1. Item 258.
@@ -53,7 +53,7 @@ function Invoke-FileLock {
                 # this message repeats forever and a bare one says nothing about which lock.
                 $totalWaitMs += $lockWaitTime
                 $waitMessage = $TimeoutMessage + " Lock: " + $LockPath + ". Waited " + [int]($totalWaitMs / 1000) + "s so far; a holder still present has not crashed, it is stuck."
-                if (Get-Command Write-Quiet -ErrorAction SilentlyContinue) { Write-Quiet $waitMessage -ForegroundColor Yellow } else { Write-Host $waitMessage -ForegroundColor Yellow }
+                if (Test-Path -LiteralPath Function:Write-Quiet) { Write-Quiet $waitMessage -ForegroundColor Yellow } else { Write-Host $waitMessage -ForegroundColor Yellow }
                 $lockWaitTime = 0
             } else {
                 Start-Sleep -Milliseconds 100

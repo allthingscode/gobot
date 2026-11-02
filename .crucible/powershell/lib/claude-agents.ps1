@@ -5,13 +5,13 @@
 # neither runs exactly that pair. These files are generated from the Claude levels in
 # config.yaml (Get-ClaudeLevel) and are never edited by hand.
 
-if (-not (Get-Command Get-ClaudeLevel -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-ClaudeLevel)) {
     . (Join-Path $PSScriptRoot "config-helpers.ps1")
 }
 
 $script:CLAUDE_AGENT_TIERS = @("strong", "default", "light")
 $script:CLAUDE_AGENT_PREFIX = "crucible-"
-if (-not (Get-Command New-CrucibleCommand -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:New-CrucibleCommand)) {
     . (Join-Path $PSScriptRoot "crucible-command.ps1")
 }
 

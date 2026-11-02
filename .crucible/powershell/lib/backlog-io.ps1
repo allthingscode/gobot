@@ -313,10 +313,10 @@ function Restore-BacklogTask {
 
     # Restore frontmatter status
     $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-    if (-not (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath Function:Set-BacklogSpecFrontmatterStatus)) {
         if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
     }
-    if (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue) {
+    if (Test-Path -LiteralPath Function:Set-BacklogSpecFrontmatterStatus) {
         Set-BacklogSpecFrontmatterStatus -Path $activeSpecPath -Status $ActiveStatus
     }
 
@@ -409,10 +409,10 @@ function Restore-BacklogTask {
         }
 
         $lineArray = [string[]]$lines.ToArray()
-        if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+        if (-not (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn)) {
             if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
         }
-        if (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue) {
+        if (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn) {
             $statusColumn = Get-MarkdownTableStatusColumn -Lines $lineArray -RowIndex $mainIdx
             if ($statusColumn -ge 0) {
                 $cells = [System.Collections.Generic.List[string]]::new()
@@ -451,15 +451,15 @@ function Set-ArchivedBacklogTaskAbandoned {
         $archivedMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir ($dir + "/archived")) | Select-Object -First 1
         if ($null -ne $archivedMatch) {
             $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-            if (-not (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath Function:Set-BacklogSpecFrontmatterStatus)) {
                 if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
             }
-            if (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue) {
+            if (Test-Path -LiteralPath Function:Set-BacklogSpecFrontmatterStatus) {
                 Set-BacklogSpecFrontmatterStatus -Path $archivedMatch.FullName -Status "Abandoned"
             }
             $relativeArchived = "$dir/archived/$($archivedMatch.Name)"
             $archivedLink = $relativeArchived.Replace("\", "/")
-            if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn)) {
                 if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
             }
             # Read, edit and write under one lock so a row another run changes
@@ -520,7 +520,7 @@ function Get-TaskFinalizationDetails {
 
     # Load archive-task helper if not loaded
     $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-    if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn)) {
         if (Test-Path -LiteralPath $archiveLibPath) {
             . $archiveLibPath
         } else {
@@ -633,7 +633,7 @@ function Invoke-HumanGateBacklogFinalization {
                 } else {
                     # Load archive-task helper
                     $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-                    if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+                    if (-not (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive)) {
                         if (Test-Path -LiteralPath $archiveLibPath) {
                             . $archiveLibPath
                         } else {
@@ -694,10 +694,10 @@ function Invoke-AbandonedBacklogTaskArchive {
         $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $ProjectRoot
         if (-not [string]::IsNullOrEmpty($activeSpecPath) -and (Test-Path -LiteralPath $activeSpecPath) -and ($activeSpecPath -match '(?i)[/\\]active[/\\]')) {
             $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-            if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive)) {
                 if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
             }
-            if (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue) {
+            if (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive) {
                 try {
                     $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath -Status "Abandoned"
                     Write-Host ("[D57] SUCCESS: Auto-archived abandoned task as $($archiveResult.Type) (status Abandoned): $($archiveResult.ArchivedRelPath)") -ForegroundColor Green

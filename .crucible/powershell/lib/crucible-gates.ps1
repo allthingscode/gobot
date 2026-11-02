@@ -1,4 +1,4 @@
-if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
 
 . (Join-Path $PSScriptRoot "platform.ps1")
 . (Join-Path $PSScriptRoot "crucible-command.ps1")
@@ -483,7 +483,7 @@ function Complete-CrucibleSourceSession {
             if (-not [string]::IsNullOrEmpty($handoff.task_id) -and (Test-Path -LiteralPath $backlogPath)) {
                 $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
                 if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
-                if (Get-Command "Get-TaskFinalizationDetails" -ErrorAction SilentlyContinue) {
+                if (Test-Path -LiteralPath Function:Get-TaskFinalizationDetails) {
                     $specInfo = Get-TaskFinalizationDetails -TaskId $handoff.task_id -ProjectRoot $repoRoot
                     if ($specInfo.SpecExistsInActive -and -not $specInfo.SpecExistsInArchived -and -not [string]::IsNullOrEmpty($specInfo.SpecPathInActive)) {
                         $fileName = Split-Path -Leaf $specInfo.SpecPathInActive
@@ -571,12 +571,12 @@ function Complete-CrucibleSourceSession {
                             }
                         }
 
-                        if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+                        if (-not (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn)) {
                             $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
                             if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
                         }
 
-                        if ($matchingRowIdx -ge 0 -and (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+                        if ($matchingRowIdx -ge 0 -and (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn)) {
                             $statusColIdx = Get-MarkdownTableStatusColumn -Lines ([string[]]$statusLines) -RowIndex $matchingRowIdx
                             if ($statusColIdx -ge 0) {
                                 $rowText = $statusLines[$matchingRowIdx]
@@ -1753,7 +1753,7 @@ function Resolve-CrucibleTransition {
                 if ($activeSpecPath -match '(?i)[/\\]active[/\\]') {
                     # Load archive-task helper
                     $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-                    if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+                    if (-not (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive)) {
                         if (Test-Path -LiteralPath $archiveLibPath) {
                             . $archiveLibPath
                         } else {

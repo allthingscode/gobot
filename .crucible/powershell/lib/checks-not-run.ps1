@@ -1,4 +1,4 @@
-if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
 
 # I12's one reporting point (docs/policy.md section 8): a pipeline check that did not run is
 # recorded here by the step that skipped it, and every receiving surface reads it back from

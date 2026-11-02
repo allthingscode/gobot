@@ -148,7 +148,7 @@ if (-not (Test-Path -LiteralPath $platformLib)) {
 if (Test-Path -LiteralPath $platformLib) {
     . $platformLib
 }
-if (-not (Get-Command "Invoke-Git" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Invoke-Git)) {
     function Invoke-Git {
         [CmdletBinding()]
         param(

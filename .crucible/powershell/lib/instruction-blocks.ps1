@@ -1,4 +1,4 @@
-if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
 
 # Idempotent instruction-block management for adopter root instruction files.
 # Owns the sentinel markers, canonical block content, and append/detect logic.

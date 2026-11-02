@@ -1,11 +1,11 @@
-if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
 
 # Deliberately does NOT call Set-StrictMode. The mode is scoped to the session, not to
 # the file that sets it, so a dot-sourced library imposes it on every caller. See the
 # comment at the top of lib/update-classification.ps1 for the failure that caused
 # there. run-all-tests.ps1 sets the mode itself, so nothing is lost here.
 
-if (-not (Get-Command "Get-NormalizedSha256" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-NormalizedSha256)) {
     . (Join-Path $PSScriptRoot "normalized-hash.ps1")
 }
 

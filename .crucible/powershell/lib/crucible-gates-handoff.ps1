@@ -1,4 +1,4 @@
-if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
 
 # Handoff intake: everything that turns an on-disk handoff into validated in-memory state
 # before any gate decides anything. Selection, misplaced-file recovery, the one reader that

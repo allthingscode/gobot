@@ -85,25 +85,25 @@ function Write-NextStep {
     }
 }
 
-if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-PwshCommand)) {
     . (Join-Path $PSScriptRoot "platform.ps1")
 }
 
-if (-not (Get-Command Assert-CrucibleContextKeys -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Assert-CrucibleContextKeys)) {
     . (Join-Path $PSScriptRoot "crucible-context.ps1")
 }
 
 # Declare Invoke-GitChecked's dependency explicitly; dot-sourcing flattens scope
 # but does not guarantee a sibling's load order. Item 14.
-if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Invoke-GitChecked)) {
     . (Join-Path $PSScriptRoot "git.ps1")
 }
 
-if (-not (Get-Command Get-ClaudeAgentDrift -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-ClaudeAgentDrift)) {
     . (Join-Path $PSScriptRoot "claude-agents.ps1")
 }
 
-if (-not (Get-Command Test-NoCodeClosure -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Test-NoCodeClosure)) {
     . (Join-Path $PSScriptRoot "no-code-closure.ps1")
 }
 

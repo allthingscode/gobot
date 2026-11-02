@@ -1,5 +1,5 @@
 . (Join-Path $PSScriptRoot "platform.ps1")
-if (-not (Get-Command "Test-PathWithinDirectory" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Test-PathWithinDirectory)) {
     . (Join-Path $PSScriptRoot "config-helpers.ps1")
 }
 

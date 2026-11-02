@@ -1,14 +1,14 @@
 # Shared deployment -> done no-code decision for the gate and handoff validator.
 # Both must use the same evidence so new-handoff.ps1 can write an accepted closure. Item 72.
 
-if (-not (Get-Command "Invoke-Git" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Invoke-Git)) {
     $noCodeClosurePlatformPath = Join-Path $PSScriptRoot "platform.ps1"
     if (Test-Path -LiteralPath $noCodeClosurePlatformPath) {
         . $noCodeClosurePlatformPath
     }
 }
 
-if (-not (Get-Command "Get-BacklogItemPathForTaskProjectRoot" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-BacklogItemPathForTaskProjectRoot)) {
     $noCodeClosureBacklogIoPath = Join-Path $PSScriptRoot "backlog-io.ps1"
     if (Test-Path -LiteralPath $noCodeClosureBacklogIoPath) {
         . $noCodeClosureBacklogIoPath

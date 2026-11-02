@@ -286,7 +286,7 @@ function Invoke-CircuitBreakerGates {
         $rebaseCycles = 0
         if ($handoff.PSObject.Properties["rebase_count"] -and
             [int]::TryParse([string]$handoff.rebase_count, [ref]$rebaseCycles) -and $rebaseCycles -gt 0) {
-            $allowance = if (Get-Command Get-RebaseCycleAllowance -ErrorAction SilentlyContinue) { Get-RebaseCycleAllowance } else { 5 }
+            $allowance = if (Test-Path -LiteralPath Function:Get-RebaseCycleAllowance) { Get-RebaseCycleAllowance } else { 5 }
             $effectiveCeiling = $ceiling + ($rebaseCycles * $allowance)
         }
 

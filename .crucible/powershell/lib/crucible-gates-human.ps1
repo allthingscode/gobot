@@ -1,4 +1,4 @@
-if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
 
 # The human gate: decision intake on both input paths, the dispatch to the accept and
 # reject arms, each arm's phases, and the review surface the human is shown.
@@ -108,7 +108,7 @@ function Invoke-HumanGateMerge {
     if ($nextRebase -gt $MaxRebaseAttempts) {
         Write-EventLog -Event "circuit_breaker" -TaskId $TaskId -Specialist "deployment" -Outcome "blocked" -Notes "Recurring Merge Conflicts - $MaxRebaseAttempts strikes at human gate" `
             -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
-        if (Get-Command Write-BlockedTaskRecord -ErrorAction SilentlyContinue) {
+        if (Test-Path -LiteralPath Function:Write-BlockedTaskRecord) {
             Write-BlockedTaskRecord -TaskId $TaskId -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $currentRebase -LastSpecialist "deployment" -Summary "Recurring Merge Conflicts at human gate. Manual conflict resolution required."
         }
         Write-WedgeReport -TaskId $TaskId -ProjectRoot $ProjectRoot -SourcePhase "deployment" -TargetPhase "deployment" -BreakerCode "recurring_merge_conflicts" `

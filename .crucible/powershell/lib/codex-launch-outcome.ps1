@@ -1,4 +1,4 @@
-if (-not (Get-Command Resolve-FilesystemPath -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
 
 # The Codex launcher's outcome: one classifier that turns a run's evidence into one status
 # record, and one emitter that writes that record to stdout and to codex-launch-status.txt.
@@ -23,7 +23,7 @@ $script:CodexLaunchPhases = @("research", "grooming", "implementation", "verific
 
 # Bind advice only when emitted. Loading this library for other helpers must not read
 # unrelated entrypoints (the deprecated shim loads crucible-lib just to log its event).
-if (-not (Get-Command New-CrucibleCommand -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:New-CrucibleCommand)) {
     . (Join-Path $PSScriptRoot "crucible-command.ps1")
 }
 # The apostrophe in "You've" as Codex writes it (U+2019) or a user types it, and the U+2019
