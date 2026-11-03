@@ -85,7 +85,7 @@ $results += Run-Test -Name "Every recovery that re-runs Init carries the supplie
             $missing += ($code + ": " + $recovery)
         }
     }
-    Assert-Result -Name "recovery table has Init re-run commands to check" -Condition ($rerunCount -gt 0) -FailureMessage "no recovery re-runs crucible.ps1 -Init, so this test checks nothing"
+    Assert-Result -Name "recovery table has Init re-run commands to check" -Condition ($rerunCount -gt 0) -FailureMessage "no recovery is an -Init re-run of crucible.ps1, so this test checks nothing"
     Assert-Result -Name "each Init re-run passes the supplied root" -Condition ($missing.Count -eq 0) -FailureMessage ("re-run commands without the supplied -ProjectRoot:`n" + ($missing -join "`n"))
 }
 

@@ -4,8 +4,9 @@
 # work as printed: a wrong path, a value re-split by Start-Process, a dropped -Effort, a
 # missing -ProjectRoot. Each was a string literal that nothing compared with the script it
 # named. Every printed command now comes from New-CrucibleCommand, which reads the target's
-# param block from its AST and binds each parameter to a declared name and kind, applies the
-# companion rules, and quotes each value for the transport it names.
+# param block from its AST and binds each parameter to a declared name and kind, refuses a
+# value its declaration does not accept (item 365), applies the companion rules, and quotes
+# each value for the transport it names.
 # powershell/tests/printed-commands.tests.ps1 fails on a "<script>.ps1 -<Param>" string
 # anywhere else in runtime PowerShell. Policy section 8, I15.
 #
@@ -53,7 +54,35 @@ function Get-CrucibleCommandRoot {
     return $configured
 }
 
-# The declared parameters of a bundle script, by name, each with whether it is a switch.
+# The values a parameter declaration accepts, when it lists them: a [ValidateSet(...)] of
+# literals, or an enum type (whose defined numeric values PowerShell also takes, so an enum is
+# checked by PowerShell's own conversion). $null when the declaration lists none, or lists them in a form
+# that cannot be read without running it (a generator type, a computed IgnoreCase). Item 365.
+function Get-CrucibleParameterAcceptedValues {
+    param([Parameter(Mandatory = $true)][System.Management.Automation.Language.ParameterAst]$Parameter)
+    foreach ($attr in $Parameter.Attributes) {
+        if ($attr -isnot [System.Management.Automation.Language.AttributeAst]) { continue }
+        if ($attr.TypeName.FullName -notin @("ValidateSet", "ValidateSetAttribute", "System.Management.Automation.ValidateSetAttribute")) { continue }
+        if (@($attr.PositionalArguments | Where-Object { $_ -isnot [System.Management.Automation.Language.ConstantExpressionAst] }).Count -gt 0) { return $null }
+        $caseSensitive = $false
+        foreach ($named in $attr.NamedArguments) {
+            if ($named.ArgumentName -ne "IgnoreCase") { continue }
+            if ($named.ExpressionOmitted) { continue }
+            try { $caseSensitive = -not [bool]$named.Argument.SafeGetValue() } catch { return $null }
+        }
+        return [pscustomobject]@{ Values = @($attr.PositionalArguments | ForEach-Object { [string]$_.Value }); CaseSensitive = $caseSensitive; EnumType = $null }
+    }
+    foreach ($attr in $Parameter.Attributes) {
+        if ($attr -isnot [System.Management.Automation.Language.TypeConstraintAst]) { continue }
+        $type = $attr.TypeName.GetReflectionType()
+        if ($null -ne $type -and $type.IsArray) { $type = $type.GetElementType() }
+        if ($null -ne $type -and $type.IsEnum) { return [pscustomobject]@{ Values = @([Enum]::GetNames($type)); CaseSensitive = $false; EnumType = $type } }
+    }
+    return $null
+}
+
+# The declared parameters of a bundle script, by name, each with whether it is a switch and
+# the values it accepts ($null when it lists none).
 function Get-CrucibleScriptParameters {
     param(
         [Parameter(Mandatory = $true)][string]$Script,
@@ -87,12 +116,13 @@ function Get-CrucibleScriptParameters {
     $declared = @{}
     foreach ($p in $ast.ParamBlock.Parameters) {
         $isSwitch = $false
+        $isArray = $false
         foreach ($attr in $p.Attributes) {
-            if ($attr -is [System.Management.Automation.Language.TypeConstraintAst] -and $attr.TypeName.FullName -in @("switch", "System.Management.Automation.SwitchParameter")) {
-                $isSwitch = $true
-            }
+            if ($attr -isnot [System.Management.Automation.Language.TypeConstraintAst]) { continue }
+            if ($attr.TypeName.FullName -in @("switch", "System.Management.Automation.SwitchParameter")) { $isSwitch = $true }
+            if ($attr.TypeName -is [System.Management.Automation.Language.ArrayTypeName]) { $isArray = $true }
         }
-        $declared[$p.Name.VariablePath.UserPath] = $isSwitch
+        $declared[$p.Name.VariablePath.UserPath] = [pscustomobject]@{ IsSwitch = $isSwitch; IsArray = $isArray; Accepted = (Get-CrucibleParameterAcceptedValues -Parameter $p) }
     }
     $script:CrucibleCommandParameterCache[$cacheKey] = $declared
     return $declared
@@ -113,6 +143,44 @@ function Get-CrucibleCommandCompanionProblems {
         if (-not [string]::IsNullOrEmpty($rule.Unless) -and $Names -contains $rule.Unless) { continue }
         if ($Names -contains $rule.Requires) { continue }
         $problems += ("-" + $rule.When + " needs -" + $rule.Requires + ": " + $rule.Reason)
+    }
+    return $problems
+}
+
+# Why a value is outside what its parameter accepts, one message each; none when the parameter
+# lists no values. A placeholder ({task_id}, {{crucible_root}}, <phase>) is for the reader to
+# fill and passes, except that a <a|b> choice list must offer only accepted values. Shared with
+# the guard tests, which apply it to literal values without running anything. Item 365.
+function Get-CrucibleCommandValueProblems {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowNull()]$Value,
+        [Parameter(Mandatory = $true)]$Parameter
+    )
+    $accepted = $Parameter.Accepted
+    if ($null -eq $accepted) { return @() }
+    $problems = @()
+    foreach ($item in @($Value)) {
+        $text = [string]$item
+        if ($text -match '^\{[^{}]*\}$' -or $text -match '^\{\{[^{}]*\}\}$') { continue }
+        $members = @($text)
+        if ($text -match '^<(?<inner>[^<>]*)>$') {
+            if (-not $Matches["inner"].Contains("|")) { continue }
+            $members = @($Matches["inner"].Split("|") | ForEach-Object { $_.Trim() })
+        }
+        foreach ($member in $members) {
+            if ($null -ne $accepted.EnumType) {
+                $ok = $true
+                try { $null = [System.Management.Automation.LanguagePrimitives]::ConvertTo($member, $accepted.EnumType) } catch { $ok = $false }
+            } elseif ($accepted.CaseSensitive) {
+                $ok = $accepted.Values -ccontains $member
+            } else {
+                $ok = $accepted.Values -contains $member
+            }
+            if (-not $ok) {
+                $problems += ("-" + $Name + " value '" + $member + "' is outside its accepted values: " + (($accepted.Values | ForEach-Object { "'" + $_ + "'" }) -join ", "))
+            }
+        }
     }
     return $problems
 }
@@ -312,14 +380,23 @@ function New-CrucibleCommand {
                 throw ("New-CrucibleCommand: " + $normalized + " declares no parameter -" + $name + ". Its parameters: " + ((@($declared.Keys) | Sort-Object | ForEach-Object { "-" + $_ }) -join ", "))
             }
             $value = $Parameters[$key]
-            if ($declared[$name]) {
+            if ($declared[$name].IsSwitch) {
                 if ($value -isnot [bool] -or -not $value) {
                     throw ("New-CrucibleCommand: -" + $name + " is a switch of " + $normalized + "; pass `$true, or omit it.")
+                }
+                # A present switch binds True, which its own ValidateSet may refuse.
+                $valueProblems = @(Get-CrucibleCommandValueProblems -Name $name -Value "True" -Parameter $declared[$name])
+                if ($valueProblems.Count -gt 0) {
+                    throw ("New-CrucibleCommand: " + $normalized + " " + ($valueProblems -join "; "))
                 }
                 $parts += ("-" + $name)
             } else {
                 if ($null -eq $value -or $value -is [bool] -or $value -is [switch]) {
                     throw ("New-CrucibleCommand: -" + $name + " of " + $normalized + " takes a value, not a switch.")
+                }
+                $valueProblems = @(Get-CrucibleCommandValueProblems -Name $name -Value $value -Parameter $declared[$name])
+                if ($valueProblems.Count -gt 0) {
+                    throw ("New-CrucibleCommand: " + $normalized + " " + ($valueProblems -join "; "))
                 }
                 if ($value -is [array]) {
                     if ($viaFile) {

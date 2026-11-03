@@ -22,11 +22,11 @@ try {
                 try {
                     $script:CrucibleCommandParameterCache = @{}
                     $bound = Get-CrucibleScriptParameters -Script 'powershell/init-project.ps1' -BundleRoot $bundle
-                    Assert-Result 'value and switch bind' ($bound.ContainsKey('ProjectRoot') -and -not $bound.ProjectRoot -and $bound.Force) ($bound.Keys -join ',')
+                    Assert-Result 'value and switch bind' ($bound.ContainsKey('ProjectRoot') -and -not $bound.ProjectRoot.IsSwitch -and $bound.Force.IsSwitch) ($bound.Keys -join ',')
                     $keys = @($script:CrucibleCommandParameterCache.Keys)
                     Assert-Result 'cache uses native canonical path' ($keys.Count -eq 1 -and $keys[0] -ceq (Join-Path $root 'powershell/init-project.ps1')) ($keys -join ',')
                     $again = Get-CrucibleScriptParameters -Script 'powershell/init-project.ps1' -BundleRoot $root
-                    Assert-Result 'native and alias share cache' ($script:CrucibleCommandParameterCache.Count -eq 1 -and $again.Force) 'cache split'
+                    Assert-Result 'native and alias share cache' ($script:CrucibleCommandParameterCache.Count -eq 1 -and $again.Force.IsSwitch) 'cache split'
                 } finally { if ($shape -eq 'root-relative') { Pop-Location } }
             } finally { Pop-Location }
         }
