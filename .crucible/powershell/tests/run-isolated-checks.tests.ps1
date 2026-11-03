@@ -538,6 +538,7 @@ try {
         $emptyRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot }
         $emptyRecord = Get-Content -LiteralPath $record -Raw
         Assert-Result -Name "I12 a mode with no checks is recorded as not run" -Condition ($emptyRecord.Contains("[isolated checks v2] verification.full checks: config.yaml configures no verification.full checks")) -FailureMessage ($emptyRecord + "`n" + ($emptyRun.Output -join "`n"))
+        Assert-Result -Name "empty verification mode is refused" -Condition ($emptyRun.ExitCode -ne 0) -FailureMessage ($emptyRun.Output -join "`n")
         Assert-Result -Name "I12 a mode with no checks says NOT RUN" -Condition (($emptyRun.Output -join "`n") -match 'NOT RUN: No commands found') -FailureMessage ($emptyRun.Output -join "`n")
 
         $full | Set-Content -LiteralPath $cfgPath -Encoding UTF8

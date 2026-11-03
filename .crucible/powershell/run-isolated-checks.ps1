@@ -334,11 +334,12 @@ function Invoke-ProjectPrePushHook {
     }
 }
 
-# A mode with no checks is reported, not passed (I12). Item 256 may make it a refusal.
+# An empty mode cannot verify anything: record the unavailable check and refuse.
 $modeCheck = "verification." + $targetMode + " checks"
 if ($commands.Count -eq 0) {
-    Write-Host "NOT RUN: No commands found for verification mode '${targetMode}'. Skipping checks." -ForegroundColor Yellow
+    Write-Host "NOT RUN: No commands found for verification mode '${targetMode}'." -ForegroundColor Yellow
     Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $modeCheck -Reason ("config.yaml configures no verification." + $targetMode + " checks, so none ran")
+    throw "config.yaml configures no verification.$targetMode checks; configure checks before running this mode."
 } else {
     Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $modeCheck
 }

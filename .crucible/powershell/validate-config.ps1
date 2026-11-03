@@ -171,10 +171,10 @@ if ($null -ne $reviewNode) {
     foreach ($field in @("ci_timeout_minutes", "ci_queued_grace_minutes")) {
         $result = Read-Value -Path @("review", $field)
         if ($result.Ok -and $null -ne $result.Value) {
-            if ($result.Value -notmatch '^[0-9]+$') {
-                $errors += "review." + $field + " must be a positive whole number of minutes (got '" + $result.Value + "')."
-            } elseif ([double]$result.Value -le 0) {
-                $errors += "review." + $field + " must be a positive whole number of minutes (got '" + $result.Value + "')."
+            try {
+                $null = ConvertFrom-ReviewMinutes -Value $result.Value -Key $field
+            } catch {
+                $errors += $_.Exception.Message
             }
         }
     }
@@ -223,7 +223,14 @@ $null = Test-RequiredSection -Path @("verification", "full") -Name "verification
 
 # The checks are read by the runner's own reader, so a value validated here is the value
 # run-isolated-checks.ps1 runs. Item 245.
-$verificationChecks = @(Get-VerificationChecks -Content $content -Mode quick) + @(Get-VerificationChecks -Content $content -Mode full)
+$verificationChecks = @()
+foreach ($mode in @("quick", "full")) {
+    $modeChecks = @(Get-VerificationChecks -Content $content -Mode $mode)
+    if (@($modeChecks | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Command) }).Count -eq 0) {
+        $errors += "Missing or invalid config field: verification.$mode has zero checks"
+    }
+    $verificationChecks += $modeChecks
+}
 $errors += @(Get-VerificationCheckIdentityErrors -Content $content)
 $hasVerificationCommand = @($verificationChecks | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Command) }).Count -gt 0
 if (-not $hasVerificationCommand) {

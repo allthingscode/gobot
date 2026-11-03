@@ -2667,10 +2667,23 @@ review:
         }
     }
 
+    foreach ($key in @("ci_timeout_minutes", "ci_queued_grace_minutes")) {
+        foreach ($bad in @("twenty", "-5", "1.5", "2147483648")) {
+            $results += Run-Test -Name "Accept config refuses review.$key value $bad" -Body {
+                $root = Join-Path $tempRoot "invalid-accept-config"
+                New-Item -ItemType Directory -Path (Join-Path $root ".crucible") -Force | Out-Null
+                [IO.File]::WriteAllText((Join-Path $root ".crucible/config.yaml"), "review:`n  ${key}: $bad`n")
+                $message = ""
+                try { $null = Get-HumanGateAcceptConfig -ProjectRoot $root } catch { $message = $_.Exception.Message }
+                Assert-Result -Name "invalid review.$key value $bad is refused by name" -Condition ($message.Contains("review.$key")) -FailureMessage "Expected named refusal, got: $message"
+            }
+        }
+    }
+
     $results += Run-Test -Name "The accept arm reads its review settings once, with the documented defaults" -Body {
         # In process: Get-HumanGateAcceptConfig returns instead of exiting (item 14 step C4),
         # so the values the publish phase acts on are checked here rather than inferred from
-        # a spawned gate's output. The unparseable-value case is item 252's, not pinned here.
+        # a spawned gate's output.
         $cfgRoot = Join-Path $tempRoot "accept-config"
         $absent = Join-Path $cfgRoot "absent"
         New-Item -ItemType Directory -Path (Join-Path $absent ".crucible") -Force | Out-Null

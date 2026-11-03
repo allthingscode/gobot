@@ -464,6 +464,12 @@ function Invoke-HumanGateAcceptRedirect {
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
     $backlogPath = Join-Path $backlogDir "BACKLOG.md"
 
+    # Refuse malformed accept settings before merging or finalizing any work.
+    $acceptConfig = $null
+    if ($SourcePhase -ne "grooming") {
+        $acceptConfig = Get-HumanGateAcceptConfig -ProjectRoot $ProjectRoot
+    }
+
     # Read once, above the merge and archival, and used twice. The merge already decides whether
     # this task shipped code by asking whether it has a branch to merge; the archival needs
     # the same fact to record Production rather than Resolved, and reading it in two places
@@ -499,7 +505,6 @@ function Invoke-HumanGateAcceptRedirect {
     }
 
     if ($SourcePhase -ne "grooming") {
-        $acceptConfig = Get-HumanGateAcceptConfig -ProjectRoot $ProjectRoot
         $mergedSha = (git rev-parse HEAD 2>$null).Trim()
 
         Invoke-HumanGatePublish -TaskId $TaskId -ProjectRoot $ProjectRoot -PrimaryBranch $PrimaryBranch -Config $acceptConfig -MergedSha $mergedSha `
@@ -545,8 +550,8 @@ function Invoke-HumanGateAcceptMerge {
 
 function Get-HumanGateAcceptConfig {
     # The review.* settings the accept arm acts on, read once. An absent key takes
-    # Get-ConfiguredReview's default; a timeout or grace that is not a non-negative
-    # integer also takes it (item 252). ci_staging_branch_prefix is read by
+    # Get-ConfiguredReview's default; malformed minutes are refused.
+    # ci_staging_branch_prefix is read by
     # Invoke-HumanGatePublish, only when it publishes a staging ref.
     param([Parameter(Mandatory=$true)][string]$ProjectRoot)
 
@@ -561,21 +566,9 @@ function Get-HumanGateAcceptConfig {
         $requireGreenCi = $true
     }
     $ciTimeoutVal = Get-ConfiguredReview -Key "ci_timeout_minutes" -ProjectRoot $ProjectRoot
-    $ciTimeoutMinutes = 20
-    if (-not [string]::IsNullOrWhiteSpace($ciTimeoutVal)) {
-        $parsedTimeout = 0
-        if ([int]::TryParse($ciTimeoutVal, [ref]$parsedTimeout) -and $parsedTimeout -ge 0) {
-            $ciTimeoutMinutes = $parsedTimeout
-        }
-    }
+    $ciTimeoutMinutes = ConvertFrom-ReviewMinutes -Value $ciTimeoutVal -Key "ci_timeout_minutes"
     $ciQueuedGraceVal = Get-ConfiguredReview -Key "ci_queued_grace_minutes" -ProjectRoot $ProjectRoot
-    $ciQueuedGraceMinutes = 15
-    if (-not [string]::IsNullOrWhiteSpace($ciQueuedGraceVal)) {
-        $parsedGrace = 0
-        if ([int]::TryParse($ciQueuedGraceVal, [ref]$parsedGrace) -and $parsedGrace -ge 0) {
-            $ciQueuedGraceMinutes = $parsedGrace
-        }
-    }
+    $ciQueuedGraceMinutes = ConvertFrom-ReviewMinutes -Value $ciQueuedGraceVal -Key "ci_queued_grace_minutes"
     $ciRequiredChecks = Get-ConfiguredReview -Key "ci_required_checks" -ProjectRoot $ProjectRoot
     $ciPostPushWatchVal = Get-ConfiguredReview -Key "ci_post_push_watch" -ProjectRoot $ProjectRoot
     $ciPostPushWatch = ($ciPostPushWatchVal -eq "true")

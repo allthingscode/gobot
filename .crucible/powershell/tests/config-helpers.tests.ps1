@@ -9,17 +9,125 @@ $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 
 $results = @()
 
-
-
-
-
-
+function Import-SubjectFunction {
+    param([string]$File, [string[]]$Names)
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($File, [ref]$null, [ref]$null)
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
+        if ($node.Name -in $Names) { . ([scriptblock]::Create($node.Extent.Text)) }
+    }
+    foreach ($name in $Names) { Set-Item "Function:script:$name" (Get-Item "Function:$name").ScriptBlock }
+}
 
 function ToStr($arr) { if ($null -eq $arr) { return "<null>" } return ($arr -join '.') }
 
 $tempRoot = New-TestFixtureRoot -NameHint "config-helpers-test"
 
 try {
+    . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+    foreach ($minutesKey in @('ci_timeout_minutes', 'ci_queued_grace_minutes')) {
+        $results += Run-Test -Name "Accept refuses invalid $minutesKey before side effects" -Body {
+            Import-SubjectFunction "$REPO_ROOT/powershell/lib/crucible-gates-human.ps1" @('Invoke-HumanGateAcceptRedirect', 'Get-HumanGateAcceptConfig')
+            $root = Join-Path $tempRoot 'accept'
+            $null = New-Item -ItemType Directory "$root/.crucible" -Force
+            [IO.File]::WriteAllText("$root/.crucible/config.yaml", "review:`n  ${minutesKey}: invalid`n")
+            $script:merged = $false
+            $script:finalized = $false
+            function git { $global:LASTEXITCODE = 0; return 'fixture-sha' }
+            function Get-ConfiguredPath { return $root }
+            function Invoke-HumanGateAcceptMerge { $script:merged = $true }
+            function Invoke-HumanGateBacklogFinalization { $script:finalized = $true; return $true }
+            $message = ''
+            try {
+                Invoke-HumanGateAcceptRedirect -TaskId F-001 -Outcome accepted -ProjectRoot $root -PrimaryBranch main -LogFile fixture -CircuitBreakerHistoryFile fixture
+            } catch { $message = $_.Exception.Message }
+            Assert-Result -Name "invalid $minutesKey refuses with no merge or finalization" -Condition ($message -match "review\.$minutesKey" -and -not $script:merged -and -not $script:finalized) -FailureMessage "message=$message merged=$script:merged finalized=$script:finalized"
+        }
+    }
+
+    foreach ($mode in @('quick', 'full')) {
+        foreach ($entries in @('[]', "`n    - name: no-command")) {
+            $results += Run-Test -Name "Validator names empty $mode mode ($entries)" -Body {
+                $text = [IO.File]::ReadAllText("$REPO_ROOT/templates/project/.crucible/config.yaml") -replace 'replace-with-project-quick-test-command', 'Write-Output quick' -replace 'replace-with-project-full-test-command', 'Write-Output full'
+                $bundle = Join-Path $tempRoot 'validate/.crucible'
+                foreach ($dir in @('docs','prompts','personas','schemas','sops','powershell')) {
+                    $null = New-Item -ItemType Directory (Join-Path $bundle $dir) -Force
+                }
+                $path = Join-Path $bundle 'config.yaml'
+                [IO.File]::WriteAllText($path, $text)
+                $control = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File "$REPO_ROOT/powershell/validate-config.ps1" -ConfigPath $path }
+                Assert-Result -Name 'populated modes pass validation' -Condition ($control.ExitCode -eq 0) -FailureMessage $control.Output
+                $text = $text -replace "(?m)^  ${mode}:\r?\n    - name: [^\r\n]+\r?\n      command: [^\r\n]+", "  ${mode}: $entries"
+                [IO.File]::WriteAllText($path, $text)
+                $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File "$REPO_ROOT/powershell/validate-config.ps1" -ConfigPath $path }
+                Assert-Result -Name "validator refuses and names verification.$mode zero checks" -Condition ($run.ExitCode -eq 2 -and $run.Output -match "verification\.$mode has zero checks") -FailureMessage $run.Output
+            }
+        }
+    }
+
+    $results += Run-Test -Name 'Verification fields trim trailing whitespace' -Body {
+        $checks = @(Get-VerificationChecks -Content "verification:`n  quick:`n    - name: Cfg`n      command: echo ok`n      host_gate: os=windows   `n  config_check:`n    name: `"Cfg check`"  `n    command: echo config`n" -Mode quick)
+        Assert-Result -Name 'host gate ignores trailing spaces' -Condition ($checks[0].HostGate -ceq 'os=windows') -FailureMessage "Got <$($checks[0].HostGate)>"
+    }
+    $results += Run-Test -Name 'Config check name trims before decoding' -Body {
+        $checks = @(Get-VerificationChecks -Content "verification:`n  config_check:`n    name: `"Cfg`"  `n    command: echo config`n" -Mode full)
+        Assert-Result -Name 'quoted config check name ignores trailing spaces' -Condition ($checks[0].Name -ceq 'Cfg') -FailureMessage "Got <$($checks[0].Name)>"
+    }
+
+    $results += Run-Test -Name 'Shared encoder round trips quotes and backslashes' -Body {
+        $value = 'A "quote" at C:\work\'
+        $got = ConvertFrom-ConfigScalar (ConvertTo-ConfigScalar $value)
+        Assert-Result -Name 'shared encoder preserves scalar' -Condition ($got -ceq $value) -FailureMessage $got
+    }
+    $results += Run-Test -Name 'Bundle scalar IO uses shared decoding' -Body {
+        Import-SubjectFunction "$REPO_ROOT/powershell/update-bundle.ps1" @('Read-ConfigScalar', 'Write-ConfigScalar')
+        $path = Join-Path $tempRoot 'bundle.yaml'
+        [IO.File]::WriteAllText($path, "crucible_version: `"1.2.3`"`ncrucible_install_commit: 'abc123'`n")
+        foreach ($pair in @(@('crucible_version','1.2.3'), @('crucible_install_commit','abc123'))) {
+            Assert-Result -Name "bundle preserves $($pair[0]) reading" -Condition ((Read-ConfigScalar $path $pair[0]) -ceq $pair[1]) -FailureMessage $pair[0]
+            Write-ConfigScalar $path $pair[0] $pair[1]
+            Assert-Result -Name "bundle preserves $($pair[0]) writing" -Condition ((Read-ConfigScalar $path $pair[0]) -ceq $pair[1]) -FailureMessage $pair[0]
+        }
+        $value = 'A "quote" at C:\work\'
+        Write-ConfigScalar $path description $value
+        Assert-Result -Name 'bundle escaped scalar round trip' -Condition ((Read-ConfigScalar $path description) -ceq $value) -FailureMessage ([IO.File]::ReadAllText($path))
+    }
+    foreach ($value in @('C:\work\', '\\server\share\b')) {
+        $results += Run-Test -Name "Legacy quoted path preserves $value" -Body {
+            $got = Get-ConfigBlockValue -Content ('paths:' + "`n  backlog: " + '"' + $value + '"') -Path @('paths','backlog') -Source fixture
+            Assert-Result -Name "legacy path remains verbatim $value" -Condition ($got -ceq $value) -FailureMessage "Got <$got>"
+        }
+    }
+    foreach ($key in @('ci_timeout_minutes', 'ci_queued_grace_minutes')) {
+        $results += Run-Test -Name "Review $key schema bounds match runtime" -Body {
+            $schema = Get-Content "$REPO_ROOT/schemas/config.schema.json" -Raw | ConvertFrom-Json
+            $property = $schema.properties.review.properties.$key
+            Assert-Result -Name "$key has non-negative schema minimum" -Condition ($property.PSObject.Properties.Name -contains 'minimum' -and $property.minimum -eq 0) -FailureMessage "$key missing minimum 0"
+        }
+    }
+
+    $results += Run-Test -Name "Init description escapes read back unchanged" -Body {
+        . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+        $root = Join-Path $tempRoot "quoted-description"
+        $description = 'A path \ and a "quote"'
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT "powershell/init-project.ps1") -ProjectRoot $root -Description $description -Quiet }
+        Assert-Result -Name "quoted description init succeeds" -Condition ($cmd.ExitCode -eq 0) -FailureMessage $cmd.Output
+        $text = Get-Content -LiteralPath (Join-Path $root ".crucible/config.yaml") -Raw
+        $got = Get-ConfigBlockValue -Content $text -Path @("project", "description") -Source "fixture"
+        Assert-Result -Name "description backslash and quote round trip" -Condition ($got -ceq $description) -FailureMessage "Got: $got"
+    }
+
+    $results += Run-Test -Name "Init absolute Windows backlog reads back unchanged" -Body {
+        if (-not $IsWindows) { return }
+        . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+        $root = Join-Path $tempRoot "windows-backlog"
+        $backlog = Join-Path $tempRoot "absolute-backlog"
+        $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT "powershell/init-project.ps1") -ProjectRoot $root -BacklogDir $backlog -Quiet }
+        Assert-Result -Name "absolute backlog init succeeds" -Condition ($cmd.ExitCode -eq 0) -FailureMessage $cmd.Output
+        $text = Get-Content -LiteralPath (Join-Path $root ".crucible/config.yaml") -Raw
+        $got = Get-ConfigBlockValue -Content $text -Path @("paths", "backlog") -Source "fixture"
+        Assert-Result -Name "absolute Windows backlog round trip" -Condition ($got -ceq $backlog) -FailureMessage "Got: $got"
+    }
+
     $results += Run-Test -Name "Parse-SemVer extracts major.minor.patch" -Body {
         Assert-Result -Name "full triple" -Condition ((ToStr (Parse-SemVer "1.2.3")) -eq "1.2.3") -FailureMessage "1.2.3 should parse to 1.2.3"
         Assert-Result -Name "embedded in text" -Condition ((ToStr (Parse-SemVer "crucible v2.10.0 (build 7)")) -eq "2.10.0") -FailureMessage "should extract embedded version"

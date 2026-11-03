@@ -17,7 +17,9 @@ function Get-ConfigEntries {
     # glued to the first key, making line 1 unmatchable.
     $text = $Content -replace '^\uFEFF', ''
 
+    $lineIndex = -1
     foreach ($line in ($text -split '\r?\n')) {
+        $lineIndex++
         if ($line -match '^[ \t]*$') { continue }
         if ($line -match '^[ \t]*#') { continue }
 
@@ -32,6 +34,7 @@ function Get-ConfigEntries {
         }
 
         $entries += [pscustomobject]@{
+            LineIndex = $lineIndex
             Indent = $indent
             Key    = $key
             Value  = $value
@@ -42,16 +45,26 @@ function Get-ConfigEntries {
     return $entries
 }
 
-# Unquote a scalar and drop a trailing comment. A quoted value is taken verbatim so a
-# '#' inside it survives.
+# One owner for config scalar decoding. Double-quoted YAML escapes written by init
+# decode once here; comments and hashes inside quoted values stay intact.
 function ConvertFrom-ConfigScalar {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
 
     $text = $Raw.Trim()
-    if ($text -match '^"([^"]*)"') { return $Matches[1] }
+    if ($text -match '^"((?:[^"\\]|\\[\\"])*)"') {
+        return [regex]::Replace($Matches[1], '\\([\\"])', { param($m) $m.Groups[1].Value })
+    }
+    # Older configs used verbatim Windows paths. Decode only when the entire
+    # quoted value uses supported escapes; otherwise preserve every backslash.
+    if ($text -match '^"(.*)"(?:[ \t]*#.*)?$') { return $Matches[1] }
     if ($text -match "^'([^']*)'") { return $Matches[1] }
     if ($text -match '^(.*?)[ \t]+#') { $text = $Matches[1] }
     return $text.Trim()
+}
+
+function ConvertTo-ConfigScalar {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+    return '"' + $Value.Replace('\', '\\').Replace('"', '\"') + '"'
 }
 
 # A requested key present without a 'key: value' pair is malformed, not absent. Item 34.
@@ -177,10 +190,12 @@ function Get-ConfigBlockList {
 
 function Read-VerificationInlineScalar {
     param([string]$Value)
+    $Value = $Value.Trim()
     if ($Value.Length -ge 2 -and ($Value[0] -eq '"' -or $Value[0] -eq "'") -and $Value[0] -eq $Value[$Value.Length - 1]) {
         $inner = $Value.Substring(1, $Value.Length - 2)
         # `"a.exe" "b"` starts and ends with a quote but is not one quoted scalar.
-        if (-not $inner.Contains([string]$Value[0])) { return $inner }
+        if ($Value[0] -eq '"' -and $Value -match '^"(?:[^"\\]|\\.)*"$') { return ConvertFrom-ConfigScalar $Value }
+        if (-not $inner.Contains([string]$Value[0])) { return ConvertFrom-ConfigScalar $Value }
     }
     return $Value
 }
@@ -236,6 +251,15 @@ function Read-VerificationBlockScalar {
     return @{ Value = $value; NextIndex = $i }
 }
 
+function Read-VerificationEntryValue {
+    param([object]$Entry, [string[]]$Lines)
+    $raw = $Entry.Value.Trim()
+    if ($raw -match "^[|>][+-]?\d*$") {
+        return (Read-VerificationBlockScalar -Lines $Lines -HeaderIndex $Entry.LineIndex -Indicator $raw -KeyIndent $Entry.Indent).Value
+    }
+    return Read-VerificationInlineScalar $raw
+}
+
 # Returns one record per check in the mode: Name, Command, HostGate, AlternativeRunner.
 # Full mode appends config_check last. HostGate and AlternativeRunner are $null when the
 # key is absent and "" when it is written empty, so the validator can refuse the second.
@@ -246,92 +270,40 @@ function Get-VerificationChecks {
     )
 
     $lines = @(([string]$Content) -split '\r?\n')
+    $entries = @(Get-ConfigEntries -Content ([string]$Content))
     $commands = @()
-    $inVerification = $false
-    $inMode = $false
-    $inConfigCheck = $false
-    $currentName = ""
-    $configCheckName = ""
-    $configCheckCommand = ""
-    $currentHostGate = $null
-    $currentAlternativeRunner = $null
-    $currentCommand = $null
-
-    for ($idx = 0; $idx -lt $lines.Count; $idx++) {
-        $line = $lines[$idx]
-        if ($line -match "^verification:\s*$") {
-            $inVerification = $true
-            continue
-        }
-        if ($inVerification -and $line -match "^[a-zA-Z]") {
-            $inVerification = $false
-        }
-        if (-not $inVerification) { continue }
-
-        if ($line -match "^\s{2}${Mode}:\s*$") {
-            $inMode = $true
-            $inConfigCheck = $false
-            continue
-        }
-        if ($line -match "^\s{2}config_check:\s*$") {
-            $inConfigCheck = $true
-            $inMode = $false
-            continue
-        }
-        if (($inMode -or $inConfigCheck) -and $line -match "^\s{2}[a-zA-Z]") {
-            $inMode = $false
-            $inConfigCheck = $false
-        }
-        if ($inMode) {
-            if ($line -match "^\s{4}-\s*name:\s*(.+?)\s*$") {
-                if ($null -ne $currentCommand) {
-                    $commands += @{ Name = $currentName; Command = $currentCommand; HostGate = $currentHostGate; AlternativeRunner = $currentAlternativeRunner }
-                }
-                $currentName = Read-VerificationInlineScalar -Value $Matches[1]
-                $currentHostGate = $null
-                $currentAlternativeRunner = $null
-                $currentCommand = $null
-            }
-            if ($line -match "^\s{6}host_gate:\s*(.*?)\s*$") { $currentHostGate = Read-VerificationInlineScalar -Value $Matches[1] }
-            if ($line -match "^\s{6}alternative_runner:\s*(.*?)\s*$") { $currentAlternativeRunner = Read-VerificationInlineScalar -Value $Matches[1] }
-            if ($line -match "^(\s{6})command:\s*(.+?)\s*$") {
-                $keyIndent = $Matches[1].Length
-                $rawVal = $Matches[2].Trim()
-                if ($rawVal -match "^[|>][+-]?\d*$") {
-                    $bs = Read-VerificationBlockScalar -Lines $lines -HeaderIndex $idx -Indicator $rawVal -KeyIndent $keyIndent
-                    $currentCommand = $bs.Value
-                    $idx = $bs.NextIndex - 1
-                } else {
-                    $currentCommand = Read-VerificationInlineScalar -Value $rawVal
+    $node = Find-ConfigNode -Entries $entries -Path @("verification", $Mode) -Source "config.yaml"
+    if ($null -ne $node -and $node.SpanStart -lt $node.SpanEnd) {
+        $listIndent = $entries[$node.SpanStart].Indent
+        for ($i = $node.SpanStart; $i -lt $node.SpanEnd; $i++) {
+            $entry = $entries[$i]
+            if ($entry.Indent -ne $listIndent -or $entry.Text -notmatch '^-\s*name:\s*(.+)$') { continue }
+            $check = @{ Name = Read-VerificationInlineScalar $Matches[1]; Command = $null; HostGate = $null; AlternativeRunner = $null }
+            $end = $i + 1
+            while ($end -lt $node.SpanEnd -and $entries[$end].Indent -gt $listIndent) { $end++ }
+            if ($i + 1 -lt $end) {
+                $fieldIndent = $entries[$i + 1].Indent
+                for ($j = $i + 1; $j -lt $end; $j++) {
+                    $field = $entries[$j]
+                    if ($field.Indent -ne $fieldIndent) { continue }
+                    switch ($field.Key) {
+                        "command" { $check.Command = Read-VerificationEntryValue -Entry $field -Lines $lines }
+                        "host_gate" { $check.HostGate = Read-VerificationInlineScalar $field.Value }
+                        "alternative_runner" { $check.AlternativeRunner = Read-VerificationInlineScalar $field.Value }
+                    }
                 }
             }
-        }
-        if ($inConfigCheck) {
-            if ($line -match "^\s{4}name:\s*(.+?)\s*$") {
-                $configCheckName = Read-VerificationInlineScalar -Value $Matches[1]
-            }
-            if ($line -match "^(\s{4})command:\s*(.+?)\s*$") {
-                $keyIndent = $Matches[1].Length
-                $rawVal = $Matches[2].Trim()
-                if ($rawVal -match "^[|>][+-]?\d*$") {
-                    $bs = Read-VerificationBlockScalar -Lines $lines -HeaderIndex $idx -Indicator $rawVal -KeyIndent $keyIndent
-                    $configCheckCommand = $bs.Value
-                    $idx = $bs.NextIndex - 1
-                } else {
-                    $configCheckCommand = Read-VerificationInlineScalar -Value $rawVal
-                }
-            }
+            if ($null -ne $check.Command) { $commands += $check }
+            $i = $end - 1
         }
     }
-
-    if ($null -ne $currentCommand) {
-        $commands += @{ Name = $currentName; Command = $currentCommand; HostGate = $currentHostGate; AlternativeRunner = $currentAlternativeRunner }
-    }
-
-    if ($Mode -eq "full" -and $configCheckName -and $configCheckCommand) {
-        $commands += @{
-            Name = $configCheckName
-            Command = $configCheckCommand
+    if ($Mode -eq "full") {
+        $nameNode = Find-ConfigNode -Entries $entries -Path @("verification", "config_check", "name") -Source "config.yaml"
+        $commandNode = Find-ConfigNode -Entries $entries -Path @("verification", "config_check", "command") -Source "config.yaml"
+        if ($null -ne $nameNode -and $null -ne $commandNode) {
+            $name = Read-VerificationInlineScalar $entries[$nameNode.Index].Value
+            $command = Read-VerificationEntryValue -Entry $entries[$commandNode.Index] -Lines $lines
+            if ($name -and $command) { $commands += @{ Name = $name; Command = $command; HostGate = $null; AlternativeRunner = $null } }
         }
     }
 
@@ -972,4 +944,14 @@ function Compare-SemVer {
         if ($A[$i] -lt $B[$i]) { return -1 }
     }
     return 0
+}
+
+# Optional review keys default in Get-ConfiguredReview; every present value must parse.
+function ConvertFrom-ReviewMinutes {
+    param([string]$Value, [string]$Key)
+    $minutes = 0
+    if ($Value -notmatch '^[0-9]+$' -or -not [int]::TryParse($Value, [ref]$minutes)) {
+        throw "review.$Key must be a non-negative integer of minutes (got '$Value')."
+    }
+    return $minutes
 }

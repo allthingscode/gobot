@@ -390,7 +390,22 @@ review:
         $path = New-ReviewConfig -Name "review-bad-timeout" -Review ($goodReview -replace "ci_timeout_minutes: 20", "ci_timeout_minutes: soon")
         $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $path }
         Assert-Result -Name "bad timeout exit" -Condition ($cmd.ExitCode -eq 2) -FailureMessage ("expected exit 2 for ci_timeout_minutes: soon, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
-        Assert-Result -Name "bad timeout message" -Condition ($cmd.Output -match "review\.ci_timeout_minutes must be a positive whole number") -FailureMessage ("expected the numeric message. Output: " + $cmd.Output)
+        Assert-Result -Name "bad timeout message" -Condition ($cmd.Output -match "review\.ci_timeout_minutes must be a non-negative integer") -FailureMessage ("expected the numeric message. Output: " + $cmd.Output)
+    }
+
+    foreach ($key in @("ci_timeout_minutes", "ci_queued_grace_minutes")) {
+        $results += Run-Test -Name "Validator checks review.$key numeric values" -Body {
+            foreach ($value in @("twenty", "-5", "2147483648", "0")) {
+                $review = $goodReview -replace ("${key}: [0-9]+"), "${key}: $value"
+                $path = New-ReviewConfig -Name "numeric-review" -Review $review
+                $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $VALIDATE_SCRIPT -ConfigPath $path }
+                $expected = if ($value -eq "0") { 0 } else { 2 }
+                Assert-Result -Name "review.$key value $value verdict" -Condition ($cmd.ExitCode -eq $expected) -FailureMessage ($cmd.Output -join "`n")
+                if ($expected -ne 0) {
+                    Assert-Result -Name "review.$key invalid value is named" -Condition (($cmd.Output -join "`n").Contains("review.$key")) -FailureMessage ($cmd.Output -join "`n")
+                }
+            }
+        }
     }
 
     $results += Run-Test -Name "A review key present but valueless is reported, not treated as absent" -Body {
@@ -447,19 +462,35 @@ review:
         # The runtime reads this file indent-agnostically. A validator that only
         # understands two spaces disagrees with it about the same config, and reports
         # fields as missing that the runtime reads without trouble.
-        # The verification block is the exception: the runner reads it at fixed indents, and
-        # since item 245 the validator reads it with the runner's reader. Item 256.
         $base = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-        $inVerification = $false
         $widened = (($base + $goodReview) -split "`r?`n" | ForEach-Object {
-            if ($_ -match '^[A-Za-z_]') { $inVerification = ($_ -match '^verification:') }
-            if (-not $inVerification -and $_ -match '^( +)(.*)$') { (" " * ($Matches[1].Length * 2)) + $Matches[2] } else { $_ }
+            if ($_ -match '^( +)(.*)$') { (" " * ($Matches[1].Length * 2)) + $Matches[2] } else { $_ }
         }) -join "`n"
+        $widened = $widened.Replace("go test ./...", "Write-Output wide-check-executed")
         $path = Join-Path $projectRoot ".crucible/config-wide-indent.yaml"
         [System.IO.File]::WriteAllText($path, $widened, (New-Object System.Text.UTF8Encoding($false)))
 
         $cmd = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $path }
         Assert-Result -Name "wide indent exit" -Condition ($cmd.ExitCode -eq 0) -FailureMessage ("expected a 4-space config to validate the same as a 2-space one, got exit " + $cmd.ExitCode + ". Output: " + $cmd.Output)
+        $runnerRoot = Join-Path $tempRoot "wide-runner"
+        New-Item -ItemType Directory -Path (Join-Path $runnerRoot ".crucible") -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $runnerRoot ".crucible/config.yaml"), $widened)
+        . (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1")
+        $primaryBranch = Get-ConfigBlockValue -Content $widened -Path @("project", "default_branch") -Source "fixture"
+        git -C $runnerRoot init --initial-branch=$primaryBranch --quiet
+        git -C $runnerRoot config user.name Test
+        git -C $runnerRoot config user.email test@example.com
+        git -C $runnerRoot config commit.gpgSign false
+        git -C $runnerRoot add .crucible/config.yaml
+        git -C $runnerRoot -c core.hooksPath= commit -m fixture --quiet
+        foreach ($mode in @("quick", "full")) {
+            $checks = @(Get-VerificationChecks -Content $widened -Mode $mode)
+            Assert-Result -Name "wide $mode check count" -Condition ($checks.Count -eq 1) -FailureMessage "Expected one configured check"
+            $output = Invoke-Expression $checks[0].Command
+            Assert-Result -Name "wide $mode check executes" -Condition ($output -eq "wide-check-executed") -FailureMessage "Configured check did not execute"
+            $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT "powershell/run-isolated-checks.ps1") -ProjectRoot $runnerRoot -TaskId R-256 -Mode $mode -Commit HEAD }
+            Assert-Result -Name "wide $mode runner executes checks" -Condition ($run.ExitCode -eq 0 -and ($run.Output -join "`n").Contains("wide-check-executed")) -FailureMessage ($run.Output -join "`n")
+        }
     }
 
     $results += Run-Test -Name "Schema config.schema.json pattern regression test" -Body {

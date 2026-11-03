@@ -39,12 +39,6 @@ function Write-Info {
     }
 }
 
-function ConvertTo-YamlScalar {
-    param([Parameter(Mandatory=$true)][string]$Value)
-    $escaped = $Value.Replace("\", "\\").Replace('"', '\"')
-    return '"' + $escaped + '"'
-}
-
 function Write-Utf8NoBomFile {
     param(
         [Parameter(Mandatory=$true)][string]$Path,
@@ -99,9 +93,9 @@ function Set-CrucibleConfigStamp {
 
     if ($Version -match '^[0-9]+\.[0-9]+\.[0-9]+') {
         if ($hasVersion) {
-            $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-YamlScalar -Value $Version))
+            $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-ConfigScalar -Value $Version))
         } else {
-            $config = $config.TrimEnd() + "`ncrucible_version: " + (ConvertTo-YamlScalar -Value $Version) + "`n"
+            $config = $config.TrimEnd() + "`ncrucible_version: " + (ConvertTo-ConfigScalar -Value $Version) + "`n"
         }
     } elseif ($hasVersion) {
         $config = $config -replace '(?m)^crucible_version: .+\r?\n', ''
@@ -109,9 +103,9 @@ function Set-CrucibleConfigStamp {
 
     if ($Commit -match '^[0-9a-f]{40}$') {
         if ($hasCommit) {
-            $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-YamlScalar -Value $Commit))
+            $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-ConfigScalar -Value $Commit))
         } else {
-            $config = $config.TrimEnd() + "`ncrucible_install_commit: " + (ConvertTo-YamlScalar -Value $Commit) + "`n"
+            $config = $config.TrimEnd() + "`ncrucible_install_commit: " + (ConvertTo-ConfigScalar -Value $Commit) + "`n"
         }
     } elseif ($hasCommit) {
         $config = $config -replace '(?m)^crucible_install_commit: .+\r?\n', ''
@@ -265,26 +259,26 @@ if (-not (Test-Path -LiteralPath $configPath)) {
 }
 
 $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-$config = $config -replace '(?m)^  name: .+$', ('  name: ' + (ConvertTo-YamlScalar -Value $ProjectName))
-$config = $config -replace '(?m)^  description: .+$', ('  description: ' + (ConvertTo-YamlScalar -Value $Description))
+$config = $config -replace '(?m)^  name: .+$', ('  name: ' + (ConvertTo-ConfigScalar -Value $ProjectName))
+$config = $config -replace '(?m)^  description: .+$', ('  description: ' + (ConvertTo-ConfigScalar -Value $Description))
 # Crucible merges into project.default_branch and stops when it does not exist, so the
 # default is the branch the project is on, not a guess. Item 189.
 if ([string]::IsNullOrWhiteSpace($DefaultBranch)) {
     $currentBranch = (git -C (Resolve-FilesystemPath -Path $resolvedProjectRoot) symbolic-ref --short -q HEAD 2>$null)
     $DefaultBranch = if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentBranch)) { ([string]$currentBranch).Trim() } else { "main" }
 }
-$config = $config -replace '(?m)^  default_branch: .+$', ('  default_branch: ' + (ConvertTo-YamlScalar -Value $DefaultBranch))
-$config = $config -replace '(?m)^crucible_root: .+$', ('crucible_root: ' + (ConvertTo-YamlScalar -Value ".crucible"))
+$config = $config -replace '(?m)^  default_branch: .+$', ('  default_branch: ' + (ConvertTo-ConfigScalar -Value $DefaultBranch))
+$config = $config -replace '(?m)^crucible_root: .+$', ('crucible_root: ' + (ConvertTo-ConfigScalar -Value ".crucible"))
 
 $stamp = Get-CrucibleSourceStamp
 if ($stamp.Version -match '^[0-9]+\.[0-9]+\.[0-9]+') {
-    $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-YamlScalar -Value $stamp.Version))
+    $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-ConfigScalar -Value $stamp.Version))
 } else {
     $config = $config -replace '(?m)^crucible_version: .+\r?\n', ''
 }
 
 if ($stamp.Commit -match '^[0-9a-f]{40}$') {
-    $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-YamlScalar -Value $stamp.Commit))
+    $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-ConfigScalar -Value $stamp.Commit))
 } else {
     $config = $config -replace '(?m)^crucible_install_commit: .+\r?\n', ''
 }
@@ -311,7 +305,7 @@ if ([string]::IsNullOrEmpty($finalBacklogDir) -and ![string]::IsNullOrEmpty($det
 }
 
 if (![string]::IsNullOrEmpty($finalBacklogDir)) {
-    $backlogVal = ConvertTo-YamlScalar -Value $finalBacklogDir
+    $backlogVal = ConvertTo-ConfigScalar -Value $finalBacklogDir
     $pathsBlock = "`npaths:`n  backlog: $backlogVal`n  session: .crucible/session`n  workspaces: .crucible/.agent-workspaces`n  prompts: .crucible/prompts`n  personas: .crucible/personas`n  sops: .crucible/sops"
     $config += $pathsBlock
 }

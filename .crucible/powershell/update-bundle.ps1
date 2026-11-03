@@ -46,8 +46,10 @@ function Read-ConfigScalar {
         [Parameter(Mandatory=$true)][string]$Key
     )
     $content = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
-    if ($content -match ('(?m)^' + [regex]::Escape($Key) + ':\s*["'']?([^"''\r\n]+)["'']?\s*$')) {
-        return $Matches[1].Trim()
+    $entries = @(Get-ConfigEntries -Content $content)
+    $node = Find-ConfigNode -Entries $entries -Path @($Key) -Source $ConfigPath
+    if ($null -ne $node) {
+        return ConvertFrom-ConfigScalar $entries[$node.Index].Value
     }
     return ""
 }
@@ -58,7 +60,7 @@ function Write-ConfigScalar {
         [Parameter(Mandatory=$true)][string]$Key,
         [Parameter(Mandatory=$true)][string]$Value
     )
-    $escaped = '"' + $Value.Replace("\", "\\").Replace('"', '\"') + '"'
+    $escaped = ConvertTo-ConfigScalar $Value
     $content = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
     if ($content -match ('(?m)^' + [regex]::Escape($Key) + ':')) {
         $content = $content -replace ('(?m)^' + [regex]::Escape($Key) + ': .+$'), ($Key + ': ' + $escaped)
