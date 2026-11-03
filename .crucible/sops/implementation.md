@@ -1,4 +1,4 @@
-<!-- prompt_version: architect-sop-v8 -->
+<!-- prompt_version: architect-sop-v9 -->
 # SOP: Implementation
 
 Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
@@ -27,9 +27,9 @@ Before writing files, read the [Specialist Workspace SOP](specialist-workspace.m
 
 Read `.crucible/session/{task_id}/implementation/task.md` for resolved paths and instructions, the incoming handoff, and `{{crucible_root}}/docs/operating-manual.md`. If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` first.
 
-Before doing anything, run `{{crucible_root}}/powershell/clear-session-state.ps1 implementation -ProjectRoot "{project_root}"` to clear stale state safely. Do not edit `session_state.json` manually.
+Before doing anything, run `{{crucible_root}}/powershell/clear-session-state.ps1 -Specialist implementation -ProjectRoot "{project_root}"` to clear stale state safely. Do not edit `session_state.json` manually.
 
-For state updates, use `update-session-state.ps1 -Specialist implementation -TaskId {task_id} -UpdateJsonFile temp.json -Merge`. Implementation session files go to `.crucible/session/{task_id}/implementation/`.
+For state updates, use `update-session-state.ps1 -Specialist implementation -TaskId {task_id} -UpdateJsonFile temp.json`. Implementation session files go to `.crucible/session/{task_id}/implementation/`.
 
 **This dispatch is your approval to implement.** The groomed spec is the approved plan. A project instruction to pause for plan approval (for example an AGENTS.md planning protocol) belongs to the manual workflow and does not apply here: write any Phase 1 design to `task.md`, then implement, commit and hand off in this session. Stop early only to escalate a genuine blocker, as [Escalating a Blocker](#escalating-a-blocker) describes.
 

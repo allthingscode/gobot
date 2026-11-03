@@ -88,15 +88,7 @@ function Get-WedgeRecovery {
         # command, is filled, and with the root as a quoted literal, never spliced inside quotes
         # that would expand it.
         $recovery = $RecoveryOverride.Replace("{task_id}", $replacementTaskId)
-        if ($replacementProjectRoot -ne "{project_root}" -and $recovery.Contains("{project_root}")) {
-            try {
-                $literal = Format-CrucibleCommandValue -Name "ProjectRoot" -Value $replacementProjectRoot
-                foreach ($quoted in @('"{project_root}"', "'{project_root}'")) { $recovery = $recovery.Replace($quoted, $literal) }
-            } catch {
-                $recovery += (" # (command unavailable: " + (($_.Exception.Message -replace '^New-CrucibleCommand: ', '') -replace '[\r\n]+', ' ') + ")")
-            }
-        }
-        return $recovery
+        return (Set-CrucibleCommandPathPlaceholder -Text $recovery -Placeholder "{project_root}" -Value $replacementProjectRoot -Name "ProjectRoot")
     }
     if (-not [string]::IsNullOrWhiteSpace($code) -and $script:WEDGE_RECOVERY_BY_CODE.ContainsKey($code)) {
         $entry = $script:WEDGE_RECOVERY_BY_CODE[$code]

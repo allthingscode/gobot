@@ -379,3 +379,38 @@ function New-CrucibleCommand {
         return ("# (command unavailable: " + $reason + ")")
     }
 }
+
+# Fills each quoted path placeholder in rendered text - "{project_root}", or
+# "{{crucible_root}}/powershell/crucible.ps1" - with the path as a PowerShell literal, never
+# spliced inside quotes that would expand a dollar sign or a backtick in it (items 247, 275).
+# An unquoted placeholder is prose and is left to the caller. A line whose path no literal can
+# carry keeps its placeholder and says why in a trailing comment, so the text still prints.
+function Set-CrucibleCommandPathPlaceholder {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory = $true)][string]$Placeholder,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value -ceq $Placeholder -or -not $Text.Contains($Placeholder)) { return $Text }
+    $pattern = '(["''])' + [regex]::Escape($Placeholder) + '([^"''\r\n]*)\1'
+    $lines = [regex]::Split($Text, '(?<=\n)')
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $state = @{ Reason = $null }
+        $filled = [regex]::Replace($lines[$i], $pattern, {
+            param($m)
+            try {
+                return (Format-CrucibleCommandValue -Name $Name -Value ($Value + $m.Groups[2].Value))
+            } catch {
+                $state.Reason = ($_.Exception.Message -replace '^New-CrucibleCommand: ', '') -replace '[\r\n]+', ' '
+                return $m.Value
+            }
+        })
+        if ($null -ne $state.Reason) {
+            $ending = [regex]::Match($filled, '\r?\n$').Value
+            $filled = $filled.Substring(0, $filled.Length - $ending.Length) + " # (command unavailable: " + $state.Reason + ")" + $ending
+        }
+        $lines[$i] = $filled
+    }
+    return ($lines -join "")
+}

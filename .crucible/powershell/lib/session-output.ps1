@@ -196,7 +196,10 @@ function New-CruciblePromptText {
             $promptVersion = $matches[1]
         }
 
-        # Simple placeholder replacement
+        # Simple placeholder replacement. A quoted path placeholder is a command argument and
+        # takes the path as a literal, so a root with a dollar sign does not expand. Item 275.
+        $promptText = Set-CrucibleCommandPathPlaceholder -Text $promptText -Placeholder "{{crucible_root}}" -Value $resolvedCrucibleRoot -Name "CrucibleRoot"
+        $promptText = Set-CrucibleCommandPathPlaceholder -Text $promptText -Placeholder "{project_root}" -Value $repoRoot -Name "ProjectRoot"
         $promptText = $promptText.Replace("{{crucible_root}}", $resolvedCrucibleRoot)
         $promptText = $promptText.Replace("powershell.exe", (Get-PwshCommand))
         $promptText = $promptText.Replace("{task_id}", $handoff.task_id)

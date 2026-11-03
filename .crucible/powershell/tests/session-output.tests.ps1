@@ -287,6 +287,29 @@ Ceiling {budget_ceiling}
         Assert-Result -Name "handoff file absolute" -Condition ($handoffLine -eq ("Handoff " + $ctx.LatestHandoff.FullName)) -FailureMessage ("got: " + $handoffLine)
     }
 
+    # Item 275: the roots were spliced into the template as raw text, so a root with a dollar
+    # sign expanded inside the template's double quotes when the agent ran the line.
+    $results += Run-Test -Name "A template's quoted root placeholders take a dollar-sign root as a literal" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot 'cash$root') -TaskId "F-917" -TargetPhase "verification"
+        @'
+<!-- prompt_version: 1 -->
+& "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}"
+Notes live in {project_root}/notes.
+'@ | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "verification_prompt.md") -Encoding UTF8
+        $text = New-CruciblePromptText -Context $ctx
+        $line = @(($text -split "`r?`n") | Where-Object { $_ -like '& *' })
+        Assert-Result -Name "one rendered command line" -Condition ($line.Count -eq 1) -FailureMessage $text
+        $tokens = $null; $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($line[0], [ref]$tokens, [ref]$errors)
+        $command = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))[0]
+        $elements = @($command.CommandElements)
+        $rootIndex = [array]::IndexOf(@($elements | ForEach-Object { $_.Extent.Text }), '-ProjectRoot')
+        $rootArgument = $elements[$rootIndex + 1]
+        Assert-Result -Name "project root argument is a literal" -Condition ($rootArgument -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $rootArgument.Value -ceq $ctx.RepoRoot) -FailureMessage ("got " + $rootArgument.Extent.Text + " from: " + $line[0])
+        Assert-Result -Name "script path argument is a literal" -Condition ($elements[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $elements[0].Value.Contains('cash$root')) -FailureMessage ("got " + $elements[0].Extent.Text + " from: " + $line[0])
+        Assert-Result -Name "unquoted prose placeholder is the plain root" -Condition ($text.Contains("Notes live in " + $ctx.RepoRoot + "/notes.")) -FailureMessage $text
+    }
+
     foreach ($scenario in @('untracked-only', 'autostash-dirty', 'wrong-branch', 'mixed-dirty', 'clean')) {
         $results += Run-Test -Name "The rendered rebase recipe handles $scenario work in its assigned checkout" -Body {
             # Items 189 and 273. Each refusal must depend on its owning SOP guard.

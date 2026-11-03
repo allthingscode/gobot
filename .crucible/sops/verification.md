@@ -1,4 +1,4 @@
-<!-- prompt_version: reviewer-sop-v9 -->
+<!-- prompt_version: reviewer-sop-v10 -->
 # SOP: Verification
 
 Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
@@ -28,14 +28,14 @@ Before writing files, read the [Specialist Workspace SOP](specialist-workspace.m
 Read the task context, incoming handoff, persona and operating manual using the resolved paths in the prompt. If task.md is missing, stop and ask the orchestrator to initialize the session.
 Echo the Cycle ID from task.md and the incoming handoff reason before following this SOP.
 
-For state updates use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist verification -TaskId {task_id} -UpdateJsonFile temp.json -Merge`. Never edit session_state.json directly.
+For state updates use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist verification -TaskId {task_id} -UpdateJsonFile temp.json`. Never edit session_state.json directly.
 
 The Reviewer does not change code. Record required fixes and route through this SOP. Edit BACKLOG.md only on approval as described under Decision Logic; terminal status belongs to the Human Gate.
 
 ## Review Workflow
 
 ### Step 1 - Pre-Review Setup
-1. Run `{{crucible_root}}/powershell/clear-session-state.ps1 verification -ProjectRoot "{project_root}"` to clear stale state safely
+1. Run `{{crucible_root}}/powershell/clear-session-state.ps1 -Specialist verification -ProjectRoot "{project_root}"` to clear stale state safely
 2. Read the backlog spec for `{task_id}` - understand what was supposed to be built
 3. Enter the assigned task worktree at `.crucible/.agent-workspaces/implementation-{task_id}` and review there. Do not check out task branches from the main checkout.
 

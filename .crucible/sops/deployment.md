@@ -1,4 +1,4 @@
-<!-- prompt_version: operator-sop-v10 -->
+<!-- prompt_version: operator-sop-v11 -->
 # SOP: Deployment
 
 Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
@@ -33,7 +33,7 @@ Before proceeding, echo the following from the required files:
 
 If any answer is missing, stop and re-read the files.
 
-For state updates use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist deployment -TaskId {task_id} -UpdateJsonFile temp.json -Merge`. Never edit session_state.json directly.
+For state updates use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist deployment -TaskId {task_id} -UpdateJsonFile temp.json`. Never edit session_state.json directly.
 
 The specialist never pushes. The Human Gate pushes only when `review.auto_push` is true. Perform deployment work in the main checkout; leave merge and cleanup to the Human Gate. Run the configured health check before and after significant operational changes. Write full reports to `.crucible/session/{task_id}/deployment/deployment_report.md` and summarize them in 1-2 sentences.
 

@@ -1,4 +1,4 @@
-<!-- prompt_version: researcher-sop-v4 -->
+<!-- prompt_version: researcher-sop-v5 -->
 # SOP: Researcher
 
 Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
@@ -42,12 +42,12 @@ You consume untrusted external sources. These rules are non-negotiable:
 
 ## Session Start
 
-1. Run `{{crucible_root}}/powershell/clear-session-state.ps1 research -ProjectRoot "{project_root}"` to clear stale state.
+1. Run `{{crucible_root}}/powershell/clear-session-state.ps1 -Specialist research -ProjectRoot "{project_root}"` to clear stale state.
 2. Read `task.md` and the incoming handoff - extract the specific questions and scope boundary.
 3. Read the persona and operating manual. Echo the Cycle ID and incoming handoff reason.
 4. Check `.crucible/research/` for existing artifacts before going external.
 
-For state updates use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist research -TaskId {task_id} -UpdateJsonFile temp.json -Merge`. Never edit session_state.json directly.
+For state updates use `{{crucible_root}}/powershell/update-session-state.ps1 -Specialist research -TaskId {task_id} -UpdateJsonFile temp.json`. Never edit session_state.json directly.
 
 ### Mid-Session Progress (Checkpointing)
 Write `### CHECKPOINT [Brief Summary]` to `task.md` after completing a major phase.
