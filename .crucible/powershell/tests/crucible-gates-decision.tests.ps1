@@ -134,9 +134,10 @@ try {
                 $ctx = New-DecisionFixture -Name "dispatch-$inputPath-$outcome" -InputPath $inputPath -Outcome $outcome
                 $run = Invoke-DecisionFixture -Context $ctx -Setup @'
 function Invoke-HumanGateAction {
-    param($TaskId, $Outcome, $ProjectRoot, $SourcePhase, $GateReason, $Handoff, $LogFile, $CircuitBreakerHistoryFile)
+    param($TaskId, $Outcome, $ProjectRoot, $SourcePhase, $GateReason, $Handoff, $LogFile, $CircuitBreakerHistoryFile, $DecisionRecordPath)
     $files = @(Get-ChildItem -LiteralPath (Join-Path $ctx.SessionDir 'global/gate_decisions') -Filter 'F-242-*.json')
-    if ($files.Count -eq 1) {
+    # Item 267: the dispatch is handed the exact record the writer produced.
+    if ($files.Count -eq 1 -and $DecisionRecordPath -eq $files[0].FullName) {
         $saved = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
         if ($saved.outcome -eq $Outcome -and $saved.task_id -eq $TaskId -and $saved.session_cycle_id -eq 'cycle-242' -and
             $saved.reason -eq $GateReason -and $saved.rework_requested -eq ($Outcome -eq 'rejected')) { Write-Host 'AUTHORIZED_ACTION' }
@@ -209,6 +210,95 @@ exit 0
                 $text = $run.Output -join "`n"
                 Assert-Result "$inputPath $preference storage refusal cannot be swallowed" ($run.ExitCode -ne 0 -and $text -match 'decision storage unavailable' -and $text -notmatch 'UNAUTHORIZED_ACTION|CALLER_CONTINUED|CALLER_CAUGHT_REFUSAL') $text
             }
+        }
+    }
+
+    # Item 266: the record used to be written in place, so an interrupted write left a
+    # truncated file under the authoritative name for every reader to trip over.
+    $results += Run-Test -Name 'A decision write that fails after partial output leaves no record and refuses before dispatch on both inputs (I7, I11)' -Body {
+        foreach ($inputPath in @('CLI', 'pending')) {
+            $ctx = New-DecisionFixture -Name "partial-$inputPath" -InputPath $inputPath
+            $template = Join-Path $ctx.SessionDir 'global/gate_decisions/gate_decision_F-242_pending.json'
+            $run = Invoke-DecisionFixture -Context $ctx -Setup @'
+function Set-Content {
+    [CmdletBinding()]
+    param([string]$LiteralPath, [string]$Path, [Parameter(ValueFromPipeline = $true)][object[]]$Value, [string]$Encoding, [switch]$NoNewline, [switch]$Force)
+    begin { $buffer = [System.Collections.Generic.List[object]]::new() }
+    process { foreach ($item in $Value) { $buffer.Add($item) } }
+    end {
+        $target = if ($LiteralPath) { $LiteralPath } else { $Path }
+        if ((Split-Path -Leaf $target) -like 'F-242-*') {
+            $text = ($buffer -join "`n")
+            [System.IO.File]::WriteAllText($target, $text.Substring(0, [int]($text.Length / 2)))
+            $visible = @(Get-ChildItem -LiteralPath (Split-Path -Parent $target) -Filter 'F-242-*.json').Count
+            Write-Host ('RECORDS_VISIBLE_MID_WRITE=' + $visible)
+            throw 'decision storage failed after partial output'
+        }
+        $forward = @{ Value = $buffer.ToArray() }
+        foreach ($name in @('LiteralPath', 'Path', 'Encoding', 'NoNewline', 'Force', 'ErrorAction')) {
+            if ($PSBoundParameters.ContainsKey($name)) { $forward[$name] = $PSBoundParameters[$name] }
+        }
+        Microsoft.PowerShell.Management\Set-Content @forward
+    }
+}
+function Invoke-HumanGateAction { Write-Host 'UNAUTHORIZED_ACTION' }
+'@
+            $text = $run.Output -join "`n"
+            Assert-Result "$inputPath partial write reached the decision writer" ($text -match 'RECORDS_VISIBLE_MID_WRITE=') $text
+            Assert-Result "$inputPath partial write refuses without dispatch" ($run.ExitCode -ne 0 -and $text -match 'decision storage failed after partial output' -and $text -notmatch 'UNAUTHORIZED_ACTION|GATE_RETURNED') $text
+            Assert-Result "$inputPath partial output is never visible as a record" ($text -match 'RECORDS_VISIBLE_MID_WRITE=0') $text
+            $gateDir = Join-Path $ctx.SessionDir 'global/gate_decisions'
+            $records = @(Get-ChildItem -LiteralPath $gateDir -Filter 'F-242-*.json')
+            Assert-Result "$inputPath partial write leaves no record" ($records.Count -eq 0) (($records | ForEach-Object Name) -join ',')
+            $residue = @(Get-ChildItem -LiteralPath $gateDir -File | Where-Object { $_.Name -like 'F-242-*' })
+            Assert-Result "$inputPath partial write leaves no temporary residue" ($residue.Count -eq 0) (($residue | ForEach-Object Name) -join ',')
+            if ($inputPath -eq 'pending') {
+                Assert-Result "$inputPath partial write keeps the template for a retry" (Test-Path -LiteralPath $template) $text
+            }
+        }
+    }
+
+    # The cleanup after a failed write probes the temporary file. A probe that raises
+    # must still end in the writer's exit, not escape to an embedding caller (I11).
+    $results += Run-Test -Name 'A failed decision write whose cleanup probe raises still refuses an embedding caller on both inputs (I7, I11)' -Body {
+        foreach ($inputPath in @('CLI', 'pending')) {
+            $ctx = New-DecisionFixture -Name "probe-$inputPath" -InputPath $inputPath
+            $run = Invoke-DecisionFixture -Context $ctx -Setup @'
+function Set-Content {
+    [CmdletBinding()]
+    param([string]$LiteralPath, [string]$Path, [Parameter(ValueFromPipeline = $true)][object[]]$Value, [string]$Encoding, [switch]$NoNewline, [switch]$Force)
+    begin { $buffer = [System.Collections.Generic.List[object]]::new() }
+    process { foreach ($item in $Value) { $buffer.Add($item) } }
+    end {
+        $target = if ($LiteralPath) { $LiteralPath } else { $Path }
+        if ((Split-Path -Leaf $target) -like 'F-242-*') {
+            [System.IO.File]::WriteAllText($target, '{"outcome":')
+            throw 'decision storage failed after partial output'
+        }
+        $forward = @{ Value = $buffer.ToArray() }
+        foreach ($name in @('LiteralPath', 'Path', 'Encoding', 'NoNewline', 'Force', 'ErrorAction')) {
+            if ($PSBoundParameters.ContainsKey($name)) { $forward[$name] = $PSBoundParameters[$name] }
+        }
+        Microsoft.PowerShell.Management\Set-Content @forward
+    }
+}
+function Test-Path {
+    [CmdletBinding()]
+    param([Parameter(Position = 0)][string]$Path, [string]$LiteralPath, [string]$PathType)
+    $target = if ($LiteralPath) { $LiteralPath } else { $Path }
+    if ($target -like '*.tmp') { throw [System.IO.IOException]::new('injected cleanup probe failure') }
+    $forward = @{}
+    foreach ($name in @('LiteralPath', 'Path', 'PathType')) { if ($PSBoundParameters.ContainsKey($name)) { $forward[$name] = $PSBoundParameters[$name] } }
+    Microsoft.PowerShell.Management\Test-Path @forward
+}
+function Invoke-HumanGateAction { Write-Host 'UNAUTHORIZED_ACTION' }
+try { Invoke-HumanGate -Context $ctx } catch { Write-Host 'CALLER_CAUGHT_REFUSAL' }
+Write-Host 'CALLER_CONTINUED'
+exit 0
+'@
+            $text = $run.Output -join "`n"
+            Assert-Result "$inputPath cleanup probe failure still exits" ($run.ExitCode -ne 0 -and $text -notmatch 'UNAUTHORIZED_ACTION|GATE_RETURNED|CALLER_CAUGHT_REFUSAL|CALLER_CONTINUED') ("exit " + $run.ExitCode + ": " + $text)
+            Assert-Result "$inputPath cleanup probe failure names the write and the residue" ($text -match 'decision storage failed after partial output' -and $text -match 'partial temporary file' -and $text -match 'injected cleanup probe failure') $text
         }
     }
 } finally {

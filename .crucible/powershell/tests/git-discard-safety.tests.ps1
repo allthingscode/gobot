@@ -111,16 +111,16 @@ if ($InputPath -eq 'action') {
         '{"outcome":"accepted"}' | Set-Content -LiteralPath $decision
         $runner = Join-Path $fixture 'merge-refusal.ps1'
         @'
-param($Lib, $Root)
+param($Lib, $Root, $Decision)
 $ErrorActionPreference = 'Stop'
 $Quiet = $true
 . $Lib
 Set-Location -LiteralPath $Root
 try {
-    Invoke-HumanGateMerge -TaskId F-253 -PrimaryBranch trunk -ProjectRoot $Root -LogFile unused -CircuitBreakerHistoryFile unused
+    Invoke-HumanGateMerge -TaskId F-253 -PrimaryBranch trunk -ProjectRoot $Root -LogFile unused -CircuitBreakerHistoryFile unused -DecisionRecordPath $Decision
 } catch { Write-Host 'REFUSAL WAS CAUGHT'; exit 9 }
 '@ | Set-Content -LiteralPath $runner
-        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runner (Join-Path $repoRoot 'powershell/crucible-lib.ps1') $root }
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runner (Join-Path $repoRoot 'powershell/crucible-lib.ps1') $root $decision }
         Assert-Result -Name 'unconditional merge refusal exits 2' -Condition ($run.ExitCode -eq 2 -and $run.Output -match 'human.txt') -FailureMessage $run.Output
         Assert-Result -Name 'acceptance record removed before refusal' -Condition (-not (Test-Path $decision)) -FailureMessage 'premature acceptance could bypass the next gate'
         Assert-Result -Name 'merge refusal preserves head and edit' -Condition ((Invoke-ExternalCommand -AsLines { git -C $root rev-parse HEAD }).Trim() -eq $head -and (Get-Content -LiteralPath (Join-Path $root 'human.txt') -Raw).Trim() -eq 'precious human edit') -FailureMessage $run.Output

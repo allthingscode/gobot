@@ -191,7 +191,8 @@ function Invoke-GitChecked { param($Command) if ($Command.ToString() -match 'mer
 function Get-ConfiguredPath { param($Key, $ProjectRoot) $Root }
 function Resolve-ImplementationWorktreePath { param($TaskId, $WorkspacesDir) Join-Path $Root 'no-such-worktree' }
 function Write-Quiet { param($Message) Write-Host $Message }
-$result = Invoke-HumanGateMerge -TaskId F-1 -PrimaryBranch main -ProjectRoot $Root -LogFile (Join-Path $Root 'log.jsonl') -CircuitBreakerHistoryFile (Join-Path $Root 'cb.jsonl')
+$result = Invoke-HumanGateMerge -TaskId F-1 -PrimaryBranch main -ProjectRoot $Root -LogFile (Join-Path $Root 'log.jsonl') -CircuitBreakerHistoryFile (Join-Path $Root 'cb.jsonl') `
+    -DecisionRecordPath (Join-Path $Root 'global/gate_decisions/F-1-20260101T000000Z.json')
 Write-Host "CALLER_RESULT=$result"
 exit 3
 '@

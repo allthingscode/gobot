@@ -36,6 +36,9 @@ function Invoke-HumanGateMerge {
         # silently misfile the operator's failure record. Item 16.
         [Parameter(Mandatory = $true)][string]$LogFile,
         [Parameter(Mandatory = $true)][string]$CircuitBreakerHistoryFile,
+        # The record Write-HumanGateDecision wrote for this dispatch. The undo removes
+        # exactly this file, never one chosen by recency. Item 267.
+        [Parameter(Mandatory = $true)][string]$DecisionRecordPath,
         $Handoff = $null,
         [int]$MaxRebaseAttempts = 3,
         [string]$CheckScript = "",
@@ -54,34 +57,37 @@ function Invoke-HumanGateMerge {
     # does not complete -- it routes to rework or trips the breaker -- that premature
     # advancing record (accepted or redirected) must be removed, or the deployment->done completion guard will
     # see it on the next run and block the retry (commit not merged into primary).
+    # Only the record this dispatch was handed is removed; an earlier cycle's record is
+    # never a substitute, so an absent record refuses (I8, I11). Item 267. Every
+    # refusal here exits rather than throws, so an embedding caller's catch cannot carry
+    # on as if the merge outcome had been returned: every probe and the removal run inside
+    # the guarded region, and any failure there ends in the one exit below.
     $removePrematureAccept = {
+        $prefix = "Could not inspect or remove premature accepted gate decisions before returning the merge outcome: "
+        $refusal = $null
+        $recordName = ""
         try {
-            $sessDir = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
-            $gdDir = Join-Path $sessDir "global/gate_decisions"
-            if (Test-Path -LiteralPath $gdDir -ErrorAction Stop) {
-                $candidates = @(Get-ChildItem -LiteralPath $gdDir -Filter ($TaskId + "-*.json") -ErrorAction Stop |
-                    Sort-Object LastWriteTime -Descending)
-                foreach ($f in $candidates) {
-                    try {
-                        $d = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
-                    } catch {
-                        Write-Quiet "[HUMAN GATE] Warning: Could not inspect gate decision $($f.Name) while removing premature acceptance: $($_.Exception.Message)" -ForegroundColor Yellow
-                        continue
-                    }
-                    if ($d.outcome -in @("accepted", "redirected")) {
-                        try {
-                            Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
-                        } catch {
-                            throw ("Could not inspect or remove premature accepted gate decisions before returning the merge outcome: " + $_.Exception.Message)
-                        }
-                        Write-Quiet "[HUMAN GATE] Removed premature '$($d.outcome)' gate decision $($f.Name) (merge did not complete)."
-                        break
-                    }
+            $recordName = Split-Path -Leaf $DecisionRecordPath
+            if (-not ($recordName.StartsWith($TaskId + "-", [System.StringComparison]::Ordinal) -and
+                      $recordName.EndsWith(".json", [System.StringComparison]::Ordinal))) {
+                $refusal = "the decision record " + $DecisionRecordPath + " is not a gate decision for " + $TaskId + ". Nothing was removed."
+            } elseif (-not (Test-Path -LiteralPath $DecisionRecordPath -PathType Leaf)) {
+                $refusal = "the decision record this gate wrote, " + $DecisionRecordPath + ", is absent, so no other record was removed in its place. Remove this cycle's accepted or redirected decision for " + $TaskId + " by hand before the gate fires again."
+            } else {
+                try {
+                    Remove-Item -LiteralPath $DecisionRecordPath -Force -ErrorAction Stop
+                } catch {
+                    $refusal = $_.Exception.Message + " The premature decision " + $DecisionRecordPath + " is still in place; remove it by hand before the gate fires again."
                 }
             }
         } catch {
-            throw ("Could not inspect or remove premature accepted gate decisions before returning the merge outcome: " + $_.Exception.Message)
+            $refusal = "the decision record " + $DecisionRecordPath + " could not be inspected: " + $_.Exception.Message + " It may still be in place; remove it by hand before the gate fires again."
         }
+        if ($null -ne $refusal) {
+            Write-Host ("[STOP] " + $prefix + $refusal) -ForegroundColor Red
+            exit 2
+        }
+        Write-Quiet "[HUMAN GATE] Removed premature gate decision $recordName (merge did not complete)."
     }
 
     if (-not (Test-GitDiscardSafe -Directory $ProjectRoot -Operation "human gate merge and abort" -IncludeUntracked:$false)) {
@@ -345,6 +351,9 @@ function Write-HumanGateDecision {
     # record is the only authority: an action that exits early cannot leave a filled
     # template to be replayed without a human when the gate next fires. The CLI input
     # never reads the template, so it passes none. Item 242.
+    # The record is written to a temporary sibling and renamed into place, so a reader
+    # sees a whole record or none (item 266). Returns the record path, which the dispatch
+    # hands to the merge undo (item 267).
     param(
         [Parameter(Mandatory=$true)][hashtable]$Context,
         [Parameter(Mandatory=$true)][psobject]$Decision,
@@ -355,6 +364,7 @@ function Write-HumanGateDecision {
         [string]$PendingTemplate = ""
     )
     $archivePath = ""
+    $tempPath = ""
     $recorded = $false
     try {
         Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @("Handoff", "SessionDir")
@@ -388,7 +398,11 @@ function Write-HumanGateDecision {
         }
         $gateDir = Join-Path $Context.SessionDir "global/gate_decisions"
         $archivePath = Join-Path $gateDir ($Context.Handoff.task_id + "-" + (Get-UtcFileTimestamp) + ".json")
-        $Decision | ConvertTo-Json | Set-Content -LiteralPath $archivePath -Encoding UTF8 -ErrorAction Stop
+        # The temporary name ends in .tmp so no "<task>-*.json" or "*.json" reader matches it.
+        $tempPath = $archivePath + "." + [guid]::NewGuid().ToString("N") + ".tmp"
+        $Decision | ConvertTo-Json | Set-Content -LiteralPath $tempPath -Encoding UTF8 -ErrorAction Stop
+        # Without -Force the rename refuses rather than replace an existing record.
+        Move-Item -LiteralPath $tempPath -Destination $archivePath -ErrorAction Stop
         $recorded = $true
         if (-not [string]::IsNullOrEmpty($PendingTemplate) -and (Test-Path -LiteralPath $PendingTemplate)) {
             Remove-Item -LiteralPath $PendingTemplate -Force -ErrorAction Stop
@@ -396,6 +410,8 @@ function Write-HumanGateDecision {
     } catch {
         # A catch in the pending-file path or an embedding caller cannot authorize
         # the action after persistence failed. Write-Error could throw before exit.
+        # Every filesystem probe in this cleanup runs inside its own try, so no failure
+        # here can escape before the exit below (I11).
         $message = $_.Exception.Message
         if ($recorded) {
             # Withdraw the record so the template stays the one copy of the decision and
@@ -406,10 +422,19 @@ function Write-HumanGateDecision {
             } catch {
                 $message = "could not consume the pending template " + $PendingTemplate + ": " + $message + " The recorded decision " + $archivePath + " could not be withdrawn either: " + $_.Exception.Message + " Remove both files before the gate fires again."
             }
+        } elseif (-not [string]::IsNullOrEmpty($tempPath)) {
+            try {
+                if (Test-Path -LiteralPath $tempPath) {
+                    Remove-Item -LiteralPath $tempPath -Force -ErrorAction Stop
+                }
+            } catch {
+                $message = $message + " The partial temporary file " + $tempPath + " could not be removed: " + $_.Exception.Message + " No decision was recorded; remove it by hand."
+            }
         }
         [Console]::Error.WriteLine("Cannot record human gate decision: " + $message)
         exit 1
     }
+    return $archivePath
 }
 
 function Invoke-HumanGateAction {
@@ -424,7 +449,9 @@ function Invoke-HumanGateAction {
         [string]$SourcePhase = "deployment",
         [string]$GateReason = "",
         # The handoff Invoke-HumanGate bound; passed rather than read from caller scope. Item 249.
-        $Handoff = $null
+        $Handoff = $null,
+        # The record Write-HumanGateDecision returned for this decision. Item 267.
+        [string]$DecisionRecordPath = ""
     )
     $primaryBranch = Get-ConfiguredPrimaryBranch
     $resolvedProjectRoot = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
@@ -432,7 +459,7 @@ function Invoke-HumanGateAction {
     if ($Outcome -eq "accepted" -or $Outcome -eq "redirected") {
         Invoke-HumanGateAcceptRedirect -TaskId $TaskId -Outcome $Outcome -LogFile $LogFile `
             -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile -ProjectRoot $resolvedProjectRoot `
-            -PrimaryBranch $primaryBranch -SourcePhase $SourcePhase -Handoff $Handoff
+            -PrimaryBranch $primaryBranch -SourcePhase $SourcePhase -Handoff $Handoff -DecisionRecordPath $DecisionRecordPath
     } elseif ($Outcome -eq "rejected" -or $Outcome -eq "abandoned") {
         Invoke-HumanGateRejectAbandon -TaskId $TaskId -Outcome $Outcome -ProjectRoot $resolvedProjectRoot `
             -PrimaryBranch $primaryBranch -SourcePhase $SourcePhase -GateReason $GateReason -Handoff $Handoff
@@ -458,7 +485,8 @@ function Invoke-HumanGateAcceptRedirect {
         [Parameter(Mandatory=$true)][string]$ProjectRoot,
         [Parameter(Mandatory=$true)][string]$PrimaryBranch,
         [string]$SourcePhase = "deployment",
-        $Handoff = $null
+        $Handoff = $null,
+        [string]$DecisionRecordPath = ""
     )
 
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
@@ -483,7 +511,7 @@ function Invoke-HumanGateAcceptRedirect {
     if ($SourcePhase -ne "grooming") {
         if ($hasTaskBranch) {
             Invoke-HumanGateAcceptMerge -TaskId $TaskId -PrimaryBranch $PrimaryBranch -ProjectRoot $ProjectRoot -Handoff $Handoff `
-                -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
+                -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile -DecisionRecordPath $DecisionRecordPath
         }
     }
 
@@ -530,11 +558,18 @@ function Invoke-HumanGateAcceptMerge {
         [Parameter(Mandatory=$true)][string]$ProjectRoot,
         [Parameter(Mandatory=$true)][string]$LogFile,
         [Parameter(Mandatory=$true)][string]$CircuitBreakerHistoryFile,
+        [AllowEmptyString()][string]$DecisionRecordPath = "",
         $Handoff = $null
     )
 
+    # A merge that does not complete must withdraw the exact record that authorized it,
+    # so a merge with no record to withdraw does not start. Item 267, I11.
+    if ([string]::IsNullOrWhiteSpace($DecisionRecordPath)) {
+        Write-Host "[STOP] No recorded gate decision was handed to the merge of task/$TaskId, so a merge that did not complete could not withdraw it. Nothing was merged. Record the decision through crucible.ps1 (-GateOutcome or the pending file), then run the gate again." -ForegroundColor Red
+        exit 2
+    }
     $mergeResult = Invoke-HumanGateMerge -TaskId $TaskId -PrimaryBranch $PrimaryBranch -ProjectRoot $ProjectRoot -Handoff $Handoff `
-        -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
+        -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile -DecisionRecordPath $DecisionRecordPath
     if ($mergeResult -eq "rework") {
         # Auto-rebase hit a genuine conflict; task routed back to implementation.
         # Repo is clean and unpushed. Exit 3 signals "not shipped, rework queued".
@@ -1278,7 +1313,7 @@ function Invoke-HumanGate {
                 redirect_target = $GateRedirectTarget
             }
             
-            Write-HumanGateDecision -Context $Context -Decision ([pscustomobject]$decision) -ProjectRoot $repoRoot -SessionCycleId $currentGateCycle -ResolveReviewRange
+            $decisionRecordPath = Write-HumanGateDecision -Context $Context -Decision ([pscustomobject]$decision) -ProjectRoot $repoRoot -SessionCycleId $currentGateCycle -ResolveReviewRange
             Write-Host ("`n[HUMAN GATE] Decision recorded via CLI flag: " + $GateOutcome) -ForegroundColor Green
             Write-Host ("Reason: " + $trimmedGateReason) -ForegroundColor Gray
 
@@ -1286,7 +1321,7 @@ function Invoke-HumanGate {
             # that conflicts routes to rework and removes this premature decision itself
             # (see Invoke-HumanGateMerge) so a non-completed accept cannot block a retry.
             Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $GateOutcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $trimmedGateReason -Handoff $handoff `
-            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE -DecisionRecordPath $decisionRecordPath
 
             if ($GateOutcome -eq "abandoned") {
                 Write-Host "[ABANDONED] Pipeline stopped per human request." -ForegroundColor Gray
@@ -1379,12 +1414,12 @@ function Invoke-HumanGate {
                             
                             exit 0
                         } else {
-                            Write-HumanGateDecision -Context $Context -Decision $gateData -ProjectRoot $repoRoot -SessionCycleId $currentGateCycle -DecisionFile $gateTemplatePath `
+                            $decisionRecordPath = Write-HumanGateDecision -Context $Context -Decision $gateData -ProjectRoot $repoRoot -SessionCycleId $currentGateCycle -DecisionFile $gateTemplatePath `
                                 -PendingTemplate $gateTemplatePath
 
                             # Execute push or reset based on manual decision
                             Invoke-HumanGateAction -TaskId $handoff.task_id -Outcome $gateData.outcome -ProjectRoot $repoRoot -SourcePhase $handoff.source_phase -GateReason $gateData.reason -Handoff $handoff `
-            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+            -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE -DecisionRecordPath $decisionRecordPath
 
                             Write-Host ("`n[HUMAN GATE] Decision recorded: " + $gateData.outcome) -ForegroundColor Green
                             

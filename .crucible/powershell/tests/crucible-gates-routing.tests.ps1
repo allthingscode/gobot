@@ -158,7 +158,8 @@ $ErrorActionPreference = "Stop"
 # The task branch exists; the merge reports the case under test.
 function git { $global:LASTEXITCODE = 0 }
 function Invoke-HumanGateMerge { return $MergeResult }
-Invoke-HumanGateAcceptRedirect -TaskId "F-222" -Outcome "accepted" -ProjectRoot $Root -PrimaryBranch "master" -LogFile (Join-Path $Root "pipeline.log") -CircuitBreakerHistoryFile (Join-Path $Root "history.jsonl")
+Invoke-HumanGateAcceptRedirect -TaskId "F-222" -Outcome "accepted" -ProjectRoot $Root -PrimaryBranch "master" -LogFile (Join-Path $Root "pipeline.log") -CircuitBreakerHistoryFile (Join-Path $Root "history.jsonl") `
+    -DecisionRecordPath (Join-Path $Root "F-222-20260101T000000Z.json")
 Write-Host "GATE_COMPLETED"
 '@
             [System.IO.File]::WriteAllText($child, $childText, $utf8)

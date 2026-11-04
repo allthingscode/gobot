@@ -386,6 +386,8 @@ try {
         $script:backlogDir = Join-Path $localRepo ".crucible/backlog"
         $script:FRAMEWORK_POWERSHELL = Split-Path -Parent $CRUCIBLE_LIB
         New-Item -ItemType Directory -Path (Split-Path -Parent $script:LOG_FILE), (Split-Path -Parent $script:CB_HISTORY_FILE), $script:backlogDir -Force | Out-Null
+        $script:BreakerDecisionRecord = Join-Path $caseRoot "F-HUM-BREAK-20260101T000000Z.json"
+        '{"task_id":"F-HUM-BREAK","outcome":"accepted"}' | Set-Content -LiteralPath $script:BreakerDecisionRecord -Encoding UTF8
 
         $script:HumanGateMergeBreakerResult = $null
         $previous = $ErrorActionPreference
@@ -394,7 +396,7 @@ try {
             Push-Location $localRepo
             $outputLines = @(Invoke-ExternalCommand -AsLines { & {
                 $script:HumanGateMergeBreakerResult = Invoke-HumanGateMerge -TaskId "F-HUM-BREAK" -PrimaryBranch "master" -ProjectRoot $localRepo -Handoff $null -MaxRebaseAttempts 0 `
-                    -LogFile $script:LOG_FILE -CircuitBreakerHistoryFile $script:CB_HISTORY_FILE
+                    -LogFile $script:LOG_FILE -CircuitBreakerHistoryFile $script:CB_HISTORY_FILE -DecisionRecordPath $script:BreakerDecisionRecord
             } 6>&1 })
         } finally {
             Pop-Location
