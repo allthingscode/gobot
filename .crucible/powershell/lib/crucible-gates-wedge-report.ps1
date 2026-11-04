@@ -24,6 +24,7 @@ $script:WEDGE_RECOVERY_BY_CODE = @{
     artifact_verification_failed = @{ Recover = $true; Text = "Inspect completion artifacts and gate decision state, correct the artifact or decision record, then run:" }
     missing_isolated_checks_script = @{ Recover = $false; Text = "Restore powershell/run-isolated-checks.ps1 from the Crucible bundle, then rerun:" }
     uncommitted_task_worktree = @{ Recover = $false; Text = "Commit the listed changes on task/{task_id} in its worktree, or discard them, so the independent checks test what the merge ships, then rerun:" }
+    config_source_refused = @{ Recover = $false; Text = "Commit .crucible/config.yaml in the main checkout, or restore it to HEAD, so the independent checks run from the committed config (WHY names the file and the remedy), then rerun:" }
     missing_required_field = @{ Recover = $false; Text = "Correct the handoff JSON to include the required field, then rerun:" }
     invalid_field = @{ Recover = $false; Text = "Correct the invalid handoff field according to schemas/handoff.schema.json, then rerun:" }
     invalid_json = @{ Recover = $false; Text = "Fix the handoff JSON syntax or restore the schema file, then rerun:" }
@@ -48,6 +49,7 @@ $script:WEDGE_GUARD_NAME_BY_CODE = @{
     artifact_verification_failed = "Completion Artifact Verification"
     missing_isolated_checks_script = "Isolated Checks Script Required"
     uncommitted_task_worktree = "Independent Verification"
+    config_source_refused = "Independent Verification"
     missing_required_field = "Preflight Validation"
     invalid_field = "Preflight Validation"
     invalid_json = "Preflight Validation"

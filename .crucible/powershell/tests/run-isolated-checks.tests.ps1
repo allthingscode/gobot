@@ -57,6 +57,13 @@ function Remove-WorktreeIfPresent {
     git -C $ProjectRoot worktree prune 2>$null
 }
 
+# The runner refuses an uncommitted config.yaml (item 254), so a fixture commits each edit.
+function Save-FixtureConfig {
+    param([Parameter(Mandatory = $true)][string]$ProjectRoot)
+    git -C $ProjectRoot add .crucible/config.yaml
+    git -C $ProjectRoot commit --quiet --allow-empty -m "fixture config"
+}
+
 $tempRoot = New-TestFixtureRoot -NameHint "run-isolated-checks-test"
 $projectRoot = Join-Path $tempRoot "project"
 $taskId = "T-001"
@@ -104,6 +111,7 @@ try {
         Initialize-Repo -ProjectRoot $customProject
         $cfg = Join-Path $customProject ".crucible/config.yaml"
         [System.IO.File]::AppendAllText($cfg, "`npaths:`n  workspaces: custom worktrees`n", [System.Text.UTF8Encoding]::new($false))
+        Save-FixtureConfig -ProjectRoot $customProject
         $customWt = Join-Path $customProject "custom worktrees/implementation-T-188"
         git -C $customProject worktree add -b task/T-188 $customWt --quiet
         try {
@@ -120,6 +128,7 @@ try {
         $customProject = Join-Path $tempRoot "custom-detached"
         Initialize-Repo -ProjectRoot $customProject
         [System.IO.File]::AppendAllText((Join-Path $customProject ".crucible/config.yaml"), "`npaths:`n  workspaces: custom worktrees`n", [System.Text.UTF8Encoding]::new($false))
+        Save-FixtureConfig -ProjectRoot $customProject
         $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId R-188 -Mode quick -Commit HEAD -ProjectRoot $customProject }
         Assert-Result -Name "detached checks pass" -Condition ($res.ExitCode -eq 0) -FailureMessage ($res.Output -join "`n")
         Assert-Result -Name "detached worktree uses configured root" -Condition (($res.Output -join "`n").Contains((Join-Path $customProject "custom worktrees"))) -FailureMessage ($res.Output -join "`n")
@@ -170,6 +179,7 @@ try {
                 "    name: test config check",
                 "    command: $pwshCmd -NoProfile -Command exit 1"
             ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+            Save-FixtureConfig -ProjectRoot $projectRoot
             
             $res = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
@@ -198,6 +208,7 @@ try {
                 "    name: test config check pass",
                 "    command: $pwshCmd -NoProfile -Command exit 0"
             ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+            Save-FixtureConfig -ProjectRoot $projectRoot
             
             $res = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
@@ -226,6 +237,7 @@ try {
                 "    name: test config check skip",
                 "    command: $pwshCmd -NoProfile -Command exit 1"
             ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+            Save-FixtureConfig -ProjectRoot $projectRoot
             
             $res = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick
@@ -250,6 +262,7 @@ try {
                 "        $pwshCmd -NoProfile",
                 "        -Command `"exit 0`""
             ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+            Save-FixtureConfig -ProjectRoot $projectRoot
 
             $res = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
@@ -275,6 +288,7 @@ try {
                 "        $pwshCmd -NoProfile",
                 "        -Command `"exit 1`""
             ) | Set-Content -LiteralPath ".crucible/config.yaml" -Encoding UTF8
+            Save-FixtureConfig -ProjectRoot $projectRoot
 
             $res = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full
@@ -355,6 +369,7 @@ try {
 
     $results += Run-Test -Name "A failing project pre-push hook fails full mode and its output is shown (item 172)" -Body {
         $hookConfig | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         [System.IO.File]::WriteAllText($worktreeHook, "#!/bin/sh`necho `"project hook ran, preflight=`$CRUCIBLE_PRE_PUSH_PREFLIGHT`"`nexit 3`n")
         $res = Invoke-ExternalCommand {
             & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot
@@ -367,6 +382,7 @@ try {
 
     $results += Run-Test -Name "A passing project pre-push hook lets full mode pass, and quick mode does not run it (item 172)" -Body {
         $hookConfig | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         [System.IO.File]::WriteAllText($worktreeHook, "#!/bin/sh`necho `"project hook passed`"`nexit 0`n")
         $full = Invoke-ExternalCommand {
             & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot
@@ -390,6 +406,7 @@ try {
         $toolDirs = @("usr/bin", "mingw64/bin", "bin") | ForEach-Object { (Join-Path $gitRoot $_).TrimEnd('\') }
         $strippedPath = (($env:PATH -split ';') | Where-Object { $_ -and ($toolDirs -notcontains $_.TrimEnd('\')) }) -join ';'
         $hookConfig | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         [System.IO.File]::WriteAllText($worktreeHook, "#!/bin/sh`necho before | sed 's/before/sed ran/'`n")
         $savedPath = $env:PATH
         $env:PATH = $strippedPath
@@ -483,6 +500,7 @@ try {
             "      alternative_runner: $pwshCmd -NoProfile -Command exit 0",
             "      host_gate: env=CRUCIBLE_ITEM239_MISSING"
         ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         Remove-Item Env:\CRUCIBLE_ITEM239_MISSING -ErrorAction SilentlyContinue
         $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
         $out = $res.Output -join "`n"
@@ -511,6 +529,7 @@ try {
             "      host_gate: env=CRUCIBLE_ITEM258_RACE"
         )
         $full | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         $fullRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot }
         Assert-Result -Name "full run records the race skip" -Condition ($fullRun.ExitCode -eq 0 -and (Get-Content -LiteralPath $record -Raw).Contains($raceLine)) -FailureMessage ($fullRun.Output -join "`n")
 
@@ -524,6 +543,7 @@ try {
             "    - name: unit",
             "      command: $pwshCmd -NoProfile -Command exit 4"
         ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         $failRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
         Assert-Result -Name "an early failure keeps prior skips" -Condition ($failRun.ExitCode -ne 0 -and (Get-Content -LiteralPath $record -Raw).Contains($raceLine)) -FailureMessage ((Get-Content -LiteralPath $record -Raw -ErrorAction SilentlyContinue) + "`n" + ($failRun.Output -join "`n"))
 
@@ -535,6 +555,7 @@ try {
             "      command: $pwshCmd -NoProfile -Command exit 0",
             "  full:"
         ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         $emptyRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot }
         $emptyRecord = Get-Content -LiteralPath $record -Raw
         Assert-Result -Name "I12 a mode with no checks is recorded as not run" -Condition ($emptyRecord.Contains("[isolated checks v2] verification.full checks: config.yaml configures no verification.full checks")) -FailureMessage ($emptyRecord + "`n" + ($emptyRun.Output -join "`n"))
@@ -542,6 +563,7 @@ try {
         Assert-Result -Name "I12 a mode with no checks says NOT RUN" -Condition (($emptyRun.Output -join "`n") -match 'NOT RUN: No commands found') -FailureMessage ($emptyRun.Output -join "`n")
 
         $full | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         $env:CRUCIBLE_ITEM258_RACE = "1"
         try {
             $raceRun = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot }
@@ -564,6 +586,7 @@ try {
         $results += Run-Test -Name ("Ambiguous check identities fail at runtime: " + $case.Label) -Body {
             $cfgPath = Join-Path $projectRoot '.crucible/config.yaml'
             [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n" + $case.Block + "`n", [Text.UTF8Encoding]::new($false))
+            Save-FixtureConfig -ProjectRoot $projectRoot
             $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
             $out = $res.Output -join "`n"
             Assert-Result -Name ("runtime refuses duplicate identity: " + $case.Label) -Condition ($res.ExitCode -ne 0 -and $out.Contains('Duplicate verification check name') -and $out.Contains($case.Name) -and $out.Contains($case.First) -and $out.Contains($case.Second)) -FailureMessage $out
@@ -575,6 +598,7 @@ try {
         $cfgPath = Join-Path $projectRoot '.crucible/config.yaml'
         $duplicateConfig = "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: unit`n      command: unused-first`n    - name: unit`n      command: unused-second`n"
         [IO.File]::WriteAllText($cfgPath, $duplicateConfig, [Text.UTF8Encoding]::new($false))
+        Save-FixtureConfig -ProjectRoot $projectRoot
         $savedStderr = [Console]::Error
         $stderr = [IO.StringWriter]::new()
         try {
@@ -610,6 +634,7 @@ try {
                 }
                 Remove-Item Env:\CRUCIBLE_ITEM258_LAUNCH -ErrorAction SilentlyContinue
                 [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: launch check`n$check`n", [Text.UTF8Encoding]::new($false))
+                Save-FixtureConfig -ProjectRoot $projectRoot
                 $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
                 $out = $res.Output -join "`n"
                 Assert-Result -Name 'launch failure exits nonzero after reaching the check' -Condition ($res.ExitCode -ne 0 -and $out.Contains('==> launch check')) -FailureMessage $out
@@ -624,6 +649,7 @@ try {
             $command = "$pwshCmd -NoProfile -Command exit 7"
             $check = if ($route -eq 'command') { "      command: $command" } else { "      command: unused`n      host_gate: env=CRUCIBLE_ITEM258_LAUNCH`n      alternative_runner: $command" }
             [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: launch check`n$check`n", [Text.UTF8Encoding]::new($false))
+            Save-FixtureConfig -ProjectRoot $projectRoot
             $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
             Assert-Result -Name 'nonzero executed check clears the skip and still fails' -Condition ($res.ExitCode -ne 0 -and ($res.Output -join "`n").Contains('exit code: 7') -and -not (Test-Path -LiteralPath $record)) -FailureMessage ($res.Output -join "`n")
         }
@@ -638,6 +664,7 @@ try {
             "    - name: quoted argument",
             "      command: $pwshCmd -NoProfile -Command `"Write-Output 'command argument preserved'; exit 0`""
         ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
         $out = $res.Output -join "`n"
         Assert-Result -Name "command runs with its complete argument" -Condition ($res.ExitCode -eq 0 -and $out -match 'command argument preserved' -and $out -match 'exit code: 0') -FailureMessage $out
@@ -651,6 +678,7 @@ try {
             "    - name: quoted words",
             "      command: 'outer' | Out-Null; $pwshCmd -NoProfile -Command 'Write-Output ''outer quotes preserved''; exit 0'"
         ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
         $out = $res.Output -join "`n"
         Assert-Result -Name "command keeps both quoted words" -Condition ($res.ExitCode -eq 0 -and $out -match 'outer quotes preserved' -and $out -match 'exit code: 0') -FailureMessage $out
@@ -666,10 +694,125 @@ try {
             "      host_gate: env=CRUCIBLE_ITEM241_MISSING",
             "      alternative_runner: $pwshCmd -NoProfile -Command `"Write-Output 'alternative argument preserved'; exit 0`""
         ) | Set-Content -LiteralPath $cfgPath -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
         Remove-Item Env:\CRUCIBLE_ITEM241_MISSING -ErrorAction SilentlyContinue
         $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode quick -ProjectRoot $projectRoot }
         $out = $res.Output -join "`n"
         Assert-Result -Name "alternative runs with its complete argument" -Condition ($res.ExitCode -eq 0 -and $out -match 'alternative runner:' -and $out -match 'alternative argument preserved' -and $out -match 'exit code: 0' -and $out -notmatch 'exit code: 9') -FailureMessage $out
+    }
+
+    # Item 254: a specialist can edit the main checkout's config.yaml without committing, and
+    # the integrity breaker skips it. The runner refuses anything but the committed file.
+    $results += Run-Test -Name "An uncommitted edit that removes a check is refused with the file and the remedy (item 254)" -Body {
+        $gateProject = Join-Path $tempRoot "uncommitted-edit"
+        Initialize-Repo -ProjectRoot $gateProject
+        $cfgPath = Join-Path $gateProject ".crucible/config.yaml"
+        [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: no-op`n      command: $pwshCmd -NoProfile -Command exit 0`n    - name: gate`n      command: $pwshCmd -NoProfile -Command exit 5`n", [Text.UTF8Encoding]::new($false))
+        Save-FixtureConfig -ProjectRoot $gateProject
+        $gateWt = Add-ImplementationWorktree -ProjectRoot $gateProject -TaskId T-254
+        try {
+            $committedRun = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-254 -Mode quick -ProjectRoot $gateProject }
+            Assert-Result -Name "the committed gate check fails the run" -Condition ($committedRun.ExitCode -ne 0 -and ($committedRun.Output -join "`n").Contains("Check failed: gate")) -FailureMessage ($committedRun.Output -join "`n")
+
+            [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: no-op`n      command: $pwshCmd -NoProfile -Command exit 0`n", [Text.UTF8Encoding]::new($false))
+            $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-254 -Mode quick -ProjectRoot $gateProject }
+            $out = $res.Output -join "`n"
+            Assert-Result -Name "an uncommitted edit that removes a check is refused" -Condition ($res.ExitCode -eq 2 -and $out -notmatch '==>') -FailureMessage ("exit " + $res.ExitCode + "`n" + $out)
+            Assert-Result -Name "the refusal names the file" -Condition ($out.Contains("Refusing to run the configured checks") -and $out.Contains($cfgPath) -and $out.Contains("uncommitted changes")) -FailureMessage $out
+            Assert-Result -Name "the refusal names the remedy" -Condition ($out.Contains("Remedy:") -and $out.Contains("git add .crucible/config.yaml")) -FailureMessage $out
+
+            $null = Invoke-ExternalCommand { git -C $gateProject update-index --skip-worktree .crucible/config.yaml }
+            $hidden = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-254 -Mode quick -ProjectRoot $gateProject }
+            Assert-Result -Name "an edit hidden from status by skip-worktree is refused" -Condition ($hidden.ExitCode -eq 2 -and ($hidden.Output -join "`n").Contains("uncommitted changes")) -FailureMessage ($hidden.Output -join "`n")
+            $null = Invoke-ExternalCommand { git -C $gateProject update-index --no-skip-worktree .crucible/config.yaml }
+
+            Save-FixtureConfig -ProjectRoot $gateProject
+            $after = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-254 -Mode quick -ProjectRoot $gateProject }
+            $afterOut = $after.Output -join "`n"
+            Assert-Result -Name "the same edit runs once committed" -Condition ($after.ExitCode -eq 0 -and $afterOut.Contains("==> no-op") -and -not $afterOut.Contains("==> gate")) -FailureMessage $afterOut
+        } finally {
+            Remove-WorktreeIfPresent -ProjectRoot $gateProject -WorktreePath $gateWt
+        }
+    }
+
+    # Codex review of de0f0f4, finding 4: the gate parses this line to tell a refused config
+    # source from a failed check.
+    $results += Run-Test -Name "A config refusal prints the stable config-source identity (item 254)" -Body {
+        $markerProject = Join-Path $tempRoot "refusal-marker"
+        Initialize-Repo -ProjectRoot $markerProject
+        [IO.File]::AppendAllText((Join-Path $markerProject ".crucible/config.yaml"), "# uncommitted`n", [Text.UTF8Encoding]::new($false))
+        $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId R-254 -Mode quick -Commit HEAD -ProjectRoot $markerProject }
+        $out = $res.Output -join "`n"
+        Assert-Result -Name "the refusal carries the config-source identity, not a check failure" -Condition ($res.ExitCode -eq 2 -and $out -match '(?m)^Config source refused \(modified\): .*config\.yaml' -and $out -notmatch 'Check failed:') -FailureMessage $out
+    }
+
+    # Codex re-review of 8e0a26e: an unreadable config still prints the identity, so the gate
+    # does not record a check failure named "unknown" and consume a retry.
+    $results += Run-Test -Name "An unreadable config prints the config-source identity (item 254)" -Body {
+        $lockedProject = Join-Path $tempRoot "unreadable-config"
+        Initialize-Repo -ProjectRoot $lockedProject
+        $lockedConfig = Join-Path $lockedProject ".crucible/config.yaml"
+        $lock = [IO.File]::Open($lockedConfig, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+        try {
+            $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId R-254U -Mode quick -Commit HEAD -ProjectRoot $lockedProject }
+        } finally { $lock.Dispose() }
+        $out = $res.Output -join "`n"
+        Assert-Result -Name "an unreadable config is a refused config source" -Condition ($res.ExitCode -eq 2 -and $out -match '(?m)^Config source refused \(unreadable\): .*config\.yaml' -and $out -notmatch '==>') -FailureMessage ("exit " + $res.ExitCode + "`n" + $out)
+    }
+
+    # Finding 2: settings come from the verified snapshot, so a check that rewrites the config
+    # cannot drop hooks.project_dir and skip the project pre-push hook that runs after it.
+    $results += Run-Test -Name "A check that removes hooks.project_dir from the config still faces the project pre-push hook (item 254)" -Body {
+        $snapProject = Join-Path $tempRoot "snapshot-hooks"
+        Initialize-Repo -ProjectRoot $snapProject
+        $cfgPath = Join-Path $snapProject ".crucible/config.yaml"
+        $rewrite = "Set-Content -LiteralPath '" + $cfgPath + "' -Value 'project: RunIsolatedChecksTest'"
+        [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: no-op`n      command: $pwshCmd -NoProfile -Command exit 0`n  full:`n    - name: drops hooks`n      command: $rewrite`nhooks:`n  project_dir: project-hooks`n", [Text.UTF8Encoding]::new($false))
+        New-Item -ItemType Directory -Path (Join-Path $snapProject "project-hooks") -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $snapProject "project-hooks/pre-push"), "#!/bin/sh`necho `"snapshot hook ran`"`nexit 3`n")
+        git -C $snapProject add .crucible/config.yaml project-hooks/pre-push
+        git -C $snapProject commit --quiet -m "hooked checks"
+        $snapWt = Add-ImplementationWorktree -ProjectRoot $snapProject -TaskId T-254S
+        try {
+            $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-254S -Mode full -ProjectRoot $snapProject }
+            $out = $res.Output -join "`n"
+            Assert-Result -Name "the check rewrote the config during the run" -Condition ($out.Contains("==> drops hooks") -and ([IO.File]::ReadAllText($cfgPath) -notmatch 'project_dir')) -FailureMessage $out
+            Assert-Result -Name "the project pre-push hook from the verified config still runs and fails" -Condition ($res.ExitCode -ne 0 -and $out.Contains("snapshot hook ran") -and $out.Contains("Check failed: Project pre-push hook")) -FailureMessage ("exit " + $res.ExitCode + "`n" + $out)
+        } finally {
+            Remove-WorktreeIfPresent -ProjectRoot $snapProject -WorktreePath $snapWt
+        }
+    }
+
+    $uncommittedCases = @(
+        @{ Name = "untracked"; Ignore = ""; Git = $true; Expect = "is not committed at HEAD"; Remedy = "git add .crucible/config.yaml" },
+        @{ Name = "ignored"; Ignore = ".crucible/config.yaml"; Git = $true; Expect = "is ignored by git"; Remedy = "git check-ignore -v .crucible/config.yaml" },
+        @{ Name = "non-git"; Ignore = ""; Git = $false; Expect = "is not inside a git work tree"; Remedy = "Put the project under git" }
+    )
+    foreach ($case in $uncommittedCases) {
+        $results += Run-Test -Name ("A config that is " + $case.Name + " gets a named refusal, not a crash or a pass (item 254)") -Body {
+            $root = Join-Path $tempRoot ("config-" + $case.Name)
+            $null = New-Item -ItemType Directory -Path (Join-Path $root ".crucible") -Force
+            $cfgPath = Join-Path $root ".crucible/config.yaml"
+            [IO.File]::WriteAllText($cfgPath, "project: RunIsolatedChecksTest`nverification:`n  quick:`n    - name: no-op`n      command: $pwshCmd -NoProfile -Command exit 0`n", [Text.UTF8Encoding]::new($false))
+            if ($case.Git) {
+                $null = Invoke-ExternalCommand { git -C $root init --quiet }
+                [IO.File]::WriteAllText((Join-Path $root "README.md"), "fixture`n")
+                $paths = @("README.md")
+                if ($case.Ignore) { [IO.File]::WriteAllText((Join-Path $root ".gitignore"), $case.Ignore + "`n"); $paths += ".gitignore" }
+                $null = Invoke-ExternalCommand { git -C $root add -- @paths }
+                $null = Invoke-ExternalCommand { git -C $root -c user.name=Test -c user.email=test@example.com -c commit.gpgSign=false commit --quiet -m init }
+            }
+            $savedCeiling = $env:GIT_CEILING_DIRECTORIES
+            $env:GIT_CEILING_DIRECTORIES = $tempRoot
+            try {
+                $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId R-254 -Mode quick -Commit HEAD -ProjectRoot $root }
+            } finally {
+                $env:GIT_CEILING_DIRECTORIES = $savedCeiling
+            }
+            $out = $res.Output -join "`n"
+            Assert-Result -Name ("a " + $case.Name + " config is refused before any check") -Condition ($res.ExitCode -eq 2 -and $out -notmatch '==>') -FailureMessage ("exit " + $res.ExitCode + "`n" + $out)
+            Assert-Result -Name ("the " + $case.Name + " refusal names the file and the remedy") -Condition ($out.Contains($cfgPath) -and $out.Contains($case.Expect) -and $out.Contains($case.Remedy)) -FailureMessage $out
+        }
     }
 } finally {
     if (Test-Path -LiteralPath $projectRoot) {

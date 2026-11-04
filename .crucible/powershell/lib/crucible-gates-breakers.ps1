@@ -357,7 +357,26 @@ function Invoke-CircuitBreakerGates {
             } finally {
                 $ErrorActionPreference = $previousPreference
             }
-            if ($LASTEXITCODE -ne 0) {
+            $checksExit = $LASTEXITCODE
+            # A refused config source is a prerequisite: no check ran, so it consumes no
+            # verification retry and is not a Reviewer failure. Item 254.
+            $configRefusal = $null
+            if ($checksExit -ne 0 -and $testOutput) {
+                foreach ($line in $testOutput) {
+                    if ([string]$line -match '^Config source refused \(([a-z-]+)\):\s*(.+)$') {
+                        $configRefusal = [pscustomobject]@{ Status = $Matches[1]; Message = $Matches[2].Trim() }
+                        break
+                    }
+                }
+            }
+            if ($null -ne $configRefusal) {
+                Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "config_source_refused" -Notes ("Config source refused (" + $configRefusal.Status + "): " + $configRefusal.Message) `
+                    -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
+                Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "config_source_refused" `
+                    -Why ("The independent checks did not run because the project's config.yaml is not the committed one (" + $configRefusal.Status + "): " + $configRefusal.Message + " No verification check ran, so no retry was consumed.")
+                exit 2
+            }
+            if ($checksExit -ne 0) {
                 # Identify which named check failed (e.g. golangci-lint)
                 $failedCheck = "unknown"
                 if ($testOutput) {

@@ -26,8 +26,27 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 }
 
+# Item 254: the checks, and every other setting this run reads, come from one read of the
+# committed config.yaml, verified against the project's HEAD. Nothing reopens the file, so
+# a running check cannot change a setting read after it. The "Config source refused" line
+# is the stable identity the verification gate parses: a refusal is a prerequisite, not a
+# failed check. Item 245 owns the checks reader.
+try {
+    $configState = Get-ConfigCommitState -ProjectRoot $ProjectRoot
+} catch {
+    # Any failure to verify is still a refused config source, never a check failure.
+    $configPathForError = Join-Path $ProjectRoot ".crucible/config.yaml"
+    $configState = [pscustomobject]@{ Status = "unverifiable"; Message = ($configPathForError + " could not be verified against HEAD (" + $_.Exception.Message + "). Remedy: Check that the file is readable and git works in this repository.") }
+}
+if ($configState.Status -ne "committed") {
+    [Console]::Error.WriteLine("Refusing to run the configured checks: " + $configState.Message)
+    Write-Host ("Config source refused ({0}): {1}" -f $configState.Status, $configState.Message)
+    exit 2
+}
+$configContent = $configState.Content
+
 # Item 188: lookup and detached checks share the configured workspaces root.
-$worktreeRoot = Resolve-FilesystemPath -Path (Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot)
+$worktreeRoot = Resolve-FilesystemPath -Path (Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot -Content $configContent)
 $commitWorktree = $null
 function Remove-CommitWorktree {
     if ($null -eq $commitWorktree) { return }
@@ -72,17 +91,10 @@ if (-not [string]::IsNullOrWhiteSpace($Commit)) {
     }
 }
 
-
-$configPath = Join-Path $ProjectRoot ".crucible/config.yaml"
-if (-not (Test-Path -LiteralPath $configPath)) {
-    Write-Error ("Configuration file not found: {0}" -f $configPath)
-}
-
 # Map "test" mode to "quick" if the framework calls it with "test" for backward compatibility
 $targetMode = if ($Mode -eq "test") { "quick" } else { $Mode }
 
 # Item 245: the checks block has one reader, shared with validate-config.ps1 and crucible-doctor.ps1.
-$configContent = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
 $identityErrors = @(Get-VerificationCheckIdentityErrors -Content $configContent)
 if ($identityErrors.Count -gt 0) {
     [Console]::Error.WriteLine(($identityErrors -join "`n"))
@@ -92,7 +104,7 @@ $commands = @(Get-VerificationChecks -Content $configContent -Mode $targetMode)
 
 # A not-run line clears only when its own check executes, so a quick run or an early failure
 # keeps a skip that a full run or another step recorded. Item 258.
-$sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
+$sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot -Content $configContent
 
 
 function Invoke-Check {
@@ -155,7 +167,7 @@ function Get-HostGateReason {
 # costs a review strike. Scan only the files this task changed, so the gate stays fast
 # and never flags pre-existing debt. Determine the branch fork point to diff against.
 # Keep the encoding baseline aligned with the scope check. Item 225.
-$defaultBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $worktree
+$defaultBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $worktree -Content $configContent
 $mergeBaseRes = Invoke-Git -Directory $worktree merge-base HEAD $defaultBranch
 if ($mergeBaseRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($mergeBaseRes.Raw)) {
     throw "Could not determine encoding baseline against '$defaultBranch'."
@@ -287,7 +299,7 @@ function Invoke-ProjectPrePushHook {
 . (Join-Path $PSScriptRoot "lib/checks-not-run.ps1")
     $checkName = "Project pre-push hook"
     try {
-        $hooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot
+        $hooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot -Content $configContent
     } catch {
         Write-Host ("hooks.project_dir is unusable, so the project's pre-push hook cannot run: " + $_.Exception.Message)
         Write-Host ("Check failed: {0}" -f $checkName)
@@ -366,7 +378,7 @@ if ($null -ne $commitWorktree) {
     if ($targetMode -eq "full") {
         Write-Host "The project pre-push hook checks a branch push, so it does not run for -Commit."
         try {
-            $commitHooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot
+            $commitHooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot -Content $configContent
         } catch {
             $commitHooksDir = ""
             Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Project pre-push hook" -Reason ("hooks.project_dir is unusable: " + $_.Exception.Message)

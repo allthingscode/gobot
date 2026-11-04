@@ -11,6 +11,14 @@ $pwshCmd = Get-PwshCommand
 
 $results = @()
 
+# The checks runner refuses a config.yaml the main checkout has not committed (item 254).
+function Save-MainCheckoutConfig {
+    param([Parameter(Mandatory = $true)][string]$Root)
+    $null = Invoke-ExternalCommand { git -C $Root init --quiet }
+    $null = Invoke-ExternalCommand { git -C $Root add -- .crucible/config.yaml }
+    $null = Invoke-ExternalCommand { git -C $Root -c user.name=Test -c user.email=test@example.com -c commit.gpgSign=false commit --quiet -m config }
+}
+
 function Write-TestHandoff {
     param(
         [Parameter(Mandatory=$true)][string]$Path,
@@ -624,6 +632,7 @@ verification:
       command: $pwshCmd -NoProfile -Command exit 1
 "@
         [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
+        Save-MainCheckoutConfig -Root $caseRoot
 
         # Set up worktree containing same config.yaml
         $wtPath = Join-Path $caseRoot ".crucible/.agent-workspaces/implementation-F-038"
@@ -711,6 +720,7 @@ verification:
       command: $pwshCmd -NoProfile -Command exit 1
 "@
         [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
+        Save-MainCheckoutConfig -Root $caseRoot
 
         # Set up worktree containing same config.yaml
         $wtPath = Join-Path $caseRoot ".crucible/.agent-workspaces/implementation-F-038"
@@ -807,6 +817,7 @@ verification:
       command: $pwshCmd -NoProfile -Command exit 0
 "@
         [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
+        Save-MainCheckoutConfig -Root $caseRoot
 
         # Set up worktree containing same config.yaml
         $wtPath = Join-Path $caseRoot ".crucible/.agent-workspaces/implementation-F-038"
@@ -879,6 +890,7 @@ verification:
       command: $pwshCmd -NoProfile -Command "Set-Content -LiteralPath '$marker' -Value ran"
 "@
         [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
+        Save-MainCheckoutConfig -Root $caseRoot
         $wtPath = Join-Path $caseRoot ".crucible/.agent-workspaces/implementation-F-221"
         New-Item -ItemType Directory -Path (Join-Path $wtPath ".crucible") -Force | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $wtPath ".crucible/config.yaml"), $configContent)
@@ -933,6 +945,80 @@ verification:
         Assert-Result -Name "the uncommitted file is named" -Condition ($output.Contains("README.md") -and $output.Contains("uncommitted_task_worktree")) -FailureMessage $output
         $cbText = if (Test-Path -LiteralPath $cbHistoryFile) { Get-Content -LiteralPath $cbHistoryFile -Raw } else { "" }
         Assert-Result -Name "breaker recorded" -Condition ($cbText -match 'uncommitted_task_worktree') -FailureMessage ("circuit breaker history: " + $cbText)
+    }
+
+    # Item 254, Codex review of de0f0f4 finding 4: a refused config source is a prerequisite.
+    # No check ran, so it must not consume the verification retry or read as a check failure.
+    $results += Run-Test -Name "An uncommitted main-checkout config stops verification without consuming a retry (item 254)" -Body {
+        $caseRoot = Join-Path $tempRoot "item254-config-refused"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $crucibleDir = Join-Path $caseRoot ".crucible"
+        New-Item -ItemType Directory -Path $crucibleDir -Force | Out-Null
+        $configContent = @"
+project_name: "Item 254 App"
+verification:
+  full:
+    - name: failing-lint
+      command: $pwshCmd -NoProfile -Command exit 1
+"@
+        $mainConfig = Join-Path $crucibleDir "config.yaml"
+        [System.IO.File]::WriteAllText($mainConfig, $configContent)
+        Save-MainCheckoutConfig -Root $caseRoot
+        [System.IO.File]::AppendAllText($mainConfig, "`n# uncommitted edit`n")
+        $wtPath = Join-Path $caseRoot ".crucible/.agent-workspaces/implementation-F-254"
+        New-Item -ItemType Directory -Path (Join-Path $wtPath ".crucible") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $wtPath ".crucible/config.yaml"), $configContent)
+        Push-Location $wtPath
+        try {
+            git init --quiet
+            git config user.name "Test"
+            git config user.email "test@example.com"
+            git config commit.gpgSign false
+            git checkout -b task/F-254 --quiet
+            Set-Content -Path "README.md" -Value "# Temp"
+            git add -A
+            git commit -m "init" --quiet
+            git branch main
+        } finally {
+            Pop-Location
+        }
+
+        $logFile = Join-Path $caseRoot "session/F-254/pipeline.log.jsonl"
+        $cbHistoryFile = Join-Path $caseRoot "session/global/circuit_breakers.jsonl"
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            Set-Location '$caseRoot'
+            `$Quiet = `$true
+            `$backlogDir = '$(Join-Path $caseRoot "backlog")'
+            `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$caseRoot'
+                WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$($cbHistoryFile.Replace("'", "''"))'
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
+                SessionDir = '$(Join-Path $caseRoot "session")'
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = 'F-254'
+                    source_phase = 'verification'
+                    target_phase = 'deployment'
+                    cumulative_handoff_count = 1
+                    budget_tier = 'low'
+                    reason = 'test'
+                }
+            }
+            Invoke-CircuitBreakerGates -Context `$ctx
+"@ 2>&1 } | Out-String
+        $exitCode = $LASTEXITCODE
+        $logContent = if (Test-Path -LiteralPath $logFile) { Get-Content -LiteralPath $logFile -Raw -Encoding UTF8 } else { "" }
+        $cbText = if (Test-Path -LiteralPath $cbHistoryFile) { Get-Content -LiteralPath $cbHistoryFile -Raw } else { "" }
+
+        Assert-Result -Name "a refused config source stops the gate" -Condition ($exitCode -eq 2) -FailureMessage ("expected exit 2, got " + $exitCode + ". Output: " + $output)
+        Assert-Result -Name "a refused config source consumes no verification retry" -Condition ($logContent -notmatch 'quality_gate_retry') -FailureMessage ("pipeline log: " + $logContent)
+        Assert-Result -Name "the refusal is recorded under its own breaker code" -Condition ($cbText -match 'config_source_refused' -and $cbText -notmatch 'reviewer_verification_failed') -FailureMessage ("circuit breaker history: " + $cbText)
+        Assert-Result -Name "the wedge names the config file and the remedy" -Condition ($output.Contains("config_source_refused") -and $output.Contains("config.yaml has uncommitted changes") -and $output.Contains("Remedy:") -and $output.Contains("no retry was consumed")) -FailureMessage $output
     }
 
     $results += Run-Test -Name "D38: No-Code Closure no worktree passes without checks" -Body {
@@ -1414,6 +1500,7 @@ verification:
 "@
         New-Item -ItemType Directory -Path $crucibleDir, $worktreeCrucibleDir -Force | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $crucibleDir "config.yaml"), $configContent)
+        Save-MainCheckoutConfig -Root $caseRoot
         [System.IO.File]::WriteAllText((Join-Path $worktreeCrucibleDir "config.yaml"), $configContent)
 
         Push-Location $worktreePath

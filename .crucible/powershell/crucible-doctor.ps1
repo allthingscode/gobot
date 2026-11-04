@@ -292,6 +292,18 @@ if ($frameworkMode) {
             -Details ("config.yaml parsed; crucible_root = '" + $crucibleRootValue + "'.")
     }
 
+    # Advisory, like validate-config.ps1: an uncommitted edit is the normal state between
+    # editing and committing, and run-isolated-checks.ps1 refuses it at run time. Item 254.
+    $configCommit = Get-ConfigCommitState -ProjectRoot $REPO_ROOT
+    if ($configCommit.Status -eq "committed") {
+        Add-DoctorResult -Check "config.committed" -Status "pass" -Severity "advisory" `
+            -Details ".crucible/config.yaml matches HEAD, so the configured checks run from the committed file."
+    } else {
+        Add-DoctorResult -Check "config.committed" -Status "warn" -Severity "advisory" `
+            -Details ($configCommit.Detail + " run-isolated-checks.ps1 refuses to run the checks until it is committed.") `
+            -Remediation $configCommit.Remedy
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($crucibleRootValue)) {
         $resolvedBundle = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $crucibleRootValue
         if (Test-Path -LiteralPath $resolvedBundle -PathType Container) {

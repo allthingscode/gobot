@@ -561,6 +561,22 @@ review:
         $outside = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $VALIDATE_SCRIPT -ConfigPath $elsewherePath }
         Assert-Result -Name "host_gate outside verification is not a check" -Condition ($outside.Output -notmatch 'verification host_gate must be') -FailureMessage $outside.Output
     }
+
+    # Item 254: the validator reports the state the checks runner refuses. A warning, so
+    # validating an edit before committing it still exits 0. Last test: it commits the file.
+    $results += Run-Test -Name "The validator warns when config.yaml differs from HEAD and is silent once committed (item 254)" -Body {
+        $null = Invoke-ExternalCommand { git -C $projectRoot init --quiet }
+        $null = Invoke-ExternalCommand { git -C $projectRoot add -- .crucible/config.yaml }
+        $null = Invoke-ExternalCommand { git -C $projectRoot -c user.name=Test -c user.email=test@example.com -c commit.gpgSign=false commit --quiet -m config }
+        $clean = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $VALIDATE_SCRIPT -ConfigPath $configPath }
+        $cleanOut = $clean.Output -join "`n"
+        Assert-Result -Name "a committed config draws no commit warning" -Condition ($clean.ExitCode -eq 0 -and -not $cleanOut.Contains("refuses this config until it is committed")) -FailureMessage $cleanOut
+
+        [IO.File]::AppendAllText($configPath, "# uncommitted edit`n", [Text.UTF8Encoding]::new($false))
+        $dirty = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $VALIDATE_SCRIPT -ConfigPath $configPath }
+        $dirtyOut = $dirty.Output -join "`n"
+        Assert-Result -Name "an uncommitted edit is reported with the file and the remedy" -Condition ($dirty.ExitCode -eq 0 -and $dirtyOut.Contains("refuses this config until it is committed") -and $dirtyOut.Contains("uncommitted changes") -and $dirtyOut.Contains("Remedy:")) -FailureMessage $dirtyOut
+    }
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) {

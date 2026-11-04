@@ -30,6 +30,13 @@ $ConfigPath = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ConfigPa
 $content = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
 $entries = @(Get-ConfigEntries -Content $content)
 
+# A warning, not an error: validating an edit before committing it is the normal loop.
+# The checks runner is the enforcement point and refuses the same state. Item 254.
+$commitState = Get-ConfigCommitState -ProjectRoot (Split-Path -Parent (Split-Path -Parent $ConfigPath)) -ConfigPath $ConfigPath
+if ($commitState.Status -ne "committed") {
+    $warnings += ("run-isolated-checks.ps1 refuses this config until it is committed: " + $commitState.Message)
+}
+
 # A key that is present but unreadable is reported as such. Treating it as absent is
 # what let a malformed value pass validation and then read as its default at runtime.
 function Read-Value {

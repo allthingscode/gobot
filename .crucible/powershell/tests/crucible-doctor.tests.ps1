@@ -200,6 +200,7 @@ try {
             "claude.agents",
             "claude.agents.ignored",
             "codex.cli",
+            "config.committed",
             "config.parse",
             "crucible.required-scripts",
             "gh.auth",
@@ -224,6 +225,43 @@ try {
         $missingDynamic = @($expectedDynamic | Where-Object { -not ($actualDynamic -ccontains $_) })
         $extraDynamic = @($actualDynamic | Where-Object { -not ($expectedDynamic -ccontains $_) })
         Assert-Result -Name "dynamic check-ID prefix set matches the recorded inventory" -Condition ($missingDynamic.Count -eq 0 -and $extraDynamic.Count -eq 0) -FailureMessage ("dynamic check-ID prefix changed. missing: [" + ($missingDynamic -join ", ") + "] extra: [" + ($extraDynamic -join ", ") + "]")
+    }
+
+    # Item 254: the doctor reports the config state run-isolated-checks.ps1 refuses.
+    $results += Run-Test -Name "Doctor reports whether config.yaml is committed (item 254)" -Body {
+        $projectRoot = Join-Path $tempRoot "commit-state-project"
+        Write-DoctorFixture -ProjectRoot $projectRoot
+        function Invoke-CommitStateDoctor {
+            $savedCeiling = $env:GIT_CEILING_DIRECTORIES
+            $env:GIT_CEILING_DIRECTORIES = $tempRoot
+            try {
+                $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }
+            } finally { $env:GIT_CEILING_DIRECTORIES = $savedCeiling }
+            return ($res.Output -join "`n")
+        }
+        function Get-CommitStateSection {
+            param([string]$Text)
+            $section = ""
+            foreach ($line in ($Text -split "\r?\n")) {
+                if ($line -match '^(PASS|WARN|FAIL) \(') { $section = $Matches[1] }
+                if ($line.Contains("[config.committed]")) { return $section }
+            }
+            return "absent"
+        }
+
+        $outside = Invoke-CommitStateDoctor
+        Assert-Result -Name "a config outside git is a warning" -Condition ((Get-CommitStateSection $outside) -eq "WARN" -and $outside.Contains("is not inside a git work tree")) -FailureMessage $outside
+
+        $null = Invoke-ExternalCommand { git -C $projectRoot init --quiet }
+        $null = Invoke-ExternalCommand { git -C $projectRoot add -- .crucible/config.yaml }
+        $null = Invoke-ExternalCommand { git -C $projectRoot -c user.name=Test -c user.email=test@example.com -c commit.gpgSign=false commit --quiet -m config }
+        $committed = Invoke-CommitStateDoctor
+        Assert-Result -Name "a committed config passes" -Condition ((Get-CommitStateSection $committed) -eq "PASS") -FailureMessage $committed
+
+        [IO.File]::AppendAllText((Join-Path $projectRoot ".crucible/config.yaml"), "# uncommitted edit`n", [Text.UTF8Encoding]::new($false))
+        $dirty = Invoke-CommitStateDoctor
+        Assert-Result -Name "an uncommitted edit is a warning with the remedy" -Condition ((Get-CommitStateSection $dirty) -eq "WARN" -and $dirty.Contains("uncommitted changes") -and $dirty.Contains("git add .crucible/config.yaml")) -FailureMessage $dirty
+        Assert-Result -Name "the warning does not block readiness" -Condition ($dirty -match "\[DOCTOR\] Result: READY") -FailureMessage $dirty
     }
 
     $results += Run-Test -Name "Adopter without framework toolchain is READY (no Go required)" -Body {

@@ -287,6 +287,9 @@ try {
         $configText2 = [System.IO.File]::ReadAllText($configPath2)
         $configText2 = $configText2 -replace '(?ms)^verification:.*?(?=\r?\n\r?\n|\z|\r?\n[a-zA-Z_])', $checksBlock
         [System.IO.File]::WriteAllText($configPath2, $configText2, (New-Object System.Text.UTF8Encoding($false)))
+        # The runner refuses an uncommitted config.yaml (item 254).
+        $null = Invoke-ExternalCommand { git -C $projectRoot2 add -f -- .crucible/config.yaml }
+        $null = Invoke-ExternalCommand { git -C $projectRoot2 -c user.name=Test -c user.email=test@example.com -c commit.gpgSign=false commit --quiet -m "checks config" -- .crucible/config.yaml }
         Remove-Item Env:\CRUCIBLE_ITEM258_MISSING -ErrorAction SilentlyContinue
         $checksRun = Invoke-ExternalCommand {
             & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File (Join-Path $REPO_ROOT "powershell/run-isolated-checks.ps1") `

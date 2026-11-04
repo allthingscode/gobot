@@ -10,6 +10,12 @@ function Write-RootFixtureFile($Path, $Content) {
     New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
     [IO.File]::WriteAllText($Path, $Content, $utf8)
 }
+# The checks runner refuses an uncommitted config.yaml (item 254), so each edit is committed.
+function Save-RootFixtureConfig($Content) {
+    [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $Content, $utf8)
+    & git -C $project add .crucible/config.yaml
+    & git -C $project commit --quiet --allow-empty -m 'fixture config'
+}
 try {
     $project = Join-Path $root 'project'
     $config = [IO.File]::ReadAllText((Join-Path $frameworkRoot 'templates/project/.crucible/config.yaml'))
@@ -138,7 +144,7 @@ function New-PSDrive {
     }
     # Local config commands must be inert, regardless of the scaffold's current toolchain.
     $checkConfig = "project:`n  default_branch: main`nverification:`n  quick:`n    - name: local marker`n      command: Write-Output 'ITEM334 CHECK RAN'`n"
-    [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $checkConfig, $utf8)
+    Save-RootFixtureConfig $checkConfig
     foreach ($variant in @('native', 'alias', 'letter', 'relative', 'slash', 'backslash')) {
         $results += Run-Test "Project owners return native roots: $variant" {
             if ($variant -eq 'letter' -and -not $aliasDrive) { Skip-Test 'No free D..Z PowerShell drive letter is available.' }
@@ -159,7 +165,7 @@ function New-PSDrive {
                 # The placeholder identifies the spelling, not a parent's claim.
                 $spelling = switch ($variant) { native { $project } alias { 'Item334:/project' } letter { 'D:/project' } relative { 'project' } slash { '/project' } backslash { '\project' } }
                 $isValidation = $caller -in @('validate-config', 'crucible-doctor')
-                [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $(if ($isValidation) { $config } else { $checkConfig }), $utf8)
+                Save-RootFixtureConfig $(if ($isValidation) { $config } else { $checkConfig })
                 $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root $spelling $caller }
                 $output = $res.Output -join "`n"
                 Skip-TestForPSDriveExhaustion -Output $output
@@ -188,7 +194,7 @@ function New-PSDrive {
             Assert-Result 'project CWD' ((Resolve-CrucibleProjectRoot '' (Join-Path $frameworkRoot 'powershell')) -ceq $project) 'wrong project'
             Assert-Result 'missing config spelling' ((Resolve-ConfigProjectRoot 'Item334:/absent') -ceq 'Item334:/absent') 'missing spelling changed'
         } finally { Pop-Location }
-        [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $checkConfig, $utf8)
+        Save-RootFixtureConfig $checkConfig
         $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root 'Item334:/project' default-checks }
         Assert-Result 'default caller ran' ($res.ExitCode -eq 0 -and ($res.Output -join "`n") -match 'ITEM334 CHECK RAN') ($res.Output -join "`n")
     }
@@ -196,7 +202,7 @@ function New-PSDrive {
         $results += Run-Test "Configured root-relative workspaces: $caller" {
             if (-not $IsWindows) { Skip-Test 'Windows root-relative paths require a filesystem drive.' }
             $aliasConfig = $checkConfig + "paths:`n  workspaces: /project/.crucible/.agent-workspaces`n"
-            [IO.File]::WriteAllText((Join-Path $project '.crucible/config.yaml'), $aliasConfig, $utf8)
+            Save-RootFixtureConfig $aliasConfig
             $res = Invoke-ExternalCommand { & pwsh -NoProfile -NonInteractive -File $runner $frameworkRoot $root $project $caller }
             Assert-Result 'configured worktree ran' ($res.ExitCode -eq 0 -and ($res.Output -join "`n") -match 'ITEM334 CHECK RAN') ($res.Output -join "`n")
             Assert-Result 'detached worktree removed' (@(Invoke-ExternalCommand -AsLines { & git -C $project worktree list --porcelain } | Where-Object { $_ -match 'checks-C-334' }).Count -eq 0) 'temporary worktree retained'

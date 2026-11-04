@@ -334,6 +334,127 @@ function Get-VerificationCheckIdentityErrors {
     }
 }
 
+# --- config source for the checks --------------------------------------------
+# The checks runner reads the main checkout's config.yaml, which a gated specialist can
+# edit without committing, and the integrity breaker skips it as adopter-owned. The runner
+# refuses anything but the committed file rather than reading HEAD: reading HEAD would run
+# checks that validate-config.ps1, the doctor and the human never see in the file. Item 254.
+#
+# - Every git call runs from ProjectRoot and compares with the project's HEAD, so a nested
+#   repository or submodule inside .crucible cannot vouch for a config it committed itself;
+#   one that owns the file is refused by name.
+# - The file is read once. Those bytes are hashed through git's filters (hash-object
+#   --stdin --path) and returned as Content, so the runner derives every setting from the
+#   bytes that were verified, not from a later read a running check could change.
+#   Comparing the hash rather than porcelain status also catches an edit that
+#   skip-worktree or assume-unchanged hides.
+# - A symlinked config, on disk or in HEAD, is refused: the checks would come from
+#   wherever the link points, and HEAD records the link text, not the checks.
+function Get-ConfigCommitState {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [string]$ConfigPath = ""
+    )
+
+    $root = Resolve-FilesystemPath -Path $ProjectRoot
+    if ([string]::IsNullOrWhiteSpace($ConfigPath)) { $ConfigPath = Join-Path $root ".crucible/config.yaml" }
+    $newState = {
+        param([string]$Status, [string]$Detail, [string]$Remedy, $Content = $null)
+        [pscustomobject]@{ Status = $Status; ConfigPath = $ConfigPath; Detail = $Detail; Remedy = $Remedy; Message = ($Detail + " Remedy: " + $Remedy); Content = $Content }
+    }
+    if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+        return & $newState "missing" ("Configuration file not found: " + $ConfigPath + ".") "Create it with init-project.ps1 and commit it."
+    }
+    $fullConfig = Resolve-FilesystemPath -Path $ConfigPath
+    $rel = Get-PathRelativeToDirectory -Path $fullConfig -Directory $root -Separator "/"
+    if ([string]::IsNullOrEmpty($rel)) {
+        return & $newState "unverifiable" ($ConfigPath + " is not inside the project root " + $root + ", so the project's HEAD cannot vouch for it.") "Keep the config at .crucible/config.yaml inside the project."
+    }
+    if (-not [string]::IsNullOrEmpty([string](Get-Item -LiteralPath $fullConfig -Force).LinkType)) {
+        return & $newState "symlink" ($ConfigPath + " is a symbolic link, so the checks would come from wherever it points.") ("Replace it with a regular file holding the config and commit it: git add " + $rel + "; git commit.")
+    }
+    if ($null -eq (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
+        return & $newState "not-git" ($ConfigPath + " cannot be compared with a commit because git is not on PATH, so nothing shows the checks it names are the committed ones.") "Install git and commit the file."
+    }
+    $git = {
+        param([string]$Directory, [string[]]$GitArgs)
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $out = @(& git -C (Resolve-FilesystemPath -Path $Directory) @GitArgs 2>$null)
+            return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Text = (($out | ForEach-Object { [string]$_ }) -join "`n").Trim() }
+        } finally { $ErrorActionPreference = $prevEAP }
+    }
+
+    $inside = & $git $root @("rev-parse", "--is-inside-work-tree")
+    if ($inside.ExitCode -ne 0 -or $inside.Text -ne "true") {
+        return & $newState "not-git" ($ConfigPath + " is not inside a git work tree (git rev-parse --is-inside-work-tree exited " + $inside.ExitCode + "), so no commit records the checks it names.") "Put the project under git and commit the file."
+    }
+    $projectTop = & $git $root @("rev-parse", "--show-toplevel")
+    $configTop = & $git (Split-Path -Parent $fullConfig) @("rev-parse", "--show-toplevel")
+    $topComparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+    if ($projectTop.ExitCode -ne 0 -or $configTop.ExitCode -ne 0 -or -not $projectTop.Text.Equals($configTop.Text, $topComparison)) {
+        return & $newState "nested-repo" ($ConfigPath + " belongs to the git repository at " + $configTop.Text + ", not the project's at " + $projectTop.Text + ", so a commit there does not show the project committed the checks.") "Remove the nested repository or submodule from the config's directory and commit the file in the project."
+    }
+
+    $entry = & $git $root @("ls-tree", "HEAD", "--", $rel)
+    if ($entry.ExitCode -eq 0 -and $entry.Text -match '^(\d{6}) (\w+) ([0-9a-f]+)\t') {
+        $headMode = $Matches[1]; $headType = $Matches[2]; $headBlob = $Matches[3]
+    } else {
+        $headMode = ""; $headType = ""; $headBlob = ""
+    }
+    if ($headMode -eq "120000") {
+        return & $newState "symlink" ($ConfigPath + " is committed as a symbolic link, so HEAD records the link text, not the checks.") ("Commit a regular file in its place: git add " + $rel + "; git commit.")
+    }
+    if ($headType -eq "commit") {
+        return & $newState "nested-repo" ($ConfigPath + " sits in a submodule of the project, so the project's HEAD records a commit id, not the checks.") "Commit the config as a regular file in the project."
+    }
+    if ([string]::IsNullOrEmpty($headBlob) -or $headType -ne "blob") {
+        $ignored = & $git $root @("check-ignore", "-q", "--", $rel)
+        if ($ignored.ExitCode -eq 0) {
+            return & $newState "ignored" ($ConfigPath + " is ignored by git and not committed at HEAD, so nothing records the checks it names.") ("Remove the ignore rule ('git check-ignore -v " + $rel + "' names it), then commit the file. docs/git-policy.md lists it under Commit By Default.")
+        }
+        return & $newState "uncommitted" ($ConfigPath + " is not committed at HEAD, so nothing records the checks it names.") ("Commit it: git add " + $rel + "; git commit.")
+    }
+
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($fullConfig)
+    } catch {
+        return & $newState "unreadable" ($ConfigPath + " could not be read (" + $_.Exception.Message + "), so the checks it names cannot be verified.") "Restore read access to the file, or restore it from HEAD, then rerun."
+    }
+    $diskBlob = ""
+    $hashExit = -1
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new("git")
+        foreach ($arg in @("-C", $root, "hash-object", "--stdin", ("--path=" + $rel))) { $psi.ArgumentList.Add($arg) }
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        try {
+            $stderrTask = $proc.StandardError.ReadToEndAsync()
+            $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+            $proc.StandardInput.Close()
+            $diskBlob = $proc.StandardOutput.ReadToEnd().Trim()
+            $proc.WaitForExit()
+            $null = $stderrTask.Result
+            $hashExit = $proc.ExitCode
+        } finally { $proc.Dispose() }
+    } catch {
+        $diskBlob = ""
+    }
+    if ($hashExit -ne 0 -or [string]::IsNullOrWhiteSpace($diskBlob)) {
+        return & $newState "unverifiable" ($ConfigPath + " could not be compared with HEAD (git hash-object exited " + $hashExit + ").") "Check that the file is readable and git works in this repository."
+    }
+    if ($diskBlob -ne $headBlob) {
+        return & $newState "modified" ($ConfigPath + " has uncommitted changes, so the checks it names are not the committed ones.") ("Commit the change (git add " + $rel + "; git commit) or revert it to HEAD.")
+    }
+    $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+    if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1) }
+    return & $newState "committed" ($ConfigPath + " matches HEAD.") "" $text
+}
+
 function Resolve-ConfigProjectRoot {
     param(
         [string]$ProjectRoot = "",
@@ -361,12 +482,16 @@ function Get-ConfiguredPath {
         [Parameter(Mandatory = $true)]
         [ValidateSet("backlog", "session", "workspaces", "prompts", "personas", "sops")]
         [string]$Key,
-        [string]$ProjectRoot = ""
+        [string]$ProjectRoot = "",
+        # Config text already read and verified (Get-ConfigCommitState). Supplied, the file
+        # is not reopened. Item 254.
+        [AllowEmptyString()][string]$Content
     )
 
     $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
     $configPath = Join-Path $root ".crucible/config.yaml"
-    
+    $haveContent = $PSBoundParameters.ContainsKey("Content")
+
     # Defaults
     $defaults = @{
         backlog    = ".crucible/backlog"
@@ -377,11 +502,11 @@ function Get-ConfiguredPath {
         sops       = ".crucible/sops"
     }
 
-    if (-not (Test-Path -LiteralPath $configPath)) {
+    if (-not $haveContent -and -not (Test-Path -LiteralPath $configPath)) {
         return (Resolve-PathFromRoot -Root $root -Path $defaults[$Key])
     }
 
-    $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+    $content = if ($haveContent) { $Content } else { Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 }
     $val = Get-ConfigBlockValue -Content $content -Path @("paths", $Key) -Source $configPath
     if ($null -ne $val) {
         return (Resolve-PathFromRoot -Root $root -Path $val)
@@ -557,13 +682,17 @@ function Get-ConfiguredReview {
         [Parameter(Mandatory = $true)]
         [ValidateSet("diff_tool", "editor", "auto_push", "require_green_ci", "ci_timeout_minutes", "ci_queued_grace_minutes", "ci_staging_branch_prefix", "ci_required_checks", "ci_post_push_watch")]
         [string]$Key,
-        [string]$ProjectRoot = ""
+        [string]$ProjectRoot = "",
+        # Config text already read and verified (Get-ConfigCommitState). Supplied, the file
+        # is not reopened. Item 254.
+        [AllowEmptyString()][string]$Content
     )
 
     $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
     $configPath = Join-Path $root ".crucible/config.yaml"
-    if (Test-Path -LiteralPath $configPath) {
-        $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+    $haveContent = $PSBoundParameters.ContainsKey("Content")
+    if ($haveContent -or (Test-Path -LiteralPath $configPath)) {
+        $content = if ($haveContent) { $Content } else { Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 }
         $val = Get-ConfigBlockValue -Content $content -Path @("review", $Key) -Source $configPath
         if ($null -ne $val) { return $val }
     }
@@ -579,14 +708,19 @@ function Get-ConfiguredReview {
 # chaining. A present but unusable value throws rather than returning $null: a hook that
 # quietly stops chaining is the silent shadowing this setting exists to end. Item 150.
 function Get-ConfiguredProjectHooksDir {
-    param([string]$ProjectRoot = "")
+    param(
+        [string]$ProjectRoot = "",
+        # Verified config text; supplied, the file is not reopened. Item 254.
+        [AllowEmptyString()][string]$Content
+    )
 
     $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -PathResolution Always
 
     $configPath = Join-Path $root ".crucible/config.yaml"
-    if (-not (Test-Path -LiteralPath $configPath)) { return $null }
+    $haveContent = $PSBoundParameters.ContainsKey("Content")
+    if (-not $haveContent -and -not (Test-Path -LiteralPath $configPath)) { return $null }
 
-    $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+    $content = if ($haveContent) { $Content } else { Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 }
     $val = Get-ConfigBlockValue -Content $content -Path @("hooks", "project_dir") -Source $configPath
     if ($null -eq $val) { return $null }
     return (Resolve-ProjectHooksDirValue -Value $val -ProjectRoot $root)
@@ -623,13 +757,18 @@ function Resolve-ProjectHooksDirValue {
 # not exist throws instead of falling back: merging into a guessed branch is worse than
 # stopping. Item 189.
 function Get-ConfiguredPrimaryBranch {
-    param([string]$ProjectRoot = "")
+    param(
+        [string]$ProjectRoot = "",
+        # Verified config text; supplied, the file is not reopened. Item 254.
+        [AllowEmptyString()][string]$Content
+    )
 
     $root = Resolve-FilesystemPath -Path (Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot -PathResolution None)
 
     $configPath = Join-Path $root ".crucible/config.yaml"
-    if (Test-Path -LiteralPath $configPath) {
-        $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+    $haveContent = $PSBoundParameters.ContainsKey("Content")
+    if ($haveContent -or (Test-Path -LiteralPath $configPath)) {
+        $content = if ($haveContent) { $Content } else { Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 }
         $val = Get-ConfigBlockValue -Content $content -Path @("project", "default_branch") -Source $configPath
         if (-not [string]::IsNullOrWhiteSpace($val)) {
             $branch = $val.Trim()

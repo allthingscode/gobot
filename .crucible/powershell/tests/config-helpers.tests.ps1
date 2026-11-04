@@ -465,7 +465,161 @@ try {
         try { $null = Get-ConfiguredPrimaryBranch -ProjectRoot $proj } catch { $message = $_.Exception.Message }
         Assert-Result -Name "missing configured branch throws" -Condition ($message -match "project.default_branch" -and $message -match "'develop'" -and $message -match "'trunk'") -FailureMessage ("expected the setting, its value and the current branch named. Got: " + $message)
     }
-}
+
+    # Item 254: the checks run only from a committed config.yaml. Each state is named, and
+    # only one of them is "committed".
+    function New-CommitStateRepo {
+        param([string]$Name, [switch]$CommitConfig, [string]$GitIgnore = "")
+        $proj = Join-Path $tempRoot $Name
+        $null = New-Item -ItemType Directory -Path (Join-Path $proj ".crucible") -Force
+        $null = Invoke-ExternalCommand { git -C $proj init --quiet }
+        $null = Invoke-ExternalCommand { git -C $proj config core.autocrlf false }
+        [IO.File]::WriteAllText((Join-Path $proj "README.md"), "fixture`n")
+        [IO.File]::WriteAllText((Join-Path $proj ".crucible/config.yaml"), "verification:`n  quick:`n    - name: unit`n      command: exit 5`n")
+        $paths = @("README.md")
+        if ($GitIgnore) { [IO.File]::WriteAllText((Join-Path $proj ".gitignore"), $GitIgnore + "`n"); $paths += ".gitignore" }
+        if ($CommitConfig) { $paths += ".crucible/config.yaml" }
+        $null = Invoke-ExternalCommand { git -C $proj add -- @paths }
+        $null = Invoke-ExternalCommand { git -C $proj -c user.name=t -c user.email=t@example.com -c commit.gpgSign=false commit --quiet -m init }
+        return $proj
+    }
+    function Get-StateFor {
+        param([string]$Config)
+        return (Get-ConfigCommitState -ProjectRoot (Split-Path -Parent (Split-Path -Parent $Config)) -ConfigPath $Config)
+    }
+
+    $results += Run-Test -Name "Config commit state names each way the checks file can differ from HEAD (item 254)" -Body {
+        $proj = New-CommitStateRepo -Name "commit-state" -CommitConfig
+        $config = Join-Path $proj ".crucible/config.yaml"
+        $committed = $config
+        Assert-Result -Name "committed config reads as committed" -Condition ((Get-StateFor $committed).Status -eq "committed") -FailureMessage (Get-StateFor $committed).Message
+
+        [IO.File]::WriteAllText($config, "verification:`n  quick:`n    - name: unit`n      command: exit 0`n")
+        $state = Get-StateFor $config
+        Assert-Result -Name "an edit that weakens a check is modified" -Condition ($state.Status -eq "modified" -and $state.Message.Contains($config) -and $state.Remedy.Contains("git add .crucible/config.yaml")) -FailureMessage $state.Message
+
+        $null = Invoke-ExternalCommand { git -C $proj add .crucible/config.yaml }
+        Assert-Result -Name "a staged but uncommitted edit is modified" -Condition ((Get-StateFor $config).Status -eq "modified") -FailureMessage (Get-StateFor $config).Message
+        $null = Invoke-ExternalCommand { git -C $proj reset --quiet -- .crucible/config.yaml }
+
+        # skip-worktree hides the edit from git status; the content hash still sees it.
+        $null = Invoke-ExternalCommand { git -C $proj update-index --skip-worktree .crucible/config.yaml }
+        $porcelain = (Invoke-ExternalCommand { git -C $proj status --porcelain -- .crucible/config.yaml }).Output -join ""
+        Assert-Result -Name "the skip-worktree fixture is hidden from status" -Condition ([string]::IsNullOrWhiteSpace($porcelain)) -FailureMessage ("status still shows the edit: " + $porcelain)
+        Assert-Result -Name "an edit hidden by skip-worktree is modified" -Condition ((Get-StateFor $config).Status -eq "modified") -FailureMessage (Get-StateFor $config).Message
+        $null = Invoke-ExternalCommand { git -C $proj update-index --no-skip-worktree .crucible/config.yaml }
+    }
+
+    $results += Run-Test -Name "A CRLF checkout of a committed LF config is committed under autocrlf (item 254)" -Body {
+        $proj = New-CommitStateRepo -Name "commit-state-crlf" -CommitConfig
+        $config = Join-Path $proj ".crucible/config.yaml"
+        $null = Invoke-ExternalCommand { git -C $proj config core.autocrlf true }
+        [IO.File]::WriteAllText($config, "verification:`r`n  quick:`r`n    - name: unit`r`n      command: exit 5`r`n")
+        $state = Get-StateFor $config
+        Assert-Result -Name "line-ending conversion alone is not an edit" -Condition ($state.Status -eq "committed") -FailureMessage $state.Message
+    }
+
+    $results += Run-Test -Name "Config commit state refuses untracked, ignored, non-git and missing configs by name (item 254)" -Body {
+        $untracked = Join-Path (New-CommitStateRepo -Name "commit-state-untracked") ".crucible/config.yaml"
+        $state = Get-StateFor $untracked
+        Assert-Result -Name "an untracked config is uncommitted" -Condition ($state.Status -eq "uncommitted" -and $state.Message.Contains($untracked) -and $state.Remedy.Contains("git add .crucible/config.yaml")) -FailureMessage $state.Message
+
+        $ignored = Join-Path (New-CommitStateRepo -Name "commit-state-ignored" -GitIgnore ".crucible/config.yaml") ".crucible/config.yaml"
+        $state = Get-StateFor $ignored
+        Assert-Result -Name "an ignored config is ignored" -Condition ($state.Status -eq "ignored" -and $state.Message.Contains($ignored) -and $state.Remedy.Contains("git check-ignore -v .crucible/config.yaml")) -FailureMessage $state.Message
+
+        $plain = Join-Path $tempRoot "commit-state-plain"
+        $null = New-Item -ItemType Directory -Path (Join-Path $plain ".crucible") -Force
+        $plainConfig = Join-Path $plain ".crucible/config.yaml"
+        [IO.File]::WriteAllText($plainConfig, "verification:`n")
+        $savedCeiling = $env:GIT_CEILING_DIRECTORIES
+        $env:GIT_CEILING_DIRECTORIES = $tempRoot
+        try { $state = Get-StateFor $plainConfig } finally { $env:GIT_CEILING_DIRECTORIES = $savedCeiling }
+        Assert-Result -Name "a config outside git is not-git" -Condition ($state.Status -eq "not-git" -and $state.Message.Contains($plainConfig)) -FailureMessage $state.Message
+
+        $missing = Join-Path $plain "nothing/config.yaml"
+        $state = Get-StateFor $missing
+        Assert-Result -Name "a missing config is missing" -Condition ($state.Status -eq "missing" -and $state.Message.Contains($missing)) -FailureMessage $state.Message
+
+        $message = (Get-StateFor $untracked).Message
+        Assert-Result -Name "the checks source refuses with the file and the remedy" -Condition ($message.Contains($untracked) -and $message.Contains("Remedy:") -and $null -eq (Get-StateFor $untracked).Content) -FailureMessage $message
+    }
+
+    # Codex review of de0f0f4, finding 1: git ran from the config's directory, so a nested
+    # repository there could commit a weakened config and vouch for it.
+    $results += Run-Test -Name "A nested repository inside .crucible cannot vouch for a weakened config (item 254)" -Body {
+        $proj = New-CommitStateRepo -Name "commit-state-nested" -CommitConfig
+        $config = Join-Path $proj ".crucible/config.yaml"
+        $nested = Join-Path $proj ".crucible"
+        [IO.File]::WriteAllText($config, "verification:`n  quick:`n    - name: unit`n      command: exit 0`n")
+        $null = Invoke-ExternalCommand { git -C $nested init --quiet }
+        $null = Invoke-ExternalCommand { git -C $nested add -- config.yaml }
+        $null = Invoke-ExternalCommand { git -C $nested -c user.name=t -c user.email=t@example.com -c commit.gpgSign=false commit --quiet -m weakened }
+        $nestedHead = (Invoke-ExternalCommand { git -C $nested rev-parse --verify --quiet "HEAD:config.yaml" }).ExitCode
+        Assert-Result -Name "the nested repository committed the weakened config" -Condition ($nestedHead -eq 0) -FailureMessage "fixture: the nested commit did not record config.yaml"
+        $state = Get-StateFor $config
+        Assert-Result -Name "a config owned by a nested repository is refused by name" -Condition ($state.Status -eq "nested-repo" -and $state.Message.Contains($config) -and $state.Remedy.Contains("nested repository")) -FailureMessage ($state.Status + ": " + $state.Message)
+    }
+
+    # Finding 2: the runner derives its settings from the bytes that were verified.
+    $results += Run-Test -Name "A committed config returns the verified bytes as its content (item 254)" -Body {
+        $proj = New-CommitStateRepo -Name "commit-state-content" -CommitConfig
+        $config = Join-Path $proj ".crucible/config.yaml"
+        $state = Get-StateFor $config
+        Assert-Result -Name "the verified content is the committed text" -Condition ($state.Status -eq "committed" -and $state.Content -ceq [IO.File]::ReadAllText($config)) -FailureMessage ($state.Status + ": " + [string]$state.Content)
+        $paths = Get-ConfiguredPath -Key "session" -ProjectRoot $proj -Content "paths:`n  session: .crucible/from-content`n"
+        Assert-Result -Name "a supplied content is read instead of the file" -Condition ($paths -eq (Join-Path $proj ".crucible/from-content")) -FailureMessage $paths
+    }
+
+    # Codex re-review of 8e0a26e: an unreadable config is a named state, not a throw, and
+    # every accessor given -Content reads it instead of the file.
+    $results += Run-Test -Name "An unreadable committed config is a named state, not an exception (item 254)" -Body {
+        $proj = New-CommitStateRepo -Name "commit-state-unreadable" -CommitConfig
+        $config = Join-Path $proj ".crucible/config.yaml"
+        $lock = [IO.File]::Open($config, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+        try {
+            $state = $null
+            $thrown = ""
+            try { $state = Get-StateFor $config } catch { $thrown = $_.Exception.Message }
+        } finally { $lock.Dispose() }
+        Assert-Result -Name "an unreadable config returns the unreadable state" -Condition ($thrown -eq "" -and $null -ne $state -and $state.Status -eq "unreadable" -and $state.Message.Contains($config) -and $state.Message.Contains("Remedy:")) -FailureMessage ("thrown: " + $thrown + "; state: " + $(if ($state) { $state.Status + ": " + $state.Message } else { "<none>" }))
+    }
+
+    $results += Run-Test -Name "The review accessor reads supplied content instead of the file (item 254)" -Body {
+        $empty = Join-Path $tempRoot "review-content-no-config"
+        $null = New-Item -ItemType Directory -Path $empty -Force
+        $value = Get-ConfiguredReview -Key auto_push -ProjectRoot $empty -Content "review:`n  auto_push: true`n"
+        Assert-Result -Name "supplied review content is honored with no config file" -Condition ($value -eq "true") -FailureMessage ("got '" + $value + "'")
+        $proj = New-CommitStateRepo -Name "review-content-over-file"
+        [IO.File]::WriteAllText((Join-Path $proj ".crucible/config.yaml"), "review:`n  auto_push: false`n")
+        $value = Get-ConfiguredReview -Key auto_push -ProjectRoot $proj -Content "review:`n  auto_push: true`n"
+        Assert-Result -Name "supplied review content wins over the file" -Condition ($value -eq "true") -FailureMessage ("got '" + $value + "'")
+    }
+
+    # Finding 3: a symlinked config is refused by name, in HEAD or on disk. The HEAD case
+    # stages a 120000 entry directly, so it runs on hosts that cannot create a link.
+    $results += Run-Test -Name "A config committed as a symbolic link is refused by name, not reported modified (item 254)" -Body {
+        $proj = New-CommitStateRepo -Name "commit-state-symlink-head"
+        $config = Join-Path $proj ".crucible/config.yaml"
+        $linkBlob = ((Invoke-ExternalCommand { "../real-config.yaml" | git -C $proj hash-object -w --stdin }).Output -join "").Trim()
+        $null = Invoke-ExternalCommand { git -C $proj update-index --add --cacheinfo ("120000," + $linkBlob + ",.crucible/config.yaml") }
+        $null = Invoke-ExternalCommand { git -C $proj -c user.name=t -c user.email=t@example.com -c commit.gpgSign=false commit --quiet -m link }
+        $mode = ((Invoke-ExternalCommand { git -C $proj ls-tree HEAD -- .crucible/config.yaml }).Output -join "")
+        Assert-Result -Name "the fixture committed a symbolic link" -Condition ($mode.StartsWith("120000")) -FailureMessage ("ls-tree: " + $mode)
+        $state = Get-StateFor $config
+        Assert-Result -Name "a committed symlink config is refused as a symlink" -Condition ($state.Status -eq "symlink" -and $state.Message.Contains($config) -and $state.Remedy.Contains("regular file")) -FailureMessage ($state.Status + ": " + $state.Message)
+    }
+
+    $results += Run-Test -Name "A config that is a symbolic link on disk is refused by name (item 254)" -Body {
+        $proj = New-CommitStateRepo -Name "commit-state-symlink-disk" -CommitConfig
+        $config = Join-Path $proj ".crucible/config.yaml"
+        $target = Join-Path $proj "same-config.yaml"
+        [IO.File]::WriteAllText($target, [IO.File]::ReadAllText($config))
+        Remove-Item -LiteralPath $config -Force
+        try { $null = New-Item -ItemType SymbolicLink -Path $config -Target $target -ErrorAction Stop } catch { Skip-Test ("this host cannot create a symbolic link: " + $_.Exception.Message); return }
+        $state = Get-StateFor $config
+        Assert-Result -Name "a symlink to identical content is still refused" -Condition ($state.Status -eq "symlink" -and $state.Message.Contains($config)) -FailureMessage ($state.Status + ": " + $state.Message)
+    }}
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

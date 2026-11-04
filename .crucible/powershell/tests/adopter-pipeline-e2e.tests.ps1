@@ -71,6 +71,11 @@ function New-AdopterProject {
     $cfg = $cfg.Replace("replace-with-project-full-test-command", "echo full")
     $cfg = $cfg.Replace("Replace with project-specific engineering rules.", "Rules updated.")
     $cfg | Out-File -LiteralPath $configPath -Encoding UTF8
+    # The checks runner refuses an uncommitted config.yaml (item 254), so commit it with the
+    # bundle as docs/git-policy.md says an adopter does. Committing the config alone splits
+    # the untracked .crucible/ entry into the bundle files the integrity breaker reports.
+    git -C $projectRoot add .crucible
+    git -C $projectRoot commit -m "commit the Crucible bundle and checks" --quiet
 
     # Active spec for the task (present so the router can resolve it).
     $specPath = Join-Path $projectRoot (".crucible/backlog/features/active/" + $TaskId + "_" + $slug + ".md")
@@ -447,6 +452,11 @@ try {
         $configPath = Join-Path $projectRoot ".crucible/config.yaml"
         $cfg = (Get-Content $configPath -Raw) + "`npaths:`n  session: .crucible/custom session`n"
         [System.IO.File]::WriteAllText($configPath, $cfg, [System.Text.UTF8Encoding]::new($false))
+        # Runtime paths belong to the adopter, as in the custom-paths test below; the checks
+        # runner reads only a committed config.yaml (item 254).
+        [System.IO.File]::AppendAllText((Join-Path $projectRoot ".gitignore"), "`n/.crucible/custom session/`n", [System.Text.UTF8Encoding]::new($false))
+        git -C $projectRoot add .gitignore .crucible/config.yaml
+        git -C $projectRoot commit -m "configure the session path" --quiet
         $session = Join-Path $projectRoot ".crucible/custom session"
         Move-Item -LiteralPath (Join-Path $projectRoot ".crucible/session") -Destination $session
         New-Item -ItemType Directory -Path (Join-Path $session "F-900") -Force | Out-Null
