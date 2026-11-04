@@ -6,6 +6,38 @@ $LAUNCHER = Join-Path $REPO_ROOT "powershell/launch-codex-specialist.ps1"
 
 $results = @()
 
+$results += Run-Test -Name "Item255 launcher requests derivation without the project check" -Body {
+    . (Join-Path $REPO_ROOT "powershell/lib/project-root.ps1")
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($LAUNCHER, [ref]$null, [ref]$null)
+    $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Resolve-ProjectRoot" }, $true)
+    . ([scriptblock]::Create($definition.Extent.Text))
+    function Resolve-CrucibleProjectRoot {
+        param([string]$ProjectRoot, [string]$ScriptRoot, [bool]$RequireProject = $true)
+        if ($RequireProject) { throw "launcher must request unchecked script derivation" }
+        return "owner-result"
+    }
+    Assert-Result "launcher routes through owner" ((Resolve-ProjectRoot -Candidate "" -ScriptDir (Join-Path $REPO_ROOT "powershell")) -eq "owner-result") "launcher bypassed root owner"
+}
+
+$results += Run-Test -Name "Review255 bare framework launch derives its project before refusing a missing prompt" -Body {
+    $dir = New-TestFixtureRoot -NameHint "review255-bare-launch"
+    try {
+        $bare = Join-Path $dir "framework"
+        $scripts = Join-Path $bare "powershell"
+        New-Item -ItemType Directory -Path $scripts -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib") -Destination (Join-Path $scripts "lib") -Recurse
+        $bareLauncher = Join-Path $scripts "launch-codex-specialist.ps1"
+        Copy-Item -LiteralPath $LAUNCHER -Destination $bareLauncher
+        Assert-Result "bare framework has no project marker" (-not (Test-Path -LiteralPath (Join-Path $bare ".crucible"))) "fixture is an adopter"
+        # No prompt exists: the real entrypoint must stop before Invoke-CodexExec.
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $bareLauncher -TaskId F-255 -Phase implementation -Model test-model 2>&1 }) -join "`n"
+        $code = $LASTEXITCODE
+        Assert-Result "real launch stops at prompt check" ($code -eq 2 -and $output.Contains("phase prompt not found:")) $output
+        Assert-Result "real launch reports derived framework root" ($output.Contains("project root: " + $bare + "  (derived from script location)")) $output
+        Assert-Result "real launch uses derived session path" ($output.Contains((Join-Path $bare ".crucible/session/F-255/implementation/prompt.md"))) $output
+    } finally { Remove-Item -LiteralPath $dir -Recurse -Force }
+}
+
 # Writes a fake `codex` onto PATH whose behavior is driven by the CODEX_FAKE_MODE env var.
 # Both OS wrappers delegate to a shared pwsh impl so arg parsing is identical and robust.
 function Write-FakeCodex {

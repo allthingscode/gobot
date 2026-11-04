@@ -85,6 +85,42 @@ exit 0
 $tempRoot = New-TestFixtureRoot -NameHint "crucible-doctor-test"
 
 try {
+    $results += Run-Test -Name 'Rereview255 doctor reports invalid root owner error' -Body {
+        . (Join-Path $REPO_ROOT 'powershell/lib/config-helpers.ps1')
+        $project = Join-Path $tempRoot 'rereview255-empty-root'
+        Write-DoctorFixture -ProjectRoot $project
+        $config = Join-Path $project '.crucible/config.yaml'
+        $text = Get-Content -LiteralPath $config -Raw
+        Set-Content -LiteralPath $config -Value ($text -replace '(?m)^crucible_root:.*', 'crucible_root: ""') -Encoding UTF8
+        $message = ''
+        try { Get-ConfiguredCrucibleRootValue -ProjectRoot $project -NoDefault | Out-Null } catch { $message = $_.Exception.Message }
+        Assert-Result 'owner refuses empty root' (-not [string]::IsNullOrWhiteSpace($message)) 'owner did not throw'
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $DOCTOR_SCRIPT -ProjectRoot $project 2>&1 }) -join "`n"
+        Assert-Result 'config.parse preserves owner error' ($output.Contains('[config.parse] ' + $message) -and -not $output.Contains("has no 'crucible_root:' key")) $output
+    }
+    $results += Run-Test -Name "Review255 doctor uses the root owner with an explicit absent policy" -Body {
+        . (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1")
+        $project = Join-Path $tempRoot "review255-root"
+        Write-DoctorFixture -ProjectRoot $project
+        $config = Join-Path $project ".crucible/config.yaml"
+        $configText = Get-Content -LiteralPath $config -Raw
+        Set-Content -LiteralPath $config -Value ($configText -replace '(?m)^crucible_root:.*\r?\n', '') -Encoding UTF8
+        Assert-Result "root owner keeps default policy" ((Get-ConfiguredCrucibleRootValue -ProjectRoot $project) -eq '.crucible') "default changed"
+        Assert-Result "root owner exposes absence" ($null -eq (Get-ConfiguredCrucibleRootValue -ProjectRoot $project -NoDefault)) "missing key defaulted"
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $DOCTOR_SCRIPT -ProjectRoot $project 2>&1 }) -join "`n"
+        Assert-Result "doctor diagnoses absent root" ($output.Contains("has no 'crucible_root:' key")) $output
+    }
+
+    $results += Run-Test -Name "Review255 doctor shares configured root scalar parsing" -Body {
+        $project = Join-Path $tempRoot "review255-root-comment"
+        Write-DoctorFixture -ProjectRoot $project
+        $config = Join-Path $project ".crucible/config.yaml"
+        $configText = Get-Content -LiteralPath $config -Raw
+        Set-Content -LiteralPath $config -Value ($configText -replace '(?m)^crucible_root:.*', 'crucible_root: .crucible # installed bundle') -Encoding UTF8
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $DOCTOR_SCRIPT -ProjectRoot $project 2>&1 }) -join "`n"
+        Assert-Result "doctor shares root scalar parsing" ($output.Contains("crucible_root = '.crucible'.")) $output
+    }
+
     $results += Run-Test -Name "Doctor emits structured results" -Body {
         $projectRoot = Join-Path $tempRoot "project"
         Write-DoctorFixture -ProjectRoot $projectRoot

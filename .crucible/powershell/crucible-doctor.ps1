@@ -275,18 +275,20 @@ if ($frameworkMode) {
         $configText = ""
     }
 
-    $crucibleRootValue = ""
-    if ($configText -match '(?m)^crucible_root:\s*["'']?([^"''\r\n]+)["'']?\s*$') {
-        $crucibleRootValue = $matches[1].Trim()
-    }
+    $crucibleRootValue = $null
+    $configParseError = ""
+    try { $crucibleRootValue = Get-ConfiguredCrucibleRootValue -ProjectRoot $REPO_ROOT -NoDefault } catch { $configParseError = $_.Exception.Message }
     if ([string]::IsNullOrWhiteSpace($configText)) {
         Add-DoctorResult -Check "config.parse" -Status "fail" -Severity "critical" `
             -Details ("Found .crucible/config.yaml but could not read it: " + $adopterConfigPath) `
             -Remediation "Ensure .crucible/config.yaml is readable UTF-8."
+    } elseif ($configParseError) {
+        Add-DoctorResult -Check "config.parse" -Status "fail" -Severity "critical" `
+            -Details $configParseError -Remediation "Correct the crucible_root value in config.yaml."
     } elseif ([string]::IsNullOrWhiteSpace($crucibleRootValue)) {
         Add-DoctorResult -Check "config.parse" -Status "fail" -Severity "critical" `
             -Details "config.yaml is present but has no 'crucible_root:' key." `
-            -Remediation "Add 'crucible_root: \".crucible\"' (or your bundle path) to config.yaml."
+            -Remediation 'Add ''crucible_root: ".crucible"'' (or your bundle path) to config.yaml.'
     } else {
         Add-DoctorResult -Check "config.parse" -Status "pass" -Severity "critical" `
             -Details ("config.yaml parsed; crucible_root = '" + $crucibleRootValue + "'.")

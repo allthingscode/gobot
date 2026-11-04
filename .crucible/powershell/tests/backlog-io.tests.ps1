@@ -72,6 +72,93 @@ function New-SingleItemBacklog {
 $tempRoot = New-TestFixtureRoot -NameHint "backlog-io-test"
 
 try {
+    foreach ($scalar in @('"Ready" # note', "'Ready' # note", 'Ready # note', '"a # b"', "'a # b'")) {
+        $results += Run-Test -Name ("Rereview255 quoted scalar: " + $scalar) -Body {
+            $path = Join-Path $tempRoot 'rereview255-scalar.md'
+            Set-Content -LiteralPath $path -Value ("---`nstatus: " + $scalar + "`n---") -Encoding UTF8
+            $expected = if ($scalar -match 'a # b') { 'a # b' } else { 'Ready' }
+            Assert-Result 'scalar value preserved without trailing comment' ((Get-BacklogSpecStatus -SpecPath $path) -ceq $expected) $scalar
+        }
+    }
+    foreach ($shape in @('leading-blank', 'no-frontmatter')) {
+        $results += Run-Test -Name ("Rereview255 dependencies: " + $shape) -Body {
+            $path = Join-Path $tempRoot 'rereview255-dependencies.md'
+            $text = if ($shape -eq 'leading-blank') { "`n---`nitem_id: F-1`ndepends_on: [F-2]`n---`ndepends_on: [F-9]" } else { "item_id: F-1`ndepends_on:`n  - F-2" }
+            Set-Content -LiteralPath $path -Value $text -Encoding UTF8
+            $root = Join-Path $tempRoot ('dependency-gate-' + $shape)
+            New-MinimalBacklogTree -Root $root
+            New-Item -ItemType Directory -Path (Join-Path $root '.crucible') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $root '.crucible/config.yaml') -Value "paths:`n  backlog: ." -Encoding UTF8
+            Set-Content -LiteralPath (Join-Path $root 'features/active/F-2.md') -Value "---`nstatus: Ready`n---" -Encoding UTF8
+            $runner = Join-Path $root 'gate.ps1'
+            $script = @'
+param($FrameworkRoot, $ProjectRoot, $SpecPath)
+$Quiet = $true
+. (Join-Path $FrameworkRoot 'powershell/crucible-lib.ps1')
+$source = [IO.File]::ReadAllText((Join-Path $FrameworkRoot 'powershell/crucible.ps1'))
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$null, [ref]$null)
+$function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Check-Dependencies' }, $true)
+. ([scriptblock]::Create($function.Extent.Text))
+$backlogDir = $ProjectRoot
+Check-Dependencies -BacklogItemPath $SpecPath -TargetSpecialist deployment -TaskId F-1
+exit 0
+'@
+            [IO.File]::WriteAllText($runner, $script, [Text.UTF8Encoding]::new($false))
+            $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $runner $REPO_ROOT $root $path 2>&1 }) -join "`n"
+            Assert-Result 'deployment blocks unmet dependency' ($LASTEXITCODE -eq 2 -and $output.Contains('Unsatisfied dependencies detected') -and $output.Contains('F-2')) $output
+            Assert-Result 'identity recognizes same spec shape' ((Get-SpecIdentity -SpecPath $path).item_id -eq 'F-1') $text
+            Assert-Result 'unmet dependency retained for deployment gate' ((@(Get-SpecDependencies -SpecPath $path) -join ',') -eq 'F-2') $text
+        }
+    }
+    $results += Run-Test -Name "Review255 dependencies stop at the frontmatter boundary" -Body {
+        $path = Join-Path $tempRoot "review255-dependencies.md"
+        foreach ($text in @("---`nitem_id: F-1`n---`n    depends_on: [F-9]", ("# Body`n" + ("body`n" * 30) + "    depends_on: [F-9]"))) {
+            Set-Content -LiteralPath $path -Value $text -Encoding UTF8
+            Assert-Result "body dependencies ignored" (@(Get-SpecDependencies -SpecPath $path).Count -eq 0) "body code became a dependency"
+        }
+        Set-Content -LiteralPath $path -Value "---`ndepends_on:`n  - F-2`n---`n    depends_on: [F-9]" -Encoding UTF8
+        Assert-Result "frontmatter dependencies retained" ((@(Get-SpecDependencies -SpecPath $path) -join ',') -eq 'F-2') "frontmatter dependency lost"
+    }
+
+    $results += Run-Test -Name "Review255 unquoted scalar comments are stripped and quoted hashes retained" -Body {
+        $path = Join-Path $tempRoot "review255-comments.md"
+        Set-Content -LiteralPath $path -Value "---`nbudget_tier: low # cheap`npriority: P2 # normal`nstatus: 'Ready # literal'`n---" -Encoding UTF8
+        Assert-Result "budget comment stripped" ((Get-SpecBudgetTier -SpecPath $path) -eq 'low') "comment leaked into tier"
+        Assert-Result "priority comment stripped" ((Get-SpecIdentity -SpecPath $path).priority -eq 'P2') "comment leaked into priority"
+        Assert-Result "quoted hash retained" ((Get-BacklogSpecStatus -SpecPath $path) -eq 'Ready # literal') "quoted text changed"
+    }
+
+    $results += Run-Test -Name "Item255 finalization reads status beyond the old joined-line limit" -Body {
+        $root = Join-Path $tempRoot "item255-finalization"
+        New-MinimalBacklogTree -Root $root
+        New-Item -ItemType Directory -Force -Path (Join-Path $root ".crucible") | Out-Null
+        Set-Content -LiteralPath (Join-Path $root ".crucible/config.yaml") -Value "paths:`n  backlog: ." -Encoding UTF8
+        $rel = "features/archived/F-255_Test.md"
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "F-255" -Priority "P2" -RelPath $rel -Title "Test"
+        Set-Content -LiteralPath $backlog -Value ((Get-Content -LiteralPath $backlog -Raw).Replace("Ready for Deploy", "Production")) -Encoding UTF8
+        $padding = (1..20 | ForEach-Object { "note_" + $_ + ": value" }) -join "`n"
+        Set-Content -LiteralPath (Join-Path $root $rel) -Value ("---`n" + $padding + "`nstatus: 'Production'`n---") -Encoding UTF8
+        $details = Get-TaskFinalizationDetails -TaskId "F-255" -ProjectRoot $root
+        Assert-Result "late status finalizes" $details.IsFinalized ($details | Out-String)
+    }
+
+    $results += Run-Test -Name "Item255 filename owner accepts paths and decodes only spec names" -Body {
+        Assert-Result "bare ID decoded" ((Get-BacklogSpecFiles -SpecPath "features/active/F-255.md" -DecodeId) -eq "F-255") "bare ID not decoded"
+        Assert-Result "slug decoded" ((Get-BacklogSpecFiles -SpecPath "features/active/F-255_a_b.md" -DecodeId) -eq "F-255") "slug not decoded"
+        Assert-Result "non markdown rejected" (-not (Get-BacklogSpecFiles -Task "F-255" -SpecPath "F-255_notes.txt")) "accepted non-spec"
+        Assert-Result "prefix rejected" (-not (Get-BacklogSpecFiles -Task "F-25" -SpecPath "F-255.md")) "accepted prefix ID"
+    }
+
+    $results += Run-Test -Name "Item255 path status reads the complete frontmatter and refuses missing paths" -Body {
+        $path = Join-Path $tempRoot "item255-status.md"
+        $padding = (1..35 | ForEach-Object { "note_" + $_ + ": value" }) -join "`n"
+        Set-Content -LiteralPath $path -Value ("---`n" + $padding + "`nstatus: 'Ready for Deploy'`n---") -Encoding UTF8
+        Assert-Result "late quoted status" ((Get-BacklogSpecStatus -SpecPath $path) -eq "Ready for Deploy") "status truncated or quote retained"
+        $refused = $false
+        try { Get-BacklogSpecStatus -SpecPath ($path + ".missing") | Out-Null } catch { $refused = $true }
+        Assert-Result "missing path refused" $refused "missing spec silently defaulted"
+    }
+
     # Item 227: prefix IDs and mentions outside the ID cell must not select a row.
     foreach ($linked in @($false, $true)) {
         foreach ($present in @($true, $false)) {

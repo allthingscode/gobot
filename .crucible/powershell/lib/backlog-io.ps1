@@ -105,12 +105,27 @@ function Invoke-WithBacklogLock {
 # TODO item 190: keep both legal spec filename forms in one place; callers choose
 # directory order and whether archived subdirectories belong in their search.
 function Get-BacklogSpecFiles {
+    [CmdletBinding(DefaultParameterSetName = "Directory")]
     param(
-        [Parameter(Mandatory = $true)][string]$Task,
-        [Parameter(Mandatory = $true)][string]$Directory,
+        [Parameter(Mandatory = $true, ParameterSetName = "Directory")]
+        [Parameter(Mandatory = $true, ParameterSetName = "Predicate")][string]$Task,
+        [Parameter(Mandatory = $true, ParameterSetName = "Directory")][string]$Directory,
+        [Parameter(Mandatory = $true, ParameterSetName = "Predicate")]
+        [Parameter(Mandatory = $true, ParameterSetName = "Decode")][string]$SpecPath,
+        [Parameter(Mandatory = $true, ParameterSetName = "Decode")][switch]$DecodeId,
         [switch]$Recurse
     )
 
+    if ($PSCmdlet.ParameterSetName -ne "Directory") {
+        $leaf = Split-Path -Leaf $SpecPath
+        # Decode only legal markdown names, retaining exact ID boundaries.
+        $id = if ($leaf -match '^([^_]+)(?:_.*)?\.md$') { $Matches[1] } else { "" }
+        if ($DecodeId) {
+            if ($id -eq "") { throw "Not a backlog spec filename: '$SpecPath'. Expected <id>.md or <id>_<slug>.md." }
+            return $id
+        }
+        return ($id -ne "" -and $id -ieq $Task)
+    }
     foreach ($pattern in @(($Task + "_*.md"), ($Task + ".md"))) {
         Get-ChildItem -LiteralPath $Directory -File -Filter $pattern -Recurse:$Recurse -ErrorAction SilentlyContinue
     }
@@ -183,27 +198,120 @@ function Get-BacklogItemPathForTaskProjectRoot {
     return ""
 }
 
-function Get-BacklogSpecStatus {
+# Delimited metadata starts at the first nonblank line. Legacy specs without
+# delimiters expose only the first 30 lines, ending at any delimiter.
+function Get-SpecFrontmatterLines {
+    param([string]$SpecPath, [switch]$RequireFrontmatter)
+    $lines = @(Get-Content -LiteralPath $SpecPath -Encoding UTF8)
+    $start = 0
+    while ($start -lt $lines.Count -and [string]::IsNullOrWhiteSpace($lines[$start])) { $start++ }
+    $delimited = $start -lt $lines.Count -and $lines[$start].Trim() -eq "---"
+    if ($delimited) { $start++ } else { $start = 0 }
+    $end = $start
+    while ($end -lt $lines.Count -and $lines[$end].Trim() -ne "---") { $end++ }
+    if ($RequireFrontmatter -and (-not $delimited -or $end -eq $lines.Count)) { return }
+    if (-not $delimited) { $end = [Math]::Min($end, 30) }
+    for ($i = $start; $i -lt $end; $i++) { $lines[$i] }
+}
+
+# Scalar frontmatter access shared by the field owners. A path is read literally;
+# a supplied missing path fails rather than looking up a different spec by task ID.
+function Get-SpecFrontmatterField {
     param(
-        [Parameter(Mandatory = $true)][string]$Task,
-        [string]$ProjectRoot = ""
+        [Parameter(Mandatory = $true)][string]$SpecPath,
+        [Parameter(Mandatory = $true)][string]$Field,
+        [switch]$RequireFrontmatter,
+        [switch]$IncludePresence
     )
-
-    # The spec's frontmatter is the artifact; BACKLOG.md is an index rendered from it.
-    # Returns $null when no spec exists at all, which is what lets a caller tell
-    # "no such task" apart from "task exists and its status is blank".
-    $specPath = Get-BacklogItemPathForTaskProjectRoot -Task $Task -ProjectRoot $ProjectRoot
-    if ([string]::IsNullOrWhiteSpace($specPath) -or -not (Test-Path -LiteralPath $specPath)) {
-        return $null
-    }
-
-    foreach ($line in (Get-Content -LiteralPath $specPath -Head 30 -Encoding UTF8)) {
-        if ($line -match '^\s*status:\s*"?([^"#]+?)"?\s*$') {
-            return $matches[1].Trim()
+    foreach ($line in @(Get-SpecFrontmatterLines -SpecPath $SpecPath -RequireFrontmatter:$RequireFrontmatter)) {
+        if ($line -match ('^\s*' + [regex]::Escape($Field) + '\s*:\s*(.*?)\s*$')) {
+            $value = $Matches[1].Trim()
+            if ($value -match '^"([^"]*)"\s*(#.*)?$' -or $value -match "^'([^']*)'\s*(#.*)?$") {
+                $value = $Matches[1]
+            } elseif (-not ($value.StartsWith('"') -or $value.StartsWith("'"))) {
+                $value = ($value -replace '\s+#.*$', '').TrimEnd()
+            }
+            if ($IncludePresence) { return @{ Present = $true; Value = $value } }
+            return $value
         }
     }
-
+    if ($IncludePresence) { return @{ Present = $false; Value = "" } }
     return ""
+}
+
+function Get-BacklogSpecStatus {
+    [CmdletBinding(DefaultParameterSetName = "Task")]
+    param(
+        [Parameter(Mandatory = $true, ParameterSetName = "Task")][string]$Task,
+        [Parameter(Mandatory = $true, ParameterSetName = "Path")][string]$SpecPath,
+        [string]$ProjectRoot = "",
+        [switch]$RequireFrontmatter
+    )
+    if ($PSCmdlet.ParameterSetName -eq "Task") {
+        $SpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $Task -ProjectRoot $ProjectRoot
+        if ([string]::IsNullOrWhiteSpace($SpecPath)) { return $null }
+    }
+    return Get-SpecFrontmatterField -SpecPath $SpecPath -Field "status" -RequireFrontmatter:$RequireFrontmatter
+}
+
+function Get-SpecBudgetTier {
+    [CmdletBinding(DefaultParameterSetName = "Task")]
+    param(
+        [Parameter(Mandatory = $true, ParameterSetName = "Task")][string]$Task,
+        [Parameter(Mandatory = $true, ParameterSetName = "Path")][string]$SpecPath,
+        [switch]$IncludePath,
+        [switch]$Raw,
+        [switch]$Validate,
+        [string]$Default = "",
+        [string]$ProjectRoot = ""
+    )
+    if ($PSCmdlet.ParameterSetName -eq "Task") {
+        $SpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $Task -ProjectRoot $ProjectRoot
+        if ([string]::IsNullOrWhiteSpace($SpecPath)) {
+            if ($IncludePath) { return @{ Tier = ""; Path = "" } }
+            return ""
+        }
+    }
+    $field = Get-SpecFrontmatterField -SpecPath $SpecPath -Field "budget_tier" -IncludePresence
+    $tier = if ($field.Present) { $field.Value } else { $Default }
+    if ($Validate -and $field.Present -and $tier -notin @("low", "medium", "high", "extended")) {
+        throw "Invalid budget_tier in spec '$SpecPath': '$tier'. Allowed values: low, medium, high, extended"
+    }
+    if (-not $Raw) { $tier = $tier.ToLowerInvariant() }
+    if ($IncludePath) { return @{ Tier = $tier; Path = $SpecPath } }
+    return $tier
+}
+
+function Get-SpecIdentity {
+    param([Parameter(Mandatory = $true)][string]$SpecPath, [switch]$RequireFrontmatter, [string]$DefaultPriority = "", [switch]$Validate)
+    $values = @{}
+    foreach ($field in @("item_id", "priority", "type")) {
+        $entry = Get-SpecFrontmatterField -SpecPath $SpecPath -Field $field -RequireFrontmatter:$RequireFrontmatter -IncludePresence
+        $values[$field] = $entry.Value
+        if ($field -eq "priority") {
+            if (-not $entry.Present) { $values.priority = $DefaultPriority }
+            elseif ($Validate -and $entry.Value -notmatch '^P[0-3]$') {
+                throw "Invalid priority in spec '$SpecPath': '$($entry.Value)'. Allowed values: P0, P1, P2, P3"
+            }
+        }
+    }
+    return $values
+}
+
+function Get-SpecDependencies {
+    param([Parameter(Mandatory = $true)][string]$SpecPath)
+    $parsing = $false
+    foreach ($line in @(Get-SpecFrontmatterLines -SpecPath $SpecPath)) {
+        if ($line -match '^\s*depends_on:\s*\[([^\]]*)\]') {
+            $matches[1].Split(',') | ForEach-Object { $_.Trim().Trim('"', "'") } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            return
+        }
+        if ($line -match '^\s*depends_on:') { $parsing = $true; continue }
+        if ($parsing) {
+            if ($line -match '^\s*-\s*["'']?([A-Z][A-Z0-9\-]*[a-z]?)') { $matches[1] }
+            elseif ($line.Trim() -ne "" -and $line -notmatch '^\s*#') { return }
+        }
+    }
 }
 
 function Get-BacklogTaskStatus {
@@ -580,10 +688,7 @@ function Get-TaskFinalizationDetails {
     $specToRead = if ($result.SpecExistsInArchived) { $result.SpecPathInArchived } else { $result.SpecPathInActive }
     $specStatus = ""
     if (-not [string]::IsNullOrEmpty($specToRead) -and (Test-Path -LiteralPath $specToRead)) {
-        $fmStr = [string](Get-Content -LiteralPath $specToRead -Head 15 -Encoding UTF8)
-        if ($fmStr -match 'status:\s*["'']?([^"''\s\r\n]+)"?') {
-            $specStatus = $matches[1]
-        }
+        $specStatus = Get-BacklogSpecStatus -SpecPath $specToRead
     }
 
     $result.SpecStatusMatches = ($specStatus -ieq $result.BacklogStatus)

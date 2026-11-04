@@ -22,11 +22,26 @@ function Test-CrucibleProjectRoot {
 
 function Resolve-CrucibleProjectRoot {
     param(
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$ProjectRoot,
-        [Parameter(Mandatory=$true)][string]$ScriptRoot,
+        [AllowEmptyString()][string]$ProjectRoot = "",
+        [string]$ScriptRoot = "",
+        [string]$AncestorOf = "",
+        [bool]$RequireProject = $true,
         [string]$ParameterName = "-ProjectRoot"
     )
 
+    # Blocked records start with a configured backlog, which may live outside the bundle.
+    # Preserve their ancestor-marker policy explicitly rather than deriving from a script.
+    if ($PSBoundParameters.ContainsKey("AncestorOf")) {
+        if ([string]::IsNullOrWhiteSpace($AncestorOf)) { throw "AncestorOf must name a backlog directory." }
+        $dir = Split-Path -Parent (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $AncestorOf))
+        while (-not [string]::IsNullOrWhiteSpace($dir)) {
+            if (Test-CrucibleProjectRoot -Path $dir) { return $dir }
+            $nextDir = Split-Path -Parent $dir
+            if ($nextDir -eq $dir) { break }
+            $dir = $nextDir
+        }
+        throw "No Crucible project ancestor found for '$AncestorOf'."
+    }
     if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
         if (-not (Test-Path -LiteralPath $ProjectRoot)) {
             throw ($ParameterName + " path does not exist: '" + $ProjectRoot + "'.")
@@ -34,11 +49,13 @@ function Resolve-CrucibleProjectRoot {
         return (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
     }
 
+    if ([string]::IsNullOrWhiteSpace($ScriptRoot)) { throw "ScriptRoot is required when deriving a project root." }
     $derivedParent = Split-Path -Path $ScriptRoot -Parent
     if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
         $derivedParent = Split-Path -Path $derivedParent -Parent
     }
     $derivedRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $derivedParent))
+    if (-not $RequireProject) { return $derivedRoot }
     if (Test-CrucibleProjectRoot -Path $derivedRoot) { return $derivedRoot }
 
     $location = Get-Location

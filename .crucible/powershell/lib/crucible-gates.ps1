@@ -1169,7 +1169,7 @@ function Test-ResearchGateFilingPath {
     if ($inBacklog -ieq "BACKLOG.md") { return $true }
     $leaf = Split-Path -Leaf $inBacklog
     foreach ($id in $Scope.Ids) {
-        if ($leaf -ieq ($id + ".md") -or $leaf.StartsWith($id + "_", [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if (Get-BacklogSpecFiles -Task $id -SpecPath $leaf) { return $true }
     }
     return $false
 }

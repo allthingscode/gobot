@@ -384,27 +384,7 @@ function Check-Dependencies {
 
     if (-not (Test-Path $BacklogItemPath)) { return }
 
-    $frontmatter = Get-Content -LiteralPath $BacklogItemPath -Head 20 -Encoding UTF8
-    $dependsOn = @()
-    $parsing = $false
-    foreach ($line in $frontmatter) {
-        if ($line -match 'depends_on:\s*\[([^\]]*)\]') {
-            $rawDeps = $matches[1].Split(',') | ForEach-Object { $_.Trim().Replace('"', '').Replace("'", "") }
-            $dependsOn = @($rawDeps | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-            break
-        }
-        if ($line -match 'depends_on:') {
-            $parsing = $true
-            continue
-        }
-        if ($parsing) {
-            if ($line -match '^\s*-\s*([A-Z][A-Z0-9\-]+)') {
-                $dependsOn += $matches[1]
-            } elseif ($line -match '^[a-z_]+:') {
-                $parsing = $false
-            }
-        }
-    }
+    $dependsOn = @(Get-SpecDependencies -SpecPath $BacklogItemPath)
 
     if ($dependsOn.Count -eq 0) { return }
 

@@ -276,24 +276,7 @@ foreach ($taskId in $taskIds) {
     $dependencies = ""
     $featureFiles = @(Get-BacklogSpecFiles -Task $taskId -Directory $backlogDir -Recurse | Where-Object { $_.FullName -match "active" })
     if ($featureFiles.Count -gt 0) {
-        $specContent = Get-Content $featureFiles[0].FullName
-        $inDepends = $false
-        $deps = @()
-        foreach ($line in $specContent) {
-            if ($line -match "^depends_on:\s*\[(.*?)\]") {
-                $depsStr = $Matches[1] -replace '["''\s]', ''
-                if ($depsStr) { $deps += $depsStr -split ',' }
-                break
-            } elseif ($line -match "^depends_on:") {
-                $inDepends = $true
-            } elseif ($inDepends -and $line -match "^---\s*$") {
-                break
-            } elseif ($inDepends -and $line -match "^\s*-\s*[`"']?([A-Z]+-\d+[a-z]?)") {
-                $deps += $Matches[1]
-            } elseif ($inDepends -and $line -notmatch "^\s*-" -and $line.Trim() -ne "") {
-                $inDepends = $false
-            }
-        }
+        $deps = @(Get-SpecDependencies -SpecPath $featureFiles[0].FullName)
         if ($deps.Count -gt 0) {
             $dependencies = $deps -join ", "
         }

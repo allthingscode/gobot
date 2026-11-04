@@ -527,17 +527,11 @@ function Initialize-CrucibleTargetSession {
 
             # Validate budget_tier against backlog spec to prevent agent budget escalation (Fix 10)
             if ($backlogItemPath -ne "unknown" -and (Test-Path $backlogItemPath)) {
-                $specFrontmatter = Get-Content $backlogItemPath -Head 20 -Encoding UTF8
-                foreach ($fml in $specFrontmatter) {
-                    if ($fml -match 'budget_tier:\s*"(\w+)"') {
-                        $specBudgetTier = $matches[1].ToLower()
-                        if ($specBudgetTier -ne $handoff.budget_tier.ToLower()) {
-                            Write-Host "[WARN] budget_tier mismatch: handoff says '$($handoff.budget_tier)' but spec says '$specBudgetTier'. Using spec value to prevent budget escalation." -ForegroundColor Yellow
-                            $handoff | Add-Member -MemberType NoteProperty -Name budget_tier -Value $specBudgetTier -Force
-                            if ($budgetCeilings.ContainsKey($specBudgetTier)) { $ceiling = $budgetCeilings[$specBudgetTier] }
-                        }
-                        break
-                    }
+                $specBudgetTier = Get-SpecBudgetTier -SpecPath $backlogItemPath
+                if (-not [string]::IsNullOrWhiteSpace($specBudgetTier) -and $specBudgetTier -ne $handoff.budget_tier.ToLower()) {
+                    Write-Host "[WARN] budget_tier mismatch: handoff says '$($handoff.budget_tier)' but spec says '$specBudgetTier'. Using spec value to prevent budget escalation." -ForegroundColor Yellow
+                    $handoff | Add-Member -MemberType NoteProperty -Name budget_tier -Value $specBudgetTier -Force
+                    if ($budgetCeilings.ContainsKey($specBudgetTier)) { $ceiling = $budgetCeilings[$specBudgetTier] }
                 }
             }
 

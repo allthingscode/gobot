@@ -74,28 +74,15 @@ param(
 
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/project-root.ps1")
 . (Join-Path $PSScriptRoot "lib/codex-launch-outcome.ps1")
 . (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 $ErrorActionPreference = "Stop"
 
 function Resolve-ProjectRoot {
     param([string]$Candidate, [string]$ScriptDir)
-    if (-not [string]::IsNullOrWhiteSpace($Candidate)) {
-        if (-not (Test-Path -LiteralPath $Candidate)) {
-            throw "ProjectRoot path does not exist: $Candidate"
-        }
-        return (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $Candidate))
-    }
-    # Derive the project root from THIS script's location, never the caller's cwd. The
-    # launcher ships to adopters at <root>/.crucible/powershell/ and lives in the framework
-    # repo at <root>/powershell/, so $PSScriptRoot names the target repo unambiguously no
-    # matter where the orchestrator invoked us from. Defaulting to cwd silently dispatched a
-    # phase against the wrong repo when the orchestrator ran from a different checkout.
-    $parent = Split-Path -Path $ScriptDir -Parent
-    if ((Split-Path -Path $parent -Leaf) -eq ".crucible") {
-        $parent = Split-Path -Path $parent -Parent
-    }
-    return (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $parent))
+    # Framework launches deliberately derive from this script even without adopter markers.
+    return Resolve-CrucibleProjectRoot -ProjectRoot $Candidate -ScriptRoot $ScriptDir -RequireProject:$false
 }
 
 function Get-RoleForPhase {

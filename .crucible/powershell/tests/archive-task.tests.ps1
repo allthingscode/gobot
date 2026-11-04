@@ -102,6 +102,53 @@ function Invoke-ArchiveTask {
 $tempRoot = New-TestFixtureRoot -NameHint "archive-task-test"
 
 try {
+    $results += Run-Test -Name "Review255 invalid archive priority falls back to the summary bucket" -Body {
+        $root = Join-Path $tempRoot "review255-priority"
+        New-MinimalBacklogTree -Root $root
+        $rel = "features/active/F-255_Test.md"
+        New-SpecFile -Root $root -RelPath $rel -ItemId "F-255" -Type "feature" -Priority "invalid" -Title "Test" -Status "Production"
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "F-255" -Priority "P2" -RelPath $rel -Title "Test"
+        Invoke-BacklogTaskArchive -BacklogPath $backlog -SpecPath (Join-Path $root $rel) | Out-Null
+        $actual = Get-Content -LiteralPath $backlog -Raw
+        Assert-Result "invalid priority removed from summary" ($actual -match '\| \*\*P2\*\* \| 0 \| - \|') $actual
+    }
+
+    $results += Run-Test -Name "Item255 archive row fallback refuses non-spec filenames" -Body {
+        $lines = @("| ID | Status | Title |", "|---|---|---|", "| F-255 | Ready | Test |")
+        $refused = $false
+        try {
+            Get-BacklogArchiveRow -Lines $lines -BacklogPath (Join-Path $tempRoot "BACKLOG.md") -ActiveRelPath "features/active/F-255_notes.txt" -ItemId "" | Out-Null
+        } catch { $refused = $_ -match "Not a backlog spec filename" }
+        Assert-Result "non-spec fallback refused" $refused "archive fallback decoded a non-markdown file as a task"
+    }
+
+    $results += Run-Test -Name "Item255 archival preserves a complete nonterminal status" -Body {
+        $root = Join-Path $tempRoot "item255-status"
+        New-MinimalBacklogTree -Root $root
+        $rel = "features/active/F-255_Status.md"
+        New-SpecFile -Root $root -RelPath $rel -ItemId "F-255" -Type "feature" -Priority "P2" -Title "Test" -Status "Production pending"
+        $path = Join-Path $root $rel
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "F-255" -Priority "P2" -RelPath $rel -Title "Test"
+        $refused = $false
+        try { Invoke-BacklogTaskArchive -BacklogPath $backlog -SpecPath $path | Out-Null }
+        catch { $refused = $_ -match "Cannot derive a terminal status" }
+        Assert-Result "whole status requires shipping evidence" ($refused -and (Test-Path -LiteralPath $path)) "archival truncated the status to Production"
+    }
+
+    $results += Run-Test -Name "Item255 archival uses the first identity and priority declarations" -Body {
+        $root = Join-Path $tempRoot "item255-identity"
+        New-MinimalBacklogTree -Root $root
+        $rel = "features/active/F-255_Test.md"
+        New-SpecFile -Root $root -RelPath $rel -ItemId "F-255" -Type "feature" -Priority "P2" -Title "Test" -Status "Production"
+        $path = Join-Path $root $rel
+        $text = (Get-Content -LiteralPath $path -Raw).Replace('target_phase:', "priority: P0`nitem_id: F-999`ntarget_phase:")
+        Set-Content -LiteralPath $path -Value $text -Encoding UTF8
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "F-255" -Priority "P2" -RelPath $rel -Title "Test"
+        Invoke-BacklogTaskArchive -BacklogPath $backlog -SpecPath $path | Out-Null
+        $actual = Get-Content -LiteralPath $backlog -Raw
+        Assert-Result "first ID removed from summary" ($actual -match '\| \*\*P2\*\* \| 0 \| - \|') $actual
+    }
+
     # Item 227: exercise both ID fallbacks without an exact spec-path link.
     foreach ($linked in @($false, $true)) {
         foreach ($present in @($true, $false)) {

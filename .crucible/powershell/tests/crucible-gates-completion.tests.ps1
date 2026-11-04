@@ -11,6 +11,13 @@ $pwshCmd = Get-PwshCommand
 
 $results = @()
 
+$results += Run-Test -Name "Item255 research filing predicate rejects non-markdown and prefix IDs" -Body {
+    $scope = @{ BacklogPrefix = ".crucible/backlog/"; Ids = @("F-255") }
+    Assert-Result "slug accepted" (Test-ResearchGateFilingPath -Scope $scope -RelativePath ".crucible/backlog/features/active/F-255_notes.md") "spec rejected"
+    Assert-Result "non-spec refused" (-not (Test-ResearchGateFilingPath -Scope $scope -RelativePath ".crucible/backlog/features/active/F-255_notes.txt")) "non-markdown accepted as a filing"
+    Assert-Result "prefix refused" (-not (Test-ResearchGateFilingPath -Scope $scope -RelativePath ".crucible/backlog/features/active/F-2550.md")) "prefix ID accepted"
+}
+
 function Write-TestHandoff {
     param(
         [Parameter(Mandatory=$true)][string]$Path,

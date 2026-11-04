@@ -111,15 +111,8 @@ function Resolve-CrucibleInputHandoff {
             }
             if ($specPath -and (Test-Path $specPath)) {
                 $targetPhase = "grooming"
-                $budgetTier = "low"
-
-                # Read budget_tier from frontmatter
-                $frontmatter = Get-Content -LiteralPath $specPath -Head 20
-                foreach ($line in $frontmatter) {
-                    if ($line -match '^\s*budget_tier:\s*"?(\w+)"?\s*$') {
-                        $budgetTier = $matches[1].ToLowerInvariant()
-                    }
-                }
+                $null = Get-SpecIdentity -SpecPath $specPath -DefaultPriority P2 -Validate
+                $budgetTier = Get-SpecBudgetTier -SpecPath $specPath -Default low -Validate
 
                 $timestamp = Get-UtcFileTimestamp
                 $bootstrapFile = Join-Path $HANDOFF_DIR "$TaskId-$timestamp.json"

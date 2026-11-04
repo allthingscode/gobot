@@ -81,6 +81,67 @@ function Invoke-Validator {
 $tempRoot = New-TestFixtureRoot -NameHint "validate-backlog-test"
 
 try {
+    foreach ($case in @(
+        @{ Field = 'priority'; Value = 'high' }, @{ Field = 'priority'; Value = 'P4' },
+        @{ Field = 'priority'; Value = '""' }, @{ Field = 'budget_tier'; Value = 'bad-tier' },
+        @{ Field = 'budget_tier'; Value = '""' }
+    )) {
+        $results += Run-Test -Name ("Rereview255 validator refuses " + $case.Field + '=' + $case.Value) -Body {
+            $root = Join-Path $tempRoot ('rereview-' + $results.Count)
+            New-MinimalBacklogTree -Root $root
+            $path = Join-Path $root 'chores/active/C-255.md'
+            $priority = if ($case.Field -eq 'priority') { $case.Value } else { 'P2' }
+            $budget = if ($case.Field -eq 'budget_tier') { $case.Value } else { 'low' }
+            Set-Content -LiteralPath $path -Value ("---`nitem_id: C-255`ntype: chore`npriority: $priority`nbudget_tier: $budget`n---") -Encoding UTF8
+            $backlog = Join-Path $root 'BACKLOG.md'
+            Set-Content -LiteralPath $backlog -Value '# Backlog' -Encoding UTF8
+            $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+            Assert-Result 'validator error names field and spec' ($r.ExitCode -eq 2 -and $r.Output.Contains($case.Field) -and $r.Output.Contains($path)) $r.Output
+        }
+    }
+    $results += Run-Test -Name "Review255 malformed filename is a validation error without a crash" -Body {
+        $root = Join-Path $tempRoot "review255-filename"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "chores/active/_draft.md" -ItemId "C-255"
+        $backlog = Join-Path $root "BACKLOG.md"
+        Set-Content -LiteralPath $backlog -Value "# Backlog`n## Active Items`n| ID | Status |`n|---|---|" -Encoding UTF8
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result "malformed filename reported" ($r.ExitCode -eq 2 -and $r.Output.Contains("Invalid spec filename: '_draft.md'")) $r.Output
+        Assert-Result "validator completes diagnostics" (-not $r.Output.Contains("BACKLOG VALIDATION ERROR:")) $r.Output
+    }
+
+    $results += Run-Test -Name "Item255 validator shares quoted identity budget and status readers" -Body {
+        $root = Join-Path $tempRoot "item255-quotes"
+        New-MinimalBacklogTree -Root $root
+        $active = Join-Path $root "chores/active/C-255.md"
+        Set-Content -LiteralPath $active -Value "---`nitem_id: 'C-255'`npriority: 'P2'`ntype: 'chore'`nstatus: 'Stub'`nbudget_tier: 'low'`n---" -Encoding UTF8
+        $archived = Join-Path $root "chores/archived/C-256.md"
+        Set-Content -LiteralPath $archived -Value "---`nstatus: 'Resolved'`n---" -Encoding UTF8
+        $backlog = Join-Path $root "BACKLOG.md"
+        Set-Content -LiteralPath $backlog -Encoding UTF8 -Value @"
+# Backlog
+## Priority Summary
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-255 |
+| **P3** | 0 | - |
+## Active Items
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-255](chores/active/C-255.md) | P2 | Stub | Test | Groomer |
+"@
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result "quoted scalars validate" ($r.ExitCode -eq 0) $r.Output
+        Set-Content -LiteralPath $active -Value "---`nitem_id: C-255`npriority: P2`ntype: chore`nstatus: Stub`nbudget_tier: bad-tier`n---" -Encoding UTF8
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result "raw invalid tier reported" ($r.ExitCode -ne 0 -and $r.Output.Contains("'bad-tier'")) $r.Output
+        Set-Content -LiteralPath $active -Value "---`nitem_id: C-255`ntype: chore`nstatus: Stub`nbudget_tier: low`n---" -Encoding UTF8
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result "missing priority defaults P2" ($r.ExitCode -eq 0) $r.Output
+    }
+
     $results += Run-Test -Name "Validator helper initialization performs no command discovery" -Body {
         # Item 262: an absent helper is a function-table lookup, not a search of
         # modules and executable PATH entries. Count the expensive operation rather

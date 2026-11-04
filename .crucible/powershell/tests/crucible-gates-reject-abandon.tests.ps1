@@ -199,6 +199,7 @@ item_id: "F-999"
 type: "Feature"
 status: "Ready for Deploy"
 priority: "P2"
+budget_tier: "low"
 target_phase: "deployment"
 created_at: "2026-06-04"
 ---

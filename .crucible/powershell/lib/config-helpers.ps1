@@ -517,16 +517,19 @@ function Get-ConfiguredPath {
 
 # The owner of crucible_root (I13): its value as configured, ".crucible" when the config
 # does not set it, and $null when the project has no config, so a caller can tell an
-# installed project from a guess. Item 247.
+# installed project from a guess. NoDefault exposes an absent key to diagnostics. Item 247.
 function Get-ConfiguredCrucibleRootValue {
-    param([string]$ProjectRoot = "")
+    param([string]$ProjectRoot = "", [switch]$NoDefault)
 
     $root = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
     $configPath = Join-Path $root ".crucible/config.yaml"
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return $null }
     $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
     $value = Get-ConfigBlockValue -Content $content -Path @("crucible_root") -Source $configPath
-    if ([string]::IsNullOrWhiteSpace($value)) { return ".crucible" }
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        if ($NoDefault) { return $null }
+        return ".crucible"
+    }
     return $value.Trim()
 }
 

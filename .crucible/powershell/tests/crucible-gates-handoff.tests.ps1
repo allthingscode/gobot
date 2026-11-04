@@ -91,6 +91,40 @@ function New-TestContext {
 }
 $tempRoot = New-TestFixtureRoot -NameHint "crucible-gates-handoff-test"
 try {
+    foreach ($case in @(
+        @{ Field = 'priority'; Value = 'high' }, @{ Field = 'priority'; Value = 'P4' },
+        @{ Field = 'priority'; Value = '""' }, @{ Field = 'budget_tier'; Value = 'bad-tier' },
+        @{ Field = 'budget_tier'; Value = '""' }
+    )) {
+        $results += Run-Test -Name ("Rereview255 bootstrap refuses " + $case.Field + '=' + $case.Value) -Body {
+            $ctx = New-TestContext -TempRoot (Join-Path $tempRoot ('rereview-' + $results.Count)) -TaskId 'B-255'
+            $active = Join-Path $ctx.BacklogDir 'bugs/active'
+            New-Item -ItemType Directory -Force -Path $active | Out-Null
+            $path = Join-Path $active 'B-255.md'
+            Set-Content -LiteralPath $path -Value ("---`n" + $case.Field + ': ' + $case.Value + "`n---") -Encoding UTF8
+            $message = ''
+            try { Resolve-CrucibleInputHandoff -Context $ctx } catch { $message = $_.Exception.Message }
+            Assert-Result 'bootstrap error names field and spec' ($message.Contains($case.Field) -and $message.Contains($path)) $message
+            Assert-Result 'invalid input writes no handoff' (@(Get-ChildItem -LiteralPath $ctx.HandoffDir -Filter '*.json').Count -eq 0) 'handoff created'
+        }
+    }
+    $results += Run-Test -Name "Item255 bootstrap uses the first budget tier" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "item255-budget") -TaskId "B-255"
+        $active = Join-Path $ctx.BacklogDir "bugs/active"
+        New-Item -ItemType Directory -Force -Path $active | Out-Null
+        Set-Content -LiteralPath (Join-Path $active "B-255.md") -Value "---`nbudget_tier: medium`nbudget_tier: high`n---" -Encoding UTF8
+        Resolve-CrucibleInputHandoff -Context $ctx
+        $handoff = Get-Content -LiteralPath $ctx.LatestHandoff.FullName -Raw | ConvertFrom-Json
+        Assert-Result "first tier wins" ($handoff.budget_tier -eq "medium") "bootstrap selected the later tier"
+        $missing = New-TestContext -TempRoot (Join-Path $tempRoot "item255-missing-budget") -TaskId "B-256"
+        $missingDir = Join-Path $missing.BacklogDir "bugs/active"
+        New-Item -ItemType Directory -Force -Path $missingDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $missingDir "B-256.md") -Value "---`ntype: bug`n---" -Encoding UTF8
+        Resolve-CrucibleInputHandoff -Context $missing
+        $handoff = Get-Content -LiteralPath $missing.LatestHandoff.FullName -Raw | ConvertFrom-Json
+        Assert-Result "missing bootstrap tier defaults low" ($handoff.budget_tier -eq "low") "bootstrap lost the low default"
+    }
+
     $results += Run-Test -Name "Resolve-CrucibleInputHandoff accepts context and populates latest handoff" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "contract") -TaskId "F-001"
         $handoffPath = Join-Path $ctx.HandoffDir "F-001-20260526T120000Z.json"

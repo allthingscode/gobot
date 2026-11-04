@@ -181,22 +181,25 @@ try {
                     try {
                         $frontmatter = Get-Content -Path $file.FullName -Head 30
                         if ($frontmatter) {
-                            $frontmatterStr = [string]$frontmatter
-                            $priority = "P2" # default
-                            if ($frontmatterStr -match 'priority:\s*"?([P][0123])"?') {
-                                $priority = $matches[1]
+                            $identity = Get-SpecIdentity -SpecPath $file.FullName -DefaultPriority P2 -Validate
+                            $priority = $identity.priority
+                            if ($priority -notmatch '^P[0-3]$') {
+                                $errors += "Missing or invalid priority in frontmatter of active file: $($file.Name)"
+                                continue
                             }
-
-                            $itemId = $null
-                            if ($frontmatterStr -match 'item_id:\s*"?([^"\s\r\n]+)"?') {
-                                $itemId = $matches[1]
-                            } else {
+                            $itemId = $identity.item_id
+                            if ([string]::IsNullOrWhiteSpace($itemId)) {
                                 $errors += "Missing or invalid item_id in frontmatter of active file: $($file.Name)"
                                 continue
                             }
 
                             # Assert that filename ID matches item_id
-                            $filenameId = ($file.Name -replace '_.*$', '') -replace '\.md$', ''
+                            try {
+                                $filenameId = Get-BacklogSpecFiles -SpecPath $file.Name -DecodeId
+                            } catch {
+                                $errors += "Invalid spec filename: '$($file.Name)'. Expected <id>.md or <id>_<slug>.md."
+                                continue
+                            }
                             if ($itemId -ne $filenameId) {
                                 $errors += "Filename ID mismatch: file '$($file.Name)' prefix '$filenameId' does not match frontmatter item_id '$itemId'"
                             }
@@ -204,13 +207,7 @@ try {
                             # Validate budget_tier (Finding 1). Match per-line and anchor at line
                             # start so a documentation comment (e.g. '# budget_tier: low|medium|...')
                             # is never mistaken for the declaration.
-                            $budgetTier = $null
-                            foreach ($fmLine in $frontmatter) {
-                                if ($fmLine -match '^\s*budget_tier:\s*"?([^"\s\r\n]+)"?') {
-                                    $budgetTier = $matches[1]
-                                    break
-                                }
-                            }
+                            $budgetTier = Get-SpecBudgetTier -SpecPath $file.FullName -Raw -Validate
                             if ($null -ne $budgetTier -and $budgetTier -ne "") {
                                 $allowedBudgetTiers = @("low", "medium", "high", "extended")
                                 if ($allowedBudgetTiers -notcontains $budgetTier.ToLowerInvariant()) {
@@ -222,13 +219,7 @@ try {
 
                             # Validate type: item kind (feature, bug, chore, research).
                             # Same per-line anchoring as budget_tier to skip comment lines.
-                            $specType = $null
-                            foreach ($fmLine in $frontmatter) {
-                                if ($fmLine -match '^\s*type:\s*"?([^"\s\r\n]+)"?') {
-                                    $specType = $matches[1]
-                                    break
-                                }
-                            }
+                            $specType = $identity.type
                             if ($null -ne $specType -and $specType -ne "") {
                                 $allowedTypes = @("feature", "bug", "chore", "research")
                                 if ($allowedTypes -notcontains $specType.ToLowerInvariant()) {
@@ -361,8 +352,6 @@ try {
         if (Test-Path $dir) {
             $archivedFiles = Get-ChildItem -Path $dir -Filter "*.md"
             foreach ($file in $archivedFiles) {
-                $frontmatter = Get-Content -Path $file.FullName -Head 20
-                $frontmatterStr = [string]$frontmatter
                 $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
                 $relPath = $relPath -replace '\\', '/'
 
@@ -383,11 +372,9 @@ try {
                     Write-Host "[WARN] Archived spec has no BACKLOG.md row: $relPath. Readers that resolve a task by its table row will treat it as nonexistent." -ForegroundColor Yellow
                 }
 
-                # Matched per line: $frontmatterStr joins the lines with spaces, so an
-                # unquoted status read on through every later line and never matched.
-                $statusLine = @($frontmatter | Where-Object { $_ -match '^\s*status:' } | Select-Object -First 1)
-                if ($statusLine.Count -gt 0 -and $statusLine[0] -match '^\s*status:\s*"?([^"]+)"?\s*$') {
-                    $status = $matches[1].Trim()
+                # Share the path reader with finalization and archival.
+                $status = Get-BacklogSpecStatus -SpecPath $file.FullName
+                if (-not [string]::IsNullOrWhiteSpace($status)) {
                     if ($status -eq "Production" -or $status -eq "Resolved" -or $status -eq "Abandoned") {
                         continue
                     }
@@ -464,9 +451,7 @@ try {
                     $targetPath = Join-Path $backlogDir ($link -replace '/', [System.IO.Path]::DirectorySeparatorChar)
                     if (-not (Test-Path -LiteralPath $targetPath)) { continue } # already reported by Check B
 
-                    $fmStr = [string](Get-Content -LiteralPath $targetPath -Head 15)
-                    $specStatus = $null
-                    if ($fmStr -match 'status:\s*"?([^"\s\r\n]+)"?') { $specStatus = $matches[1] }
+                    $specStatus = Get-BacklogSpecStatus -SpecPath $targetPath
                     if ($specStatus -ine 'Stub') {
                         $errors += "Stub-row convention: BACKLOG.md row $link has Status='Stub' but spec frontmatter status is '$specStatus' (expected 'Stub')"
                     }
@@ -480,8 +465,7 @@ try {
         $dir = $dirInfo.Path
         if (-not (Test-Path $dir)) { continue }
         foreach ($file in @(Get-ChildItem -Path $dir -Filter "*.md")) {
-            $fmStr = [string](Get-Content -LiteralPath $file.FullName -Head 15)
-            if ($fmStr -notmatch 'status:\s*"?Stub"?') { continue }
+            if ((Get-BacklogSpecStatus -SpecPath $file.FullName) -ine "Stub") { continue }
             $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
             $relPath = $relPath -replace '\\', '/'
             if (-not $stubLinksFromBacklog.ContainsKey($relPath)) {

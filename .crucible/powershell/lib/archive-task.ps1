@@ -129,7 +129,7 @@ function Get-BacklogArchiveRow {
     }
     if ($rowIndex -lt 0) {
         $fileName = Split-Path -Leaf $ActiveRelPath
-        $taskIdFromFile = ($fileName -replace '_.*$', '') -replace '\.md$', ''
+        $taskIdFromFile = Get-BacklogSpecFiles -SpecPath $fileName -DecodeId
         for ($i = 0; $i -lt $Lines.Count; $i++) {
             if (Test-BacklogTaskRow -Line $Lines[$i] -TaskId $taskIdFromFile) {
                 $rowIndex = $i
@@ -324,27 +324,9 @@ function Invoke-BacklogTaskArchive {
         $terminalStatus = $Status
         if ([string]::IsNullOrEmpty($terminalStatus)) {
             # Check if the active spec's frontmatter status is already a terminal value ("Production" or "Resolved")
-            $specLines = [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $resolvedSpec), [System.Text.Encoding]::UTF8)
-            $frontmatterEnd = -1
-            if ($specLines.Count -gt 0 -and $specLines[0] -eq "---") {
-                for ($i = 1; $i -lt $specLines.Count; $i++) {
-                    if ($specLines[$i] -eq "---") {
-                        $frontmatterEnd = $i
-                        break
-                    }
-                }
-            }
-            if ($frontmatterEnd -gt 0) {
-                $specStatus = ""
-                for ($i = 1; $i -lt $frontmatterEnd; $i++) {
-                    if ($specLines[$i] -match '^\s*status\s*:\s*["'']?([^"''\s\r\n]+)"?') {
-                        $specStatus = $Matches[1]
-                        break
-                    }
-                }
-                if ($specStatus -eq "Production" -or $specStatus -eq "Resolved") {
-                    $terminalStatus = $specStatus
-                }
+            $specStatus = Get-BacklogSpecStatus -SpecPath $resolvedSpec -RequireFrontmatter
+            if ($specStatus -eq "Production" -or $specStatus -eq "Resolved") {
+                $terminalStatus = $specStatus
             }
         }
         if ([string]::IsNullOrEmpty($terminalStatus)) {
@@ -354,36 +336,13 @@ function Invoke-BacklogTaskArchive {
             $terminalStatus = Get-BacklogTerminalStatus -ShippedCode ([bool]$ShippedCode)
         }
 
-        # Read item_id and priority from active spec frontmatter before moving
-        $itemId = $null
-        $priority = $null
-        if (Test-Path -LiteralPath $resolvedSpec) {
-            $specLines = [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $resolvedSpec), [System.Text.Encoding]::UTF8)
-            $frontmatterEnd = -1
-            if ($specLines.Count -gt 0 -and $specLines[0] -eq "---") {
-                for ($i = 1; $i -lt $specLines.Count; $i++) {
-                    if ($specLines[$i] -eq "---") {
-                        $frontmatterEnd = $i
-                        break
-                    }
-                }
-            }
-            if ($frontmatterEnd -gt 0) {
-                for ($i = 1; $i -lt $frontmatterEnd; $i++) {
-                    $line = $specLines[$i]
-                    if ($line -match '^\s*item_id\s*:\s*["'']?([^"''\s\r\n]+)"?') {
-                        $itemId = $Matches[1]
-                    }
-                    elseif ($line -match '^\s*priority\s*:\s*["'']?([P][0-3])"?') {
-                        $priority = $Matches[1]
-                    }
-                }
-            }
-        }
+        $identity = Get-SpecIdentity -SpecPath $resolvedSpec -RequireFrontmatter
+        $itemId = $identity.item_id
+        $priority = if ($identity.priority -match '^P[0-3]$') { $identity.priority } else { $null }
 
         if ([string]::IsNullOrEmpty($itemId)) {
             $fileName = Split-Path -Leaf $resolvedSpec
-            $itemId = ($fileName -replace '_.*$', '') -replace '\.md$', ''
+            $itemId = Get-BacklogSpecFiles -SpecPath $fileName -DecodeId
         }
 
         $archivedRelPath = $relativeSpec -replace '/active/', '/archived/'

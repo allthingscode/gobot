@@ -87,6 +87,22 @@ function New-TestContext {
 $tempRoot = New-TestFixtureRoot -NameHint "session-output-test"
 
 try {
+    $results += Run-Test -Name "Item255 initialization enforces an unquoted spec budget" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "item255-budget")
+        $ctx.TypeDir = "features"
+        $ctx.Handoff.budget_tier = "high"
+        $active = Join-Path $ctx.BacklogDir "features/active"
+        New-Item -ItemType Directory -Force -Path $active | Out-Null
+        Set-Content -LiteralPath (Join-Path $active "F-901.md") -Value "---`nbudget_tier: low`n---" -Encoding UTF8
+        Initialize-CrucibleTargetSession -Context $ctx
+        Assert-Result "unquoted tier enforced" ($ctx.Handoff.budget_tier -eq "low") "unquoted spec allowed budget escalation"
+        Remove-Item -LiteralPath (Join-Path $ctx.SessionDir "F-901/verification/task.md")
+        Set-Content -LiteralPath (Join-Path $active "F-901.md") -Value "---`ntype: feature`n---" -Encoding UTF8
+        $ctx.Handoff.budget_tier = "high"
+        Initialize-CrucibleTargetSession -Context $ctx
+        Assert-Result "missing tier keeps handoff budget" ($ctx.Handoff.budget_tier -eq "high") "absent tier changed handoff policy"
+    }
+
 
     $results += Run-Test -Name "Generated handoff reference uses supplied custom session (item 188)" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "custom-handoff") -TaskId "F-188" -TargetPhase "verification"
@@ -432,7 +448,7 @@ Notes live in {project_root}/notes.
         $ctx.Init = $true
         $activeDir = Join-Path $ctx.BacklogDir "features/active"
         New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
-        "---`ntype: research`n---`nSpec`n" | Set-Content -LiteralPath (Join-Path $activeDir "R-914_spec.md") -Encoding UTF8
+        "---`ntype: research`nbudget_tier: low`n---`nSpec`n" | Set-Content -LiteralPath (Join-Path $activeDir "R-914_spec.md") -Encoding UTF8
         "# Backlog`n| [R-914](features/active/R-914_spec.md) | Spec | P2 | Ready |`n" | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
         "crucible_root: `".crucible`"`npaths:`n  backlog: `"" + ($ctx.BacklogDir -replace '\\', '/') + "`"`n" | Set-Content -LiteralPath (New-Item -ItemType File -Path (Join-Path $caseRoot ".crucible/config.yaml") -Force).FullName -Encoding UTF8
         & git -C $caseRoot init --quiet -b master

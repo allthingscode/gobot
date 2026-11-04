@@ -168,35 +168,6 @@ function Invoke-NativeCommand {
     return $output
 }
 
-function Get-SpecBudgetTier {
-    param(
-        [Parameter(Mandatory = $true)][string]$Task,
-        [switch]$IncludePath,
-        [string]$ProjectRoot = ""
-    )
-
-    $specPath = Get-BacklogItemPathForTaskProjectRoot -Task $Task -ProjectRoot $ProjectRoot
-    if ([string]::IsNullOrWhiteSpace($specPath) -or -not (Test-Path -LiteralPath $specPath)) {
-        if ($IncludePath) {
-            return @{ Tier = ""; Path = "" }
-        }
-        return ""
-    }
-
-    $tier = ""
-    $frontmatter = Get-Content -LiteralPath $specPath -Head 30
-    foreach ($line in $frontmatter) {
-        if ($line -match '^\s*budget_tier:\s*"?(\w+)"?\s*$') {
-            $tier = $matches[1].ToLowerInvariant()
-            break
-        }
-    }
-
-    if ($IncludePath) {
-        return @{ Tier = $tier; Path = $specPath }
-    }
-    return $tier
-}
 
 . (Join-Path $PSScriptRoot "lib/file-lock.ps1")
 . (Join-Path $PSScriptRoot "lib/crucible-command.ps1")

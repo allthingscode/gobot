@@ -42,6 +42,27 @@ $payload | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot "u
 '@ | Set-Content -LiteralPath $stubScript -Encoding UTF8
 
 try {
+    $results += Run-Test -Name "Item255 blocked record asks the owner for the backlog ancestor" -Body {
+        $caseRoot = Join-Path $tempRoot "item255-ancestor"
+        $caseBacklog = Join-Path $caseRoot "external/backlog"
+        $caseFramework = Join-Path $caseRoot "framework"
+        New-Item -ItemType Directory -Force -Path $caseBacklog, $caseFramework | Out-Null
+        $capture = Join-Path $caseFramework "root.txt"
+        Set-Content -LiteralPath (Join-Path $caseFramework "update-session-state.ps1") -Encoding UTF8 -Value @'
+param($Specialist, $TaskId, $UpdateJson, $Merge, $ProjectRoot)
+Set-Content -LiteralPath (Join-Path $PSScriptRoot "root.txt") -Value $ProjectRoot
+'@
+        function Resolve-CrucibleProjectRoot {
+            param([string]$AncestorOf)
+            if ($AncestorOf -ne $caseBacklog) { throw "wrong ancestor input" }
+            return "owner-result"
+        }
+        $Context = @{}
+        $repoRoot = ""
+        Write-BlockedTaskRecord -TaskId "F-255" -CircuitBreaker "budget_exceeded" -AttemptCount 1 -LastPhase "verification" -Summary "Test" -BacklogDir $caseBacklog -FrameworkPowerShell $caseFramework
+        Assert-Result "blocked record routes through owner" ((Get-Content -LiteralPath $capture -Raw).Trim() -eq "owner-result") "blocked helper bypassed ancestor owner"
+    }
+
     $results += Run-Test -Name "Write-BlockedTaskRecord creates blocked record" -Body {
         Write-BlockedTaskRecord -TaskId "F-010" -CircuitBreaker "budget_exceeded" -AttemptCount 7 -LastPhase "verification" -Summary "Too many handoffs" -Artifacts @("report.md", "log.txt") -BacklogDir $backlogDir -FrameworkPowerShell $frameworkDir
 
