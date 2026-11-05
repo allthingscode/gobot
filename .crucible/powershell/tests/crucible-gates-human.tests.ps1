@@ -2757,26 +2757,23 @@ review:
             -FailureMessage ("Accept lines that say nothing about merging or publishing:`n" + ($offenders -join "`n"))
     }
     $results += Run-Test -Name "An outcome matching no dispatch arm is refused, not passed over" -Body {
-        # In process, deliberately: the refusal path does not exit, which is what makes
-        # the whole outcome observable from here. Before the fix this call returned 0
-        # having written nothing, and Invoke-HumanGate read that silence as success -
-        # archiving the decision, deleting the pending template, and printing
-        # "Decision recorded" in green for an outcome no arm had acted on.
+        # Gate refusals must terminate even an embedding caller under Stop (I11).
         $root = Join-Path $tempRoot "bad-outcome"
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         $logFile = Join-Path $root "events.jsonl"
         $cbFile = Join-Path $root "circuit-breaker.jsonl"
-
-        $message = ""
-        try {
-            Invoke-HumanGateAction -TaskId "F-BAD" -Outcome "accpeted" -ProjectRoot $root `
-                -LogFile $logFile -CircuitBreakerHistoryFile $cbFile | Out-Null
-        } catch {
-            $message = [string]$_.Exception.Message
-        }
-
-        Assert-Result -Name "a misspelled outcome throws" -Condition ($message -ne "") `
-            -FailureMessage "Invoke-HumanGateAction returned normally for outcome 'accpeted'"
+        $child = Join-Path $root "caller.ps1"
+        @"
+`$ErrorActionPreference = 'Stop'
+. '$($CRUCIBLE_LIB.Replace("'", "''"))'
+try {
+    Invoke-HumanGateAction -TaskId F-BAD -Outcome accpeted -ProjectRoot '$($root.Replace("'", "''"))' -LogFile '$($logFile.Replace("'", "''"))' -CircuitBreakerHistoryFile '$($cbFile.Replace("'", "''"))'
+} catch { Write-Host 'CALLER_CAUGHT' }
+Write-Host 'CALLER_CONTINUED'
+"@ | Set-Content -LiteralPath $child -Encoding utf8
+        $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $child 2>&1 }
+        $message = $res.Output
+        Assert-Result -Name "a misspelled outcome exits unconditionally" -Condition ($res.ExitCode -ne 0 -and $message -notmatch 'CALLER_CAUGHT|CALLER_CONTINUED') -FailureMessage $message
         Assert-Result -Name "the message quotes what was received" -Condition ($message -match "accpeted") `
             -FailureMessage ("expected the rejected outcome to be named, got: " + $message)
         foreach ($valid in (Get-HumanGateOutcomes)) {

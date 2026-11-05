@@ -58,7 +58,19 @@ function Remove-CommitWorktree {
 }
 # A trap covers the whole script, including lines before this one, so it tests the variable
 # rather than calling the function before it exists.
-trap { if ($null -ne $commitWorktree) { Remove-CommitWorktree }; break }
+trap {
+    $refusal = $_.Exception.Message
+    # Cleanup must not let a second error escape to an embedding caller either.
+    try {
+        if ($null -ne (Get-Variable commitWorktree -ErrorAction Ignore) -and $null -ne $commitWorktree) {
+            Remove-CommitWorktree
+        }
+    } catch {
+        [Console]::Error.WriteLine("Temporary worktree cleanup failed: " + $_.Exception.Message)
+    }
+    [Console]::Error.WriteLine("Isolated checks refused: " + $refusal)
+    exit 1
+}
 if (-not [string]::IsNullOrWhiteSpace($Commit)) {
     # Research tasks have no implementation worktree or task branch. -Commit runs
     # configured checks in a detached throwaway worktree so their artifacts never

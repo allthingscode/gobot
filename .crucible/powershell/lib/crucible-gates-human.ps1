@@ -466,7 +466,8 @@ function Invoke-HumanGateAction {
     } else {
         # Reject unknown outcomes before side effects so a typo cannot pass the gate;
         # keep the pending file for the operator to correct. Item 38.
-        throw ("Unrecognized gate outcome '" + $Outcome + "'. Expected one of: " + ((Get-HumanGateOutcomes) -join ", ") + ".")
+        [Console]::Error.WriteLine("Unrecognized gate outcome '" + $Outcome + "'. Expected one of: " + ((Get-HumanGateOutcomes) -join ", ") + ".")
+        exit 1
     }
 }
 
@@ -1431,9 +1432,9 @@ function Invoke-HumanGate {
                             }
                         }
                     } catch {
-                        # This catch spans the gate action too, not just the parse, so a
-                        # fixed message would report an unrecognized outcome as bad JSON
-                        # and send the operator to debug a file that is well-formed.
+                        # This catch spans parsing and catchable gate-action errors, so
+                        # preserve the exception message. Unrecognized outcomes refuse
+                        # with a direct exit before this catch can run.
                         Write-Host ("Error handling gate decision template: " + $_.Exception.Message) -ForegroundColor Red
                         exit 1
                     }

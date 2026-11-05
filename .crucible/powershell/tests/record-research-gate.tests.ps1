@@ -60,9 +60,9 @@ try {
 
     $results += Run-Test -Name "a non-ID in -Approved is still refused" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "non-id")
-        $refused = $false
-        try { & $SCRIPT -TaskId $p.TaskId -Reason "x" -Approved "U-044-01" -ProjectRoot $p.Root | Out-Null } catch { $refused = $_.Exception.Message -match 'is not a backlog item ID' }
-        Assert-Result "non-ID refused" $refused "U-044-01 must not be accepted as a backlog ID"
+        $pwshCmd = Get-PwshCommand
+        $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $SCRIPT -TaskId $p.TaskId -Reason x -Approved U-044-01 -ProjectRoot $p.Root 2>&1 }
+        Assert-Result "non-ID refused" ($res.ExitCode -ne 0 -and $res.Output -match 'is not a backlog item ID') $res.Output
     }
 
     # Item 229: filing instructions must follow the adopter's backlog path.
@@ -286,17 +286,15 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
 
     $results += Run-Test -Name "a value that is not a backlog ID is refused (item 174)" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "bad-id")
-        $threw = $false
-        try { & $SCRIPT -TaskId $p.TaskId -Reason "x" -Approved "C-350","B034" -ProjectRoot $p.Root 2>$null } catch { $threw = ($_.Exception.Message -match "'B034' is not a backlog item ID") }
-        Assert-Result "refuses B034" $threw "expected a refusal naming B034"
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $SCRIPT -TaskId $p.TaskId -Reason x -Approved 'C-350,B034' -ProjectRoot $p.Root 2>&1 }
+        Assert-Result "refuses B034" ($run.ExitCode -ne 0 -and $run.Output -match "'B034' is not a backlog item ID") $run.Output
         Assert-Result "writes no gate-filing" (-not (Test-Path -LiteralPath $p.GateFiling)) "a refused gate must not write gate-filing.md"
     }
 
     $results += Run-Test -Name "empty decision is refused" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "empty")
-        $threw = $false
-        try { & $SCRIPT -TaskId $p.TaskId -Reason "x" -ProjectRoot $p.Root 2>$null } catch { $threw = $true }
-        Assert-Result "throws on empty decision" $threw "expected an error when no items are approved/deferred/rejected"
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $SCRIPT -TaskId $p.TaskId -Reason x -ProjectRoot $p.Root 2>&1 }
+        Assert-Result "exits on empty decision" ($run.ExitCode -ne 0 -and $run.Output -match 'decision cannot be empty') $run.Output
     }
 
     $results += Run-Test -Name "missing research session directory is refused" -Body {
@@ -304,9 +302,8 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
         $crucible = Join-Path $root ".crucible"
         New-Item -ItemType Directory -Path (Join-Path $crucible "backlog") -Force | Out-Null
         "paths:`n  backlog: `".crucible/backlog`"`n  session: `".crucible/session`"" | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
-        $threw = $false
-        try { & $SCRIPT -TaskId "R-099" -Reason "x" -Approved "C-1" -ProjectRoot $root 2>$null } catch { $threw = $true }
-        Assert-Result "throws without research session" $threw "expected an error when the research session dir is absent"
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $SCRIPT -TaskId R-099 -Reason x -Approved C-1 -ProjectRoot $root 2>&1 }
+        Assert-Result "exits without research session" ($run.ExitCode -ne 0 -and $run.Output -match 'No research session directory') $run.Output
     }
 
 } finally {

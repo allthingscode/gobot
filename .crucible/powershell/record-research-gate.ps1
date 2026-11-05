@@ -65,13 +65,19 @@ function Split-ItemList {
     return , @($out)
 }
 
-$approvedList = Split-ItemList -Items $Approved
-$deferredList = Split-ItemList -Items $Deferred
-$rejectedList = Split-ItemList -Items $Rejected
+try {
+    $approvedList = Split-ItemList -Items $Approved
+    $deferredList = Split-ItemList -Items $Deferred
+    $rejectedList = Split-ItemList -Items $Rejected
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 $upstreamList = @(@($ApprovedUpstream) | Where-Object { $null -ne $_ } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 
 if ($approvedList.Count -eq 0 -and $deferredList.Count -eq 0 -and $rejectedList.Count -eq 0 -and $upstreamList.Count -eq 0) {
-    throw "At least one of -Approved / -Deferred / -Rejected / -ApprovedUpstream must be provided; a Research Gate decision cannot be empty."
+    [Console]::Error.WriteLine("At least one of -Approved / -Deferred / -Rejected / -ApprovedUpstream must be provided; a Research Gate decision cannot be empty.")
+    exit 1
 }
 
 $resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $CrucibleRoot
@@ -79,7 +85,8 @@ $resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -Cruc
 $sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
 $researchSessionDir = Join-Path $sessionRoot (Join-Path $TaskId "research")
 if (-not (Test-Path -LiteralPath $researchSessionDir)) {
-    throw "No research session directory at $researchSessionDir. Run the research phase for $TaskId before recording its gate."
+    [Console]::Error.WriteLine("No research session directory at $researchSessionDir. Run the research phase for $TaskId before recording its gate.")
+    exit 1
 }
 
 # Every command the continuation and the guidance print. The human's reason and IDs are data:

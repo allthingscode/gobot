@@ -113,7 +113,8 @@ $ErrorActionPreference = "Stop"
 foreach ($lib in "config-helpers.ps1", "instruction-blocks.ps1", "language-presets.ps1", "project-root.ps1") {
     $libPath = Join-Path $PSScriptRoot "lib/$lib"
     if (-not (Test-Path -LiteralPath $libPath)) {
-        throw "Required helper script not found at $libPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+        [Console]::Error.WriteLine("Required helper script not found at $libPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+        exit 1
     }
 }
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")

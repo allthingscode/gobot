@@ -18,7 +18,8 @@ function Get-GateNotRunSessionDir {
     # A skip that cannot be recorded would reach the Reviewer and the Human Gate as a pass. I12.
     param([Parameter(Mandatory=$true)][hashtable]$Context)
     if (-not $Context.ContainsKey("SessionDir") -or [string]::IsNullOrWhiteSpace([string]$Context["SessionDir"])) {
-        throw "A skipped check cannot be recorded as not run: Context.SessionDir is missing."
+        [Console]::Error.WriteLine("A skipped check cannot be recorded as not run: Context.SessionDir is missing.")
+        exit 1
     }
     return [string]$Context["SessionDir"]
 }
@@ -1747,7 +1748,8 @@ function Resolve-CrucibleTransition {
                 $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $handoff.task_id -ProjectRoot $repoRoot
                 
                 if ([string]::IsNullOrEmpty($activeSpecPath) -or -not (Test-Path -LiteralPath $activeSpecPath)) {
-                    throw "Active spec path not found for task $($handoff.task_id) during auto-finalization."
+                    [Console]::Error.WriteLine("Active spec path not found for task $($handoff.task_id) during auto-finalization.")
+                    exit 1
                 }
                 
                 if ($activeSpecPath -match '(?i)[/\\]active[/\\]') {
@@ -1757,7 +1759,8 @@ function Resolve-CrucibleTransition {
                         if (Test-Path -LiteralPath $archiveLibPath) {
                             . $archiveLibPath
                         } else {
-                            throw "archive-task helper not found at $archiveLibPath"
+                            [Console]::Error.WriteLine("archive-task helper not found at $archiveLibPath")
+                            exit 1
                         }
                     }
                     

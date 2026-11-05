@@ -2,19 +2,22 @@ Set-StrictMode -Version Latest
 
 $helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
 if (-not (Test-Path -LiteralPath $helpersPath)) {
-    throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $helpersPath
 
 $taskChecklistPath = Join-Path $PSScriptRoot "lib/task-checklist.ps1"
 if (-not (Test-Path -LiteralPath $taskChecklistPath)) {
-    throw "Required helper script not found at $taskChecklistPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $taskChecklistPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $taskChecklistPath
 
 $timePath = Join-Path $PSScriptRoot "lib/time.ps1"
 if (-not (Test-Path -LiteralPath $timePath)) {
-    throw "Required helper script not found at $timePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $timePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $timePath
 
@@ -174,49 +177,57 @@ function Invoke-NativeCommand {
 
 $crucibleContextPath = Join-Path $PSScriptRoot "lib/crucible-context.ps1"
 if (-not (Test-Path -LiteralPath $crucibleContextPath)) {
-    throw "Required helper script not found at $crucibleContextPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $crucibleContextPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $crucibleContextPath
 
 $eventLogPath = Join-Path $PSScriptRoot "lib/event-log.ps1"
 if (-not (Test-Path -LiteralPath $eventLogPath)) {
-    throw "Required helper script not found at $eventLogPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $eventLogPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $eventLogPath
 
 $blockedPath = Join-Path $PSScriptRoot "lib/blocked.ps1"
 if (-not (Test-Path -LiteralPath $blockedPath)) {
-    throw "Required helper script not found at $blockedPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $blockedPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $blockedPath
 
 $handoffPath = Join-Path $PSScriptRoot "lib/handoff.ps1"
 if (-not (Test-Path -LiteralPath $handoffPath)) {
-    throw "Required helper script not found at $handoffPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $handoffPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $handoffPath
 
 $worktreePath = Join-Path $PSScriptRoot "lib/worktree.ps1"
 if (-not (Test-Path -LiteralPath $worktreePath)) {
-    throw "Required helper script not found at $worktreePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $worktreePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $worktreePath
 
 $pipelineDagPath = Join-Path $PSScriptRoot "lib/pipeline-dag.ps1"
 if (-not (Test-Path -LiteralPath $pipelineDagPath)) {
-    throw "Required helper script not found at $pipelineDagPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $pipelineDagPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $pipelineDagPath
 
 $crucibleGatesPath = Join-Path $PSScriptRoot "lib/crucible-gates.ps1"
 if (-not (Test-Path -LiteralPath $crucibleGatesPath)) {
-    throw "Required helper script not found at $crucibleGatesPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $crucibleGatesPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $crucibleGatesPath
 
 $sessionOutputPath = Join-Path $PSScriptRoot "lib/session-output.ps1"
 if (-not (Test-Path -LiteralPath $sessionOutputPath)) {
-    throw "Required helper script not found at $sessionOutputPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $sessionOutputPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $sessionOutputPath
 
@@ -224,7 +235,8 @@ if (-not (Test-Path -LiteralPath $sessionOutputPath)) {
 
 $taskRewindPath = Join-Path $PSScriptRoot "lib/task-rewind.ps1"
 if (-not (Test-Path -LiteralPath $taskRewindPath)) {
-    throw "Required helper script not found at $taskRewindPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $taskRewindPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $taskRewindPath
 

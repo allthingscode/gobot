@@ -23,7 +23,8 @@ if (-not (Test-Path -LiteralPath $crucibleScript)) {
 [Console]::Error.WriteLine("[DEPRECATED] factory.ps1 is deprecated and will be removed. Invoke powershell/crucible.ps1 instead; forwarding this call unchanged.")
 
 # Telemetry is what makes D2's deletion criterion measurable rather than a guess,
-# but it must never be able to fail the call it is only observing.
+# with catchable telemetry errors reported before forwarding. A crucible-lib
+# bootstrap refusal exits before forwarding, with the same exit 1 as crucible.ps1.
 try {
     & {
         . (Join-Path $PSScriptRoot "crucible-lib.ps1")
