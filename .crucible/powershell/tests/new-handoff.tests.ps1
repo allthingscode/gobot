@@ -61,18 +61,24 @@ function Invoke-Generator {
     if ($InputArgs.ContainsKey("TaskId") -and -not $NoRegister) {
         Register-TaskId $InputArgs.TaskId
     }
+    $savedError = [Console]::Error
+    $diagnostics = [IO.StringWriter]::new()
     try {
+        [Console]::SetError($diagnostics)
         $global:LASTEXITCODE = 0
         $output = Invoke-ExternalCommand -AsLines { & $generator @InputArgs 2>&1 }
         return @{
-            ExitCode = $(if ($global:LASTEXITCODE -eq 2) { 2 } else { 0 })
-            Output   = ($output -join "`n")
+            ExitCode = $global:LASTEXITCODE
+            Output   = ($output -join "`n") + $diagnostics.ToString()
         }
     } catch {
         return @{
             ExitCode = 1
             Output   = $_.Exception.Message
         }
+    } finally {
+        [Console]::SetError($savedError)
+        $diagnostics.Dispose()
     }
 }
 

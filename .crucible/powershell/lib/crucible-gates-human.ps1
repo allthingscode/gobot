@@ -203,11 +203,11 @@ function Invoke-HumanGateMerge {
         }
         $global:LASTEXITCODE = 0
         & $HandoffScript @handoffParams | Out-Null
-        if ($LASTEXITCODE -eq 2) {
-            # The generator refused (exit 2, I11): no rework was queued, so claim none. The
+        if ($LASTEXITCODE -ne 0) {
+            # The generator refused (I11): no rework was queued, so claim none. The
             # premature accept goes so a retry is not blocked, as in the unsafe-worktree exit above.
             try { & $removePrematureAccept } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
-            Write-Host "[STOP] The rework handoff for ${TaskId} was refused, so no rework was queued. Fix the cause named above, then run the gate again." -ForegroundColor Red
+            [Console]::Error.WriteLine("[STOP] The rework handoff for ${TaskId} was refused, so no rework was queued. Fix the cause named above, then run the gate again.")
             exit 2
         }
     }
@@ -523,6 +523,7 @@ function Invoke-HumanGateAcceptRedirect {
         -BacklogPath $backlogPath -HasTaskBranch $hasTaskBranch -SourcePhase $SourcePhase
 
     if (-not $finalizationOk) {
+        [Console]::Error.WriteLine("Auto-finalization failed for $TaskId; refusing to push.")
         try {
             Write-EventLog -Event "quality_gate_retry" -TaskId $TaskId -Phase "deployment" `
                 -Outcome "retry_required" -Notes "Auto-finalization failed at human gate; push withheld" `
@@ -899,25 +900,50 @@ function Invoke-HumanGateRejectAbandon {
             Write-Quiet "[HUMAN GATE] $PrimaryBranch does not end in a merge of task/$TaskId; leaving it untouched."
         }
 
-        # Restore/archive only after safety and unwind: neither may dirty files that
-        # the reset would then discard. A refused decision has no partial state.
-        if ($Outcome -eq "rejected") {
-            Restore-BacklogTask -TaskId $TaskId -ProjectRoot $ProjectRoot -ActiveStatus "In Progress"
-        } elseif ($Outcome -eq "abandoned") {
-            Invoke-AbandonedBacklogTaskArchive -TaskId $TaskId -ProjectRoot $ProjectRoot
-        }
+        # Only this task's proven merge supplies a second-parent task tip. Another
+        # task's merge is not recovery evidence; require reflog verification instead.
+        $taskTip = if ($headIsTaskMerge -and $parentList.Count -ge 2) { $parentList[1] } elseif ($parentList.Count -lt 2) { $currentHead } else { $null }
+        $branchCommand = if ($taskTip) { "git -C '" + $ProjectRoot.Replace("'", "''") + "' branch 'task/" + $TaskId.Replace("'", "''") + "' '" + $taskTip + "'" } else { "" }
+        $primaryState = if ($headIsTaskMerge) { "$PrimaryBranch was reset to $unwindTarget" } else { "$PrimaryBranch was left untouched" }
 
+        # Creating a ref cannot dirty files or bypass the unwind safety check. Preserve
+        # the task commits before a backlog failure can stop this recorded rejection.
         if ($Outcome -eq "rejected") {
             Invoke-GitChecked { git show-ref --quiet "refs/heads/task/$TaskId" }
             if ($LASTEXITCODE -ne 0) {
-                if ($parentList.Count -ge 2) {
-                    Invoke-GitChecked { git branch "task/$TaskId" $parentList[1] }
-                } else {
-                    Invoke-GitChecked { git branch "task/$TaskId" $currentHead }
+                if (-not $taskTip) {
+                    [Console]::Error.WriteLine("[STOP] Cannot identify the tip of task/$TaskId from another task's merge. The rejection is already recorded and $primaryState. Identify and verify the task sha with git reflog --all, then restore task/$TaskId manually before resuming rework (do not reject again).")
+                    exit 1
+                }
+                $global:LASTEXITCODE = 0
+                Invoke-GitChecked { git branch "task/$TaskId" $taskTip }
+                if ($LASTEXITCODE -ne 0) {
+                    [Console]::Error.WriteLine("[STOP] Could not restore task/$TaskId. The rejection is already recorded and $primaryState; no backlog update or rework handoff was attempted. Restore the saved task tip manually: $branchCommand. Resume rework after repairing the cause (do not reject again).")
+                    exit 1
                 }
                 Write-Quiet "[HUMAN GATE] Restored task branch task/$TaskId"
             }
+        }
 
+        # Restore/archive only after safety and unwind: neither may dirty files that
+        # the reset would then discard. A refused decision has no partial state.
+        try {
+            if ($Outcome -eq "rejected") {
+                Restore-BacklogTask -TaskId $TaskId -ProjectRoot $ProjectRoot -ActiveStatus "In Progress"
+            } elseif ($Outcome -eq "abandoned") {
+                Invoke-AbandonedBacklogTaskArchive -TaskId $TaskId -ProjectRoot $ProjectRoot
+            }
+        } catch {
+            $recovery = ""
+            if ($Outcome -eq "rejected") {
+                $branchRecovery = if ($taskTip) { "If the task branch is missing, recreate it from the saved task tip: $branchCommand." } else { "If the task branch is missing, identify and verify its sha with git reflog --all before recreating it; the primary merge is not a verified task tip." }
+                $recovery = ". The rejection is already recorded, $primaryState, and task/$TaskId restored, but no rework handoff was generated. $branchRecovery Repair the backlog update before resuming implementation. To generate the rework handoff, run: $(Get-HumanGateReworkRecoveryCommand -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff) (do not reject again)."
+            }
+            [Console]::Error.WriteLine("Could not update backlog for ${Outcome} task ${TaskId}: " + $_.Exception.Message + $recovery)
+            exit 1
+        }
+
+        if ($Outcome -eq "rejected") {
             Restore-ImplementationWorktree -TaskId $TaskId -ProjectRoot $ProjectRoot
 
             # Check if the task is present in the backlog before running new-handoff.ps1
@@ -985,8 +1011,8 @@ function Invoke-HumanGateRejectAbandon {
                     
                     $global:LASTEXITCODE = 0
                     & $generatorScript @handoffParams
-                    if ($LASTEXITCODE -eq 2) {
-                        # The generator refuses with exit 2 (I11); a refusal must not read as a written handoff.
+                    if ($LASTEXITCODE -ne 0) {
+                        [Console]::Error.WriteLine("Rework handoff generation failed for $TaskId (exit $LASTEXITCODE). The rejection is already recorded and task/$TaskId restored. Rework handoff generation did not complete successfully. Fix the generator failure, then run: $(Get-HumanGateReworkRecoveryCommand -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff) (do not reject again).")
                         exit 2
                     }
                 }

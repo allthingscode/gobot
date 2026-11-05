@@ -264,6 +264,7 @@ if ($NewHandoff) {
     if ($HumanDeferred.Count -gt 0) { $genParams.HumanDeferred = [string[]]$HumanDeferred }
     if ($HumanRejected.Count -gt 0) { $genParams.HumanRejected = [string[]]$HumanRejected }
 
+    $global:LASTEXITCODE = 0
     & $generatorScript @genParams
     exit $LASTEXITCODE
 }

@@ -54,6 +54,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 . (Join-Path $PSScriptRoot "lib/project-root.ps1")
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
@@ -259,7 +263,7 @@ if ($Rebaseline) {
         superseded               = $rebaselineFile.Name
         cumulative_handoff_count = $rebaselineObj.cumulative_handoff_count
     } | ConvertTo-Json
-    return
+    exit 0
 }
 
 $latest = Get-LatestActiveHandoffForTask -HandoffDir $handoffDir -Task $TaskId
@@ -565,3 +569,4 @@ Write-ValidatedHandoff -Payload $payload -Path $resolvedOutputPath
 } finally {
     Pop-Location
 }
+exit 0

@@ -1,8 +1,10 @@
-# Item 261 phases 1 and 2: each refusal runs inside a .ps1 caller's catch under Stop.
+# Item 261 phases 1, 2 and 3a: refusals run inside a caller's catch under Stop.
 # Invoked scripts return a nonzero LASTEXITCODE; dot-sourced libraries terminate
 # the hosting script. Neither boundary permits a catch to swallow the refusal.
 # Dependency stubs select otherwise difficult failure paths; the boundary code is
 # copied unchanged. Existing gate and runner suites cover the real dependencies.
+param([string[]]$Kind = @())
+
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '_harness.ps1')
 $source = Join-Path $PSScriptRoot '..'
@@ -19,6 +21,38 @@ function Write-FixtureText {
 $helpers = @('config-helpers', 'task-checklist', 'time', 'crucible-context', 'event-log',
     'blocked', 'handoff', 'worktree', 'pipeline-dag', 'crucible-gates', 'session-output', 'task-rewind')
 $cases = @(
+    foreach ($pair in @(
+        @('backlog-dir', 'Backlog directory not found'),
+        @('backlog-file', 'BACKLOG.md not found'),
+        @('validator-missing', 'Validator not found'),
+        @('validator-exit', 'Schema validation failed'),
+        @('rebaseline-extra', 'takes no other handoff fields'),
+        @('rebaseline-base', 'needs -BaseCommit'),
+        @('rebaseline-empty', 'No active handoff'),
+        @('rebaseline-commit', 'does not name a commit'),
+        @('rebaseline-same', 'already based on'),
+        @('rebaseline-ancestor', 'does not descend'),
+        @('rebaseline-collision', 'already exists'),
+        @('commit', 'does not name a commit'),
+        @('suspicious', 'reads as'),
+        @('artifacts', 'Artifacts entry contains a quote'),
+        @('affinity', 'FileAffinity entry contains a quote'),
+        @('scope', 'is not covered by')
+    )) { @{ Kind = 'handoff'; Name = $pair[0]; Expected = $pair[1] } }
+    foreach ($pair in @(
+        @('helper', 'Required helper script not found'),
+        @('terminal', 'Cannot derive a terminal status'),
+        @('frontmatter', 'missing YAML frontmatter'),
+        @('row', 'does not contain active spec row'),
+        @('collision', 'Archived spec already exists'),
+        @('rollback', 'ARCHIVE_SUMMARY_FAILURE')
+    )) { @{ Kind = 'archive'; Name = $pair[0]; Expected = $pair[1] } }
+    foreach ($name in @('cli', 'merge', 'reject', 'research-runner')) {
+        @{ Kind = 'handoff-caller'; Name = $name; Expected = 'HANDOFF_FAILURE|handoff.*refused|handoff generation failed' }
+    }
+    foreach ($name in @('completion', 'restore', 'legacy-abandon', 'accept')) {
+        @{ Kind = 'archive-gate'; Name = $name; Expected = 'ARCHIVE_FAILURE|missing YAML frontmatter|Auto-finalization failed' }
+    }
     foreach ($helper in @('instruction-blocks', 'language-presets', 'config-helpers', 'install-manifest')) {
         @{ Kind = 'init'; Name = "helper-$helper"; Expected = ('Required helper script not found at .*' + $helper + '\.ps1') }
     }
@@ -83,6 +117,7 @@ $cases = @(
         @('no-checks', 'configures no verification.full checks')
     )) { @{ Kind = 'runner'; Name = $pair[0]; Expected = $pair[1] } }
 )
+if ($Kind.Count -gt 0) { $cases = @($cases | Where-Object { $_.Kind -in $Kind }) }
 
 try {
     foreach ($case in $cases) {
@@ -93,6 +128,189 @@ try {
             $setup = ''
             $call = ''
             switch ($case.Kind) {
+                'handoff' {
+                    Copy-Item -LiteralPath (Join-Path $source 'new-handoff.ps1') -Destination $root
+                    Write-FixtureText (Join-Path $lib 'project-root.ps1') 'function Resolve-CrucibleProjectRoot { param($ProjectRoot) $ProjectRoot }'
+                    Write-FixtureText (Join-Path $root 'crucible-lib.ps1') @'
+function Get-ConfiguredPath { param($Key) Join-Path $REPO_ROOT $Key }
+function Test-BacklogTaskRow { $true }
+function Resolve-FilesystemPath { param($Path) $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) }
+function Sort-HandoffFiles { param($Files) $Files }
+function Get-SpecBudgetTier { '' }
+function Get-ConfiguredPrimaryBranch { 'main' }
+function Resolve-ImplementationWorktreePath { Join-Path $REPO_ROOT 'worktree' }
+function Normalize-HandoffArtifactPaths { param($Artifacts) $Artifacts }
+function Get-BacklogItemPathForTaskProjectRoot { Join-Path $REPO_ROOT 'spec.md' }
+function Get-SpecFrontmatterAffinity { 'src/' }
+function Get-AffinityWidening { if ($scenario -eq 'scope') { 'outside/' } else { @() } }
+function ConvertTo-AsciiSafeText { param($Text) $Text }
+function Get-UtcFileTimestamp { 'fixture' }
+function Get-UtcTimestamp { 'fixture' }
+function git {
+    $global:LASTEXITCODE = 0
+    $argsText = $args -join ' '
+    if ($argsText -match 'merge-base') {
+        if ($scenario -eq 'rebaseline-ancestor') { $global:LASTEXITCODE = 1 }
+    } elseif ($argsText -match 'show-ref|rev-parse main') {
+        $global:LASTEXITCODE = 7
+    } elseif ($scenario -in @('commit', 'rebaseline-commit')) {
+        $global:LASTEXITCODE = 1
+    } else { 'new-base' }
+}
+'@
+                    Write-FixtureText (Join-Path $root 'backlog/BACKLOG.md') '| F-261 | Ready |'
+                    Write-FixtureText (Join-Path $root 'spec.md') 'fixture'
+                    Write-FixtureText (Join-Path $root '.git') 'fixture marker'
+                    Write-FixtureText (Join-Path $root 'validate-handoff.ps1') @'
+param($HandoffFile, $SchemaPath)
+if ($scenario -eq 'validator-exit') { 'INVALID_HANDOFF'; exit 7 }
+exit 0
+'@
+                    $extra = switch ($case.Name) {
+                        'backlog-dir' { Remove-Item (Join-Path $root 'backlog') -Recurse -Force }
+                        'backlog-file' { Remove-Item (Join-Path $root 'backlog/BACKLOG.md') -Force }
+                        'validator-missing' { Remove-Item (Join-Path $root 'validate-handoff.ps1') -Force }
+                        'commit' { '-CommitHash invalid' }
+                        'suspicious' { '-SuspiciousContent none' }
+                        'artifacts' { '-Artifacts "''quoted''"' }
+                        'affinity' { '-FileAffinity "''quoted''"' }
+                        default { '' }
+                    }
+                    if ($case.Name.StartsWith('rebaseline-')) {
+                        $oldBase = if ($case.Name -eq 'rebaseline-same') { 'new-base' } else { 'old-base' }
+                        if ($case.Name -ne 'rebaseline-empty') {
+                            Write-FixtureText (Join-Path $root 'session/handoffs/F-261-old.json') ('{"source_phase":"deployment","target_phase":"done","base_commit":"' + $oldBase + '","cumulative_handoff_count":3}')
+                        }
+                        $extra = '-Rebaseline -BaseCommit fixture'
+                        if ($case.Name -eq 'rebaseline-extra') { $extra += ' -Artifacts extra' }
+                        if ($case.Name -eq 'rebaseline-base') { $extra = '-Rebaseline' }
+                        if ($case.Name -eq 'rebaseline-collision') { Write-FixtureText (Join-Path $root 'output.json') 'existing' }
+                    } else {
+                        $extra = '-Source grooming -Target implementation -Reason fixture ' + $extra
+                    }
+                    $setup = "`$scenario = '$($case.Name)'"
+                    $call = "& './new-handoff.ps1' -TaskId F-261 -ProjectRoot `$PSScriptRoot -OutputPath './output.json' $extra"
+                }
+                'archive' {
+                    Copy-TestRunnerLibraries -Destination $lib
+                    Copy-Item -LiteralPath (Join-Path $source 'archive-task.ps1') -Destination $root
+                    Write-FixtureText (Join-Path $root 'backlog/features/active/F-261.md') "---`nitem_id: F-261`ntype: feature`nstatus: Ready`npriority: P1`n---`n"
+                    Write-FixtureText (Join-Path $root 'backlog/BACKLOG.md') "| ID | Status |`n|---|---|`n| [F-261](features/active/F-261.md) | Ready |`n"
+                    switch ($case.Name) {
+                        'helper' { Remove-Item (Join-Path $lib 'archive-task.ps1') -Force }
+                        'frontmatter' { Write-FixtureText (Join-Path $root 'backlog/features/active/F-261.md') 'no frontmatter' }
+                        'row' { Write-FixtureText (Join-Path $root 'backlog/BACKLOG.md') 'no row' }
+                        'collision' { Write-FixtureText (Join-Path $root 'backlog/features/archived/F-261.md') 'existing' }
+                        'rollback' {
+                            # Keep the real archive and rollback, injecting only its final write failure.
+                            $archiveLib = Join-Path $lib 'archive-task.ps1'
+                            Write-FixtureText $archiveLib ([IO.File]::ReadAllText($archiveLib) + "`nfunction Update-BacklogPrioritySummary { throw 'ARCHIVE_SUMMARY_FAILURE' }`n")
+                        }
+                    }
+                    $call = "& './archive-task.ps1' -BacklogPath './backlog/BACKLOG.md' -SpecPath './backlog/features/active/F-261.md'"
+                    if ($case.Name -ne 'terminal') { $call += ' -Status Resolved' }
+                }
+                'handoff-caller' {
+                    Copy-TestRunnerLibraries -Destination $lib
+                    Write-FixtureText (Join-Path $root 'new-handoff.ps1') @'
+# No success exit deliberately: exercise the caller's reset under StrictMode.
+if ($handoffExit -ne 0) { [Console]::Error.WriteLine('HANDOFF_FAILURE'); exit $handoffExit }
+'@
+                    Write-FixtureText (Join-Path $root 'backlog/BACKLOG.md') '| F-261 | Ready |'
+                    Write-FixtureText (Join-Path $root 'F-261-decision.json') '{}'
+                    $setup = @'
+Set-StrictMode -Version Latest
+. './lib/crucible-gates.ps1'
+function Write-Quiet {}
+function Write-EventLog {}
+function Test-GitDiscardSafe { $true }
+function Invoke-GitChecked {
+    param($Command)
+    $global:LASTEXITCODE = if ($Command.ToString() -match 'merge --no-ff|show-ref') { 1 } else { 0 }
+}
+function Invoke-Git { [pscustomobject]@{ ExitCode = 1; Lines = @() } }
+function Get-ConfiguredPath { param($Key) Join-Path $PSScriptRoot $Key }
+function Resolve-ImplementationWorktreePath { Join-Path $PSScriptRoot 'worktree' }
+function Resolve-ConfigProjectRoot { $PSScriptRoot }
+function Get-HumanGateRejectUnwind { @{ CurrentHead = 'head'; ParentList = @(); HeadIsTaskMerge = $false; UnwindTarget = '' } }
+function Assert-HumanGateReworkAvailable {}
+function Restore-BacklogTask {}
+function Restore-ImplementationWorktree {}
+function Test-BacklogTaskRow { $true }
+function Get-ConfiguredPrimaryBranch { 'main' }
+$handoffExit = 7
+'@
+                    # Success and failure share the unchanged production caller. Success runs
+                    # first under StrictMode, with stale status 7 supplied by the fixture.
+                    $invoke = switch ($case.Name) {
+                        'research-runner' {
+                            $generatorAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'new-handoff.ps1'), [ref]$null, [ref]$null)
+                            Write-FixtureText (Join-Path $root '.crucible/powershell/new-handoff.ps1') ($generatorAst.ParamBlock.Extent.Text + "`n" + [IO.File]::ReadAllText((Join-Path $root 'new-handoff.ps1')))
+                            Write-FixtureText (Join-Path $root '.crucible/config.yaml') "project: fixture`n"
+                            New-Item -ItemType Directory -Path (Join-Path $root '.crucible/session/F-261/research') -Force | Out-Null
+                            $recordScript = (Join-Path $source 'record-research-gate.ps1').Replace("'", "''")
+                            $setup += "`n& '$recordScript' -TaskId F-261 -Reason fixture -Approved B-261 -ProjectRoot `$PSScriptRoot"
+                            "& './.crucible/session/F-261/research/gate-handoff.ps1'"
+                        }
+                        'merge' { "Invoke-HumanGateMerge -TaskId F-261 -PrimaryBranch main -ProjectRoot `$PSScriptRoot -LogFile unused -CircuitBreakerHistoryFile unused -DecisionRecordPath './F-261-decision.json'" }
+                        'reject' { "Invoke-HumanGateRejectAbandon -TaskId F-261 -Outcome rejected -PrimaryBranch main -ProjectRoot `$PSScriptRoot" }
+                        'cli' {
+                            Copy-Item (Join-Path $source 'crucible.ps1') $root
+                            Write-FixtureText (Join-Path $root 'crucible-lib.ps1') ''
+                            Write-FixtureText (Join-Path $lib 'config-helpers.ps1') 'function Get-ConfiguredCrucibleRootValue { "" }'
+                            Write-FixtureText (Join-Path $lib 'project-root.ps1') 'function Resolve-CrucibleProjectRoot { param($ProjectRoot) $ProjectRoot }'
+                            "& './crucible.ps1' -NewHandoff -TaskId F-261 -HandoffSource grooming -HandoffTarget implementation -HandoffReason fixture -ProjectRoot `$PSScriptRoot -Quiet"
+                        }
+                    }
+                    $call = @"
+`$handoffExit = 0
+`$global:LASTEXITCODE = 7
+$invoke
+$(if ($case.Name -in @('cli', 'research-runner')) { "if (`$LASTEXITCODE -ne 0) { throw 'SUCCESS_STATUS_STALE' }" })
+Write-Host 'CALLER_SUCCESS'
+Set-Content -LiteralPath './F-261-decision.json' -Value '{}'
+`$handoffExit = 7
+$invoke
+"@
+                }
+                'archive-gate' {
+                    Copy-TestRunnerLibraries -Destination $lib
+                    Write-FixtureText (Join-Path $root 'active/F-261.md') 'no frontmatter'
+                    Write-FixtureText (Join-Path $root 'global/gate_decisions/F-261-fixture.json') '{"outcome":"accepted"}'
+                    $setup = @'
+. './lib/crucible-gates.ps1'
+. './lib/archive-task.ps1'
+function Write-Quiet {}
+function Get-ConfiguredPrimaryBranch { 'main' }
+function Resolve-ConfigProjectRoot { $PSScriptRoot }
+function Get-ConfiguredPath { $PSScriptRoot }
+function Get-BacklogItemPathForTaskProjectRoot { Join-Path $PSScriptRoot 'active/F-261.md' }
+function Test-DeploymentReworkReentry { $false }
+function Get-PipelineValidTransitions { @{ grooming = @('done') } }
+function Get-TaskFinalizationDetails { @{ IsFinalized = $false } }
+function Invoke-BacklogTaskArchive { throw 'ARCHIVE_FAILURE' }
+function Test-GitDiscardSafe { $true }
+function Invoke-GitChecked {}
+function Get-HumanGateRejectUnwind { @{ CurrentHead = 'head'; ParentList = @(); HeadIsTaskMerge = $false; UnwindTarget = '' } }
+function Assert-HumanGateReworkAvailable {}
+function Restore-BacklogTask { Set-BacklogSpecFrontmatterStatus -Path './active/F-261.md' -Status 'In Progress' }
+function Invoke-AbandonedBacklogTaskArchive { Set-BacklogSpecFrontmatterStatus -Path './active/F-261.md' -Status Abandoned }
+function Invoke-HumanGateBacklogFinalization { $false }
+function Write-EventLog {}
+function git { $global:LASTEXITCODE = 1 }
+$context = @{
+    Handoff = [pscustomobject]@{ task_id = 'F-261'; source_phase = 'grooming'; target_phase = 'done' }
+    IsBootstrap = $false; SessionDir = $PSScriptRoot; HandoffDir = ''; FrameworkPowerShell = $PSScriptRoot
+    NextCrucibleCommand = ''; Quiet = $true; LogFile = 'unused'; CircuitBreakerHistoryFile = 'unused'; RepoRoot = $PSScriptRoot
+}
+'@
+                    $call = if ($case.Name -eq 'completion') { 'Resolve-CrucibleTransition -Context $context' } elseif ($case.Name -eq 'accept') {
+                        'Invoke-HumanGateAcceptRedirect -TaskId F-261 -Outcome accepted -SourcePhase grooming -PrimaryBranch main -ProjectRoot $PSScriptRoot -LogFile unused -CircuitBreakerHistoryFile unused'
+                    } else {
+                        $outcome = if ($case.Name -eq 'restore') { 'rejected' } else { 'abandoned' }
+                        "Invoke-HumanGateRejectAbandon -TaskId F-261 -Outcome $outcome -PrimaryBranch main -ProjectRoot `$PSScriptRoot"
+                    }
+                }
                 'init' {
                     $framework = Join-Path $root 'source'
                     $scripts = Join-Path $framework 'powershell'
@@ -355,7 +573,7 @@ function Invoke-Git {
                 }
             }
             $child = Join-Path $root 'caller.ps1'
-            $isCommand = $case.Kind -in @('bootstrap', 'entry', 'research', 'runner', 'init', 'hooks', 'state')
+            $isCommand = $case.Kind -in @('bootstrap', 'entry', 'research', 'runner', 'init', 'hooks', 'state', 'handoff', 'archive') -or ($case.Kind -eq 'handoff-caller' -and $case.Name -in @('cli', 'research-runner'))
             # A .ps1 caller may continue after & script.ps1. Record the status
             # immediately and propagate it to the child process's own exit.
             $afterCall = if ($isCommand) {
@@ -417,6 +635,53 @@ $afterCall
                 Assert-Result 'no success or event after failed update' ($res.Output -notmatch 'Pipeline Complete|EVENT_AFTER_UPDATE') $evidence
             }
             Assert-Result 'refusal identifies the selected path on stderr' ($diagnostic -match $case.Expected) $evidence
+            if ($case.Kind -eq 'handoff-caller') {
+                Assert-Result 'caller success works under StrictMode' ($res.Output -match 'CALLER_SUCCESS') $evidence
+            }
+            if ($case.Kind -eq 'handoff' -and $case.Name -in @('validator-missing', 'validator-exit')) {
+                Assert-Result 'failed validation removes temporary output' (-not (Test-Path (Join-Path $root 'output.json.tmp'))) $evidence
+            }
+            if ($case.Kind -eq 'archive' -and $case.Name -eq 'rollback') {
+                Assert-Result 'rollback restores active spec and row' (([IO.File]::ReadAllText((Join-Path $root 'backlog/features/active/F-261.md')) -match 'status: Ready') -and ([IO.File]::ReadAllText((Join-Path $root 'backlog/BACKLOG.md')) -match '/active/') -and -not (Test-Path (Join-Path $root 'backlog/features/archived/F-261.md'))) $evidence
+            }
+            if ($case.Kind -eq 'handoff' -and $case.Name -eq 'validator-exit') {
+                # Both command success paths must reset status, even when a native
+                # probe or embedding caller left a nonzero value under StrictMode.
+                foreach ($mode in @('transition', 'rebaseline')) {
+                    if ($mode -eq 'rebaseline') {
+                        Write-FixtureText (Join-Path $root 'session/handoffs/F-261-old.json') '{"source_phase":"deployment","target_phase":"done","base_commit":"old-base","cumulative_handoff_count":3}'
+                        Remove-Item (Join-Path $root 'output.json') -Force
+                    }
+                    $successCall = if ($mode -eq 'transition') {
+                        "& './new-handoff.ps1' -TaskId F-261 -Source grooming -Target implementation -Reason fixture -ProjectRoot `$PSScriptRoot -OutputPath './output.json'"
+                    } else {
+                        "& './new-handoff.ps1' -TaskId F-261 -Rebaseline -BaseCommit fixture -ProjectRoot `$PSScriptRoot -OutputPath './output.json'"
+                    }
+                    Write-FixtureText $child @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+Set-Location `$PSScriptRoot
+`$scenario = 'success'
+`$global:LASTEXITCODE = 7
+$successCall
+exit `$LASTEXITCODE
+"@
+                    $success = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $child 2>$stderr }
+                    Assert-Result "$mode succeeds under StrictMode" ($success.ExitCode -eq 0) ($success.Output + [IO.File]::ReadAllText($stderr))
+                }
+            }
+            if ($case.Kind -eq 'archive' -and $case.Name -eq 'terminal') {
+                Write-FixtureText $child @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+Set-Location $PSScriptRoot
+$global:LASTEXITCODE = 7
+& './archive-task.ps1' -BacklogPath './backlog/BACKLOG.md' -SpecPath './backlog/features/active/F-261.md' -Status Resolved
+exit $LASTEXITCODE
+'@
+                $success = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $child 2>$stderr }
+                Assert-Result 'archive succeeds under StrictMode with stale status' ($success.ExitCode -eq 0) ($success.Output + [IO.File]::ReadAllText($stderr))
+            }
             if ($case.Kind -eq 'state' -and $case.Name -eq 'update') {
                 Assert-Result 'failed update releases its lock' (-not (Test-Path -LiteralPath (Join-Path $root 'session/global/session_state.lock'))) $evidence
             }

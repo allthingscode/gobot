@@ -1764,7 +1764,12 @@ function Resolve-CrucibleTransition {
                         }
                     }
                     
-                    $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath -Status Resolved
+                    try {
+                        $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath -Status Resolved
+                    } catch {
+                        [Console]::Error.WriteLine("Grooming auto-finalization failed for $($handoff.task_id): " + $_.Exception.Message)
+                        exit 1
+                    }
                     Write-Host ("[D49] SUCCESS: Auto-archived task as {0} (status {1}): {2}" -f $archiveResult.Type, $archiveResult.Status, $archiveResult.ArchivedRelPath) -ForegroundColor Green
                 }
             }

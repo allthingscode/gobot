@@ -6,7 +6,7 @@ $REPO_ROOT = (Resolve-Path "$PSScriptRoot/../..").Path
 $results = @()
 $root = New-TestFixtureRoot -NameHint 'human-gate-rework'
 try {
-    foreach ($case in @('prefix', 'mention', 'missing', 'read-error', 'late-read-error', 'late-missing-row', 'plain', 'linked')) {
+    foreach ($case in @('prefix', 'mention', 'missing', 'read-error', 'late-read-error', 'late-missing-row', 'backlog-failure-merge', 'backlog-failure-tip', 'restore-failure-merge', 'restore-failure-tip', 'unrelated-merge', 'generator-failure', 'plain', 'linked')) {
         $results += Run-Test -Name "Rework exact backlog ID: $case" -Body {
             $dir = Join-Path $root $case
             $lib = Join-Path $dir 'powershell/lib'
@@ -15,7 +15,7 @@ try {
             $row = switch ($case) {
                 { $_ -in @('prefix', 'late-missing-row') } { '| F-10 | In Progress | Other task |' }
                 'mention' { '| F-20 | In Progress | Replaces F-1 |' }
-                { $_ -in @('plain', 'late-read-error') } { '| F-1 | In Progress | Task |' }
+                { $_ -in @('plain', 'late-read-error', 'backlog-failure-merge', 'backlog-failure-tip', 'restore-failure-merge', 'restore-failure-tip', 'unrelated-merge', 'generator-failure') } { '| F-1 | In Progress | Task |' }
                 'linked' { '| [F-1](features/active/F-1_task.md) | In Progress | Task |' }
             }
             if ($case -eq 'late-missing-row') {
@@ -31,11 +31,16 @@ try {
             # gate suite, and the generator records whether it was called at all.
             'param($TaskId, $Source, $Target, $Reason, $ReviewStrikeCount, $RebaseCount, $ProjectRoot, $SessionCycleId, $Artifacts); Set-Content -LiteralPath (Join-Path $PSScriptRoot "../generated.txt") -Value $TaskId' |
                 Set-Content -LiteralPath (Join-Path $dir 'powershell/new-handoff.ps1') -Encoding utf8NoBOM
+            if ($case -eq 'generator-failure') {
+                'param($TaskId, $Source, $Target, $Reason, $ReviewStrikeCount, $RebaseCount, $ProjectRoot, $SessionCycleId, $Artifacts); exit 7' |
+                    Set-Content -LiteralPath (Join-Path $dir 'powershell/new-handoff.ps1') -Encoding utf8NoBOM
+            }
             $runner = @'
 param($Root, $Framework, $Case)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $Framework 'powershell/lib/backlog-io.ps1')
 . (Join-Path $Root 'powershell/lib/crucible-gates-human.ps1')
+$realGitChecked = (Get-Item Function:Invoke-GitChecked).ScriptBlock
 function Get-HumanGateRejectUnwind { @{ CurrentHead = 'tip'; ParentList = @(); HeadIsTaskMerge = $false; UnwindTarget = '' } }
 function Test-GitDiscardSafe { $true }
 function Invoke-GitChecked { $global:LASTEXITCODE = 0 }
@@ -43,6 +48,41 @@ function Restore-BacklogTask {}
 function Restore-ImplementationWorktree {}
 function Get-ConfiguredPath { $Root }
 function Write-Quiet { param($Message) Write-Host $Message }
+if ($Case -like 'backlog-failure-*') {
+    function Get-HumanGateRejectUnwind {
+        @{ CurrentHead = ('a' * 40); ParentList = $(if ($Case -eq 'backlog-failure-merge') { @('base', ('b' * 40)) } else { @() }); HeadIsTaskMerge = ($Case -eq 'backlog-failure-merge'); UnwindTarget = 'base' }
+    }
+    function Invoke-GitChecked { param($Command) & $Command }
+    function git {
+        Add-Content -LiteralPath (Join-Path $Root 'git-actions.txt') -Value ($args -join ' ')
+        $global:LASTEXITCODE = if ($args -contains 'show-ref') { 1 } else { 0 }
+    }
+    function Restore-BacklogTask {
+        Add-Content -LiteralPath (Join-Path $Root 'git-actions.txt') -Value 'BACKLOG_FAILURE'
+        throw 'injected backlog update failure'
+    }
+    function Restore-ImplementationWorktree { throw 'worktree must not restore after backlog failure' }
+}
+if ($Case -like 'restore-failure-*' -or $Case -eq 'unrelated-merge') {
+    # Exercise the real wrapper: it reports git errors with Continue and does not throw.
+    Set-Item Function:Invoke-GitChecked -Value $realGitChecked
+    if ($Case -eq 'restore-failure-tip') { $ErrorActionPreference = 'Continue' }
+    function Get-HumanGateRejectUnwind {
+        @{ CurrentHead = ('a' * 40); ParentList = $(if ($Case -ne 'restore-failure-tip') { @('base', ('b' * 40)) } else { @() }); HeadIsTaskMerge = ($Case -eq 'restore-failure-merge'); UnwindTarget = 'base' }
+    }
+    function git {
+        Add-Content -LiteralPath (Join-Path $Root 'git-actions.txt') -Value ($args -join ' ')
+        $global:LASTEXITCODE = 0
+        if ($args -contains 'show-ref') { $global:LASTEXITCODE = 1 }
+        if ($args -contains 'branch') {
+            Write-Error 'injected ref lock failure' -ErrorAction Continue
+            $global:LASTEXITCODE = 128
+        }
+    }
+    function Restore-BacklogTask {
+        Add-Content -LiteralPath (Join-Path $Root 'git-actions.txt') -Value 'BACKLOG_UPDATE'
+    }
+}
 if ($Case -eq 'late-read-error') {
     $ErrorActionPreference = 'Continue'
     $global:backlogReads = 0
@@ -72,12 +112,33 @@ exit 0
             $script = Join-Path $dir 'run.ps1'
             Set-Content -LiteralPath $script -Value $runner -Encoding utf8NoBOM
             $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $script $dir $REPO_ROOT $case }
-            if ($case -in @('late-read-error', 'late-missing-row')) {
+            if ($case -in @('late-read-error', 'late-missing-row', 'generator-failure')) {
                 Assert-Result -Name 'late refusal prints the recovery command with the incremented strike count' -Condition ($run.Output -match "new-handoff\.ps1'" -and $run.Output -match "-ReviewStrikeCount '3'" -and $run.Output -match '-ProjectRoot ' -and $run.Output -match "-SessionCycleId 'cycle-7'" -and $run.Output -match 'already recorded and task/F-1 restored') -FailureMessage $run.Output
                 Assert-Result -Name 'late refusal does not tell the human to reject again' -Condition ($run.Output -notmatch 'then reject again' -and $run.Output -match 'do not reject again') -FailureMessage $run.Output
             }
             if ($case -eq 'late-read-error') {
                 Assert-Result -Name 'late read error names the state it leaves and a remedy' -Condition ($run.Output -match 'injected late read error' -and $run.Output -match 'already recorded and task/F-1 restored' -and $run.Output -match "& '[^']*new-handoff\.ps1' -TaskId 'F-1'" -and $run.Output -match 'do not reject again' -and $run.Output -notmatch 'then reject again') -FailureMessage $run.Output
+            }
+            if ($case -like 'backlog-failure-*') {
+                $tip = if ($case -eq 'backlog-failure-merge') { 'b' * 40 } else { 'a' * 40 }
+                $actions = Get-Content -LiteralPath (Join-Path $dir 'git-actions.txt') -Raw
+                $expectedState = if ($case -eq 'backlog-failure-merge') { 'main was reset to base' } else { 'main was left untouched' }
+                Assert-Result -Name "$case preserves the correct task tip before the backlog failure" -Condition ($actions -match ("branch task/F-1 " + $tip + "\r?\nBACKLOG_FAILURE") -and $run.Output -match 'Restored task branch task/F-1') -FailureMessage ($actions + $run.Output)
+                Assert-Result -Name "$case explains state and gives exact branch and handoff recovery" -Condition ($run.Output -match 'injected backlog update failure' -and $run.Output -match $expectedState -and $run.Output -match 'rejection is already recorded' -and $run.Output -match ("git -C '[^']+' branch 'task/F-1' '" + $tip + "'") -and $run.Output -match "new-handoff\.ps1'" -and $run.Output -match "-ReviewStrikeCount '3'" -and $run.Output -match 'To generate the rework handoff' -and $run.Output -notmatch 'pre-reset task tip|restore the implementation worktree' -and $run.Output -match 'do not reject again' -and $run.Output -notmatch 'CALLER_CONTINUED|Caller caught') -FailureMessage $run.Output
+                Assert-Result -Name "$case retains exit 1" -Condition ($run.ExitCode -eq 1) -FailureMessage $run.Output
+            }
+            if ($case -like 'restore-failure-*' -or $case -eq 'unrelated-merge') {
+                $actions = Get-Content -LiteralPath (Join-Path $dir 'git-actions.txt') -Raw
+                Assert-Result -Name "$case stops unconditionally before backlog update" -Condition ($run.ExitCode -ne 0 -and $actions -notmatch 'BACKLOG_UPDATE' -and $run.Output -notmatch 'Restored task branch|CALLER_CONTINUED|Caller caught') -FailureMessage ($actions + $run.Output)
+                if ($case -eq 'unrelated-merge') {
+                    Assert-Result -Name 'unrelated merge never supplies another task second parent' -Condition ($actions -notmatch 'branch task/F-1' -and $run.Output -match 'verify.*git reflog' -and $run.Output -match 'do not reject again') -FailureMessage ($actions + $run.Output)
+                } else {
+                    $tip = if ($case -eq 'restore-failure-merge') { 'b' * 40 } else { 'a' * 40 }
+                    Assert-Result -Name "$case names the exact manual branch command" -Condition ($run.Output -match 'injected ref lock failure' -and $run.Output -match ("git -C '[^']+' branch 'task/F-1' '" + $tip + "'") -and $run.Output -match 'do not reject again') -FailureMessage $run.Output
+                }
+            }
+            if ($case -eq 'generator-failure') {
+                Assert-Result -Name 'generator failure names the child exit and retry remedy' -Condition ($run.ExitCode -eq 2 -and $run.Output -match 'Rework handoff generation failed for F-1 \(exit 7\)' -and $run.Output -match 'Fix the generator failure, then run:' -and $run.Output -notmatch 'CALLER_CONTINUED|Caller caught') -FailureMessage $run.Output
             }
             if ($case -eq 'read-error') {
                 Assert-Result -Name 'read error is diagnosed under Continue preference' -Condition ($run.Output -match 'Cannot read backlog for rework of F-1:.*injected backlog read error' -and $run.Output -notmatch 'no exact ID row') -FailureMessage $run.Output
@@ -89,7 +150,7 @@ exit 0
                 Assert-Result -Name 'late missing row names the absent exact row' -Condition ($run.Output -match 'F-1 has no exact ID row' -and $run.Output -notmatch 'CALLER_CONTINUED') -FailureMessage $run.Output
             } elseif ($case -eq 'missing') {
                 Assert-Result -Name 'missing refusal names absent backlog file' -Condition ($run.Output -match 'Backlog file .* is missing' -and $run.Output -notmatch 'no exact ID row|CALLER_CONTINUED') -FailureMessage $run.Output
-            } elseif (-not $present -and $case -notin @('read-error', 'late-read-error', 'late-missing-row')) {
+            } elseif (-not $present -and $case -notin @('read-error', 'late-read-error', 'late-missing-row', 'backlog-failure-merge', 'backlog-failure-tip', 'restore-failure-merge', 'restore-failure-tip', 'unrelated-merge', 'generator-failure')) {
                 Assert-Result -Name "$case refusal names missing exact row" -Condition ($run.Output -match 'F-1 has no exact ID row' -and $run.Output -notmatch 'CALLER_CONTINUED') -FailureMessage $run.Output
             }
         }

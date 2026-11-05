@@ -154,11 +154,18 @@ function Invoke-DeploymentDoneHandoff {
         $handoffArgs["CommitHash"] = $CommitHash
     }
 
+    $savedError = [Console]::Error
+    $diagnostics = [IO.StringWriter]::new()
     try {
+        [Console]::SetError($diagnostics)
+        $global:LASTEXITCODE = 0
         $output = Invoke-ExternalCommand -AsLines { & $generator @handoffArgs 2>&1 }
-        return @{ Ok = $true; Output = (@($output) -join ([string][char]10)) }
+        return @{ Ok = ($LASTEXITCODE -eq 0); Output = (@($output) -join ([string][char]10)) + $diagnostics.ToString() }
     } catch {
         return @{ Ok = $false; Output = $_.Exception.Message }
+    } finally {
+        [Console]::SetError($savedError)
+        $diagnostics.Dispose()
     }
 }
 

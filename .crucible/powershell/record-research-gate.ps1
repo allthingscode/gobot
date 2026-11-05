@@ -260,10 +260,11 @@ $gateFilingPath = Join-Path $researchSessionDir "gate-filing.md"
 $runnerExit = if ($handoffCommand.StartsWith("# (command unavailable: ")) {
     "[Console]::Error.WriteLine(" + (ConvertTo-CrucibleCommandPowerShellLiteral -Value ("The research gate handoff " + $handoffCommand.Substring(2) + ". Record the gate again with a reason it can carry.")) + ")`nexit 2"
 } else {
-    "if (-not `$?) { if (`$LASTEXITCODE -gt 0) { exit `$LASTEXITCODE }; exit 1 }"
+    "if (-not `$? -or `$LASTEXITCODE -ne 0) { if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }; exit 1 }; exit 0"
 }
 $handoffRunner = @(
     "# generated_by: record-research-gate.ps1. Run with pwsh -File from the project root.",
+    '$global:LASTEXITCODE = 0',
     $handoffCommand,
     $runnerExit
 ) -join "`n"

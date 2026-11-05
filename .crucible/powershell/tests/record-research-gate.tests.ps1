@@ -257,7 +257,7 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
         }
         $runnerPath = Join-Path (Split-Path -Parent $p.GateFiling) "gate-handoff.ps1"
         $runner = @([IO.File]::ReadAllText($runnerPath) -split "`n")
-        Assert-Result "the reading copy is the command the runner holds" ($steps.Contains("    # " + $runner[1] + "`n")) ($runner -join "`n")
+        Assert-Result "the reading copy is the command the runner holds" ($steps.Contains("    # " + $runner[2] + "`n")) ($runner -join "`n")
 
         # A refused handoff stops the Researcher before Step 4.
         [IO.File]::WriteAllText((Join-Path $bundle "new-handoff.ps1"), ((Get-Content -LiteralPath (Join-Path $bundle "new-handoff.ps1") -Raw) + "`nexit 2`n"), $utf8)
