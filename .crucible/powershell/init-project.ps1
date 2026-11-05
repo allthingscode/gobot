@@ -14,6 +14,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Translate unhandled setup/helper failures at the command boundary. Local
+# recovery (for example optional provenance) keeps its reusable exceptions.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 $REPO_ROOT = Split-Path -Parent $PSScriptRoot
 $templateRoot = Join-Path $REPO_ROOT "templates/project/.crucible"
 
@@ -429,7 +436,11 @@ if (Test-Path -LiteralPath (Join-Path $resolvedProjectRoot ".git")) {
     # -Quiet follows init-project's Quiet. The installer's Write-Host is this
     # process's stdout when we are ourselves a child; an uncaptured caller would
     # otherwise inherit "Success:" as a path.
+    $global:LASTEXITCODE = 0
     & $hookInstaller -Quiet:$Quiet
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installed hook activation failed (exit $LASTEXITCODE)."
+    }
 }
 
 # Item 213: generate the Claude agent definitions a Claude dispatch names. Written from the

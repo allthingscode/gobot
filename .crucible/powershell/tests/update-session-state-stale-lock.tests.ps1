@@ -83,6 +83,28 @@ function Assert-True {
 
 Backup-State
 try {
+    # A successful in-process invocation must define its status under strict mode.
+    foreach ($initialStatus in @('unset', 'stale')) {
+        $caller = Join-Path $tempRoot "strict-success-$initialStatus.ps1"
+        $initialization = if ($initialStatus -eq 'unset') {
+            'Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue'
+        } else { '$global:LASTEXITCODE = 7' }
+        $callerBody = @"
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = 'Stop'
+$initialization
+& '$($scriptUnderTest.Replace("'", "''"))' -Specialist implementation -TaskId F-261 -UpdateJson '{"status":"active"}' -ProjectRoot '$($tempRoot.Replace("'", "''"))'
+if (`$LASTEXITCODE -ne 0) { throw "Unexpected update exit: `$LASTEXITCODE" }
+Write-Host 'CALLER_CONTINUED'
+"@
+        [IO.File]::WriteAllText($caller, $callerBody.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
+        $shell = Get-PwshCommand
+        $r = Invoke-ExternalCommand { & $shell -NoProfile -File $caller 2>&1 }
+        Assert-True -Name "strict caller continues after success ($initialStatus status)" -Cond ($r.ExitCode -eq 0 -and $r.Output -match 'CALLER_CONTINUED') -Detail ("exit=" + $r.ExitCode + " :: " + $r.Output)
+        $saved = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
+        Assert-True -Name "strict caller persisted update ($initialStatus status)" -Cond ($saved.tasks.'F-261'.phases.implementation.status -eq 'active') -Detail 'successful update must be written'
+    }
+
     Write-Host "`nTest 1: Stale lock (>2 min) is auto-removed with [WARN]" -ForegroundColor Cyan
     Set-Content -LiteralPath $LockFile -Value "999999" -Encoding UTF8
     $stale = (Get-Date).AddMinutes(-5)

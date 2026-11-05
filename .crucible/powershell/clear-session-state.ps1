@@ -82,4 +82,6 @@ $IdleJson = $IdleStates[$normalized] | ConvertTo-Json -Compress
 $ScriptPath = Join-Path $PSScriptRoot "update-session-state.ps1"
 
 Write-Host "[CLEANUP] Clearing $normalized session state..." -ForegroundColor Cyan
+$global:LASTEXITCODE = 0
 & $ScriptPath -Specialist $normalized -UpdateJson $IdleJson -Merge:$false -ProjectRoot $resolvedProjectRoot
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

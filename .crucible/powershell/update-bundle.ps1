@@ -551,7 +551,11 @@ function Invoke-UpdateBundle {
         $hookInstaller = Join-Path $adopterCrucibleRoot "powershell/install-hooks.ps1"
         if ((Test-Path -LiteralPath (Join-Path $adopterRootResolved ".git")) -and
             (Test-Path -LiteralPath $hookInstaller -PathType Leaf)) {
+            $global:LASTEXITCODE = 0
             $null = & $hookInstaller
+            if ($LASTEXITCODE -ne 0) {
+                throw "Installed hook activation failed (exit $LASTEXITCODE)."
+            }
         }
     }
 

@@ -22,14 +22,15 @@ param (
 )
 
 if ([string]::IsNullOrEmpty($UpdateJson) -and [string]::IsNullOrEmpty($UpdateJsonFile)) {
-    Write-Error "Either -UpdateJson or -UpdateJsonFile must be provided."
+    [Console]::Error.WriteLine("Either -UpdateJson or -UpdateJsonFile must be provided.")
     exit 1
 }
 
 $ErrorActionPreference = "Stop"
 $helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
 if (-not (Test-Path -LiteralPath $helpersPath)) {
-    throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $helpersPath
 . (Join-Path $PSScriptRoot "lib/time.ps1")
@@ -85,7 +86,7 @@ while ((Get-Date) -lt $StartTime.AddSeconds($MaxWait)) {
 }
 
 if (-not $Acquired) {
-    Write-Error "Lock timeout: Could not acquire lock for $StateFile after $MaxWait seconds."
+    [Console]::Error.WriteLine("Lock timeout: Could not acquire lock for $StateFile after $MaxWait seconds.")
     exit 1
 }
 
@@ -185,10 +186,13 @@ try {
     # so its outcome controls progression and the contract is discoverable. Item 91.
 
 } catch {
-    Write-Error "Failed to update session state: $($_.Exception.Message)"
+    [Console]::Error.WriteLine("Failed to update session state: $($_.Exception.Message)")
+    exit 1
 } finally {
     # --- 3. Release Lock ---
     if ($Acquired) {
         Remove-Item $LockFile -ErrorAction SilentlyContinue
     }
 }
+
+exit 0

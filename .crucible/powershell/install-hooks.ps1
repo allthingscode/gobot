@@ -28,13 +28,15 @@ if (Test-Path -LiteralPath (Join-Path $parentDir ".git")) {
     $repoRoot = $grandParentDir
     $hooksPath = ".crucible/scripts/hooks"
 } else {
-    throw "Not a git repository (missing .git directory)."
+    [Console]::Error.WriteLine("Not a git repository (missing .git directory).")
+    exit 1
 }
 
 # Verify the hooks directory actually exists
 $fullHooksDir = Join-Path $repoRoot $hooksPath
 if (-not (Test-Path -LiteralPath $fullHooksDir)) {
-    throw "Hooks directory not found: $fullHooksDir"
+    [Console]::Error.WriteLine("Hooks directory not found: $fullHooksDir")
+    exit 1
 }
 
 # Configure core.hooksPath in Git
@@ -156,3 +158,4 @@ if (-not $onWindows) {
     Write-InstallInfo "Marked hook scripts executable for this platform." -ForegroundColor Green
 }
 
+exit 0

@@ -1770,12 +1770,17 @@ function Resolve-CrucibleTransition {
             }
         }
 
+        # Update state to remove the completed task
+        $global:LASTEXITCODE = 0
+        & "$FRAMEWORK_POWERSHELL/update-session-state.ps1" -Specialist done -TaskId $handoff.task_id -UpdateJson "{}" -Merge $false -ProjectRoot $repoRoot
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("Could not remove completed task $($handoff.task_id) from session state (exit $LASTEXITCODE).")
+            exit 1
+        }
+
         Write-Host "`n====================================================" -ForegroundColor Green
         Write-Host "Pipeline Complete: Task $($handoff.task_id) is resolved!" -ForegroundColor Green
         Write-Host "====================================================`n" -ForegroundColor Green
-
-        # Update state to remove the completed task
-        & "$FRAMEWORK_POWERSHELL/update-session-state.ps1" -Specialist done -TaskId $handoff.task_id -UpdateJson "{}" -Merge $false -ProjectRoot $repoRoot
 
         # Log session_end/pipeline_complete
         $logPhase = if ($handoff.source_phase -eq "grooming") { "grooming" } else { "deployment" }

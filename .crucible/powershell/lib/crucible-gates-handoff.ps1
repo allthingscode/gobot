@@ -747,7 +747,12 @@ function Normalize-CrucibleInputState {
         # Update state to 'recovering'
         $repoRoot = if ($Context.ContainsKey("RepoRoot")) { $Context.RepoRoot } else { Resolve-ConfigProjectRoot }
         $updateJson = @{ status = "recovering" } | ConvertTo-Json -Compress
+        $global:LASTEXITCODE = 0
         & "$FRAMEWORK_POWERSHELL/update-session-state.ps1" -Specialist $handoff.target_phase -TaskId $handoff.task_id -UpdateJson $updateJson -Merge $true -ProjectRoot $repoRoot
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("Could not register recovery session state for $($handoff.task_id) (exit $LASTEXITCODE).")
+            exit 1
+        }
 
         # Log recovery_start for recoverable sessions.
         Write-EventLog -Event "recovery_start" -TaskId $handoff.task_id -Phase $handoff.target_phase -Notes "Recovering from: $recoveryMarker" `

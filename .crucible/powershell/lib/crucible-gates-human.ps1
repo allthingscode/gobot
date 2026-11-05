@@ -810,7 +810,10 @@ function Invoke-HumanGateAcceptArchival {
     # here (and later invisible to the backlog parser) falls through to "In Progress".
     try {
         $updateStateScript = Join-Path (Split-Path -Parent $PSScriptRoot) "update-session-state.ps1"
+        $global:LASTEXITCODE = 0
         & $updateStateScript -Specialist done -TaskId $TaskId -UpdateJson "{}" -Merge $false -ProjectRoot $ProjectRoot | Out-Null
+        # Archival has completed; pruning remains advisory, with a visible warning.
+        if ($LASTEXITCODE -ne 0) { throw "Session state updater exited $LASTEXITCODE." }
     } catch {
         Write-Quiet ("[HUMAN GATE] Could not prune session state for " + $TaskId + ": " + $_.Exception.Message)
     }

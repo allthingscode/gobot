@@ -56,9 +56,17 @@ function Write-BlockedTaskRecord {
     # Session-state updates are secondary to the blocked record. Warn on failure so
     # an in-process config error under "Stop" cannot replace the refusal or its exit code.
     $updateJson = @{ status = "blocked"; circuit_breaker = $CircuitBreaker } | ConvertTo-Json -Compress
+    $previousConsoleError = [Console]::Error
     try {
+        # Console.Error bypasses PowerShell redirection. Keep this advisory failure
+        # on the blocked warning surface, and restore the writer even on exceptions.
+        [Console]::SetError([IO.TextWriter]::Null)
+        $global:LASTEXITCODE = 0
         & "$FrameworkPowerShell/update-session-state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true -ProjectRoot $actualProjectRoot 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Session state updater exited $LASTEXITCODE." }
     } catch {
         Write-Quiet ("[BLOCKED] Warning: session state was not updated for " + $TaskId + ": " + $_.Exception.Message) -ForegroundColor Yellow
+    } finally {
+        [Console]::SetError($previousConsoleError)
     }
 }
