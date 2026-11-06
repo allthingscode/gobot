@@ -67,13 +67,13 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
     },
     @{
         RelativePath = "powershell/lib/crucible-gates.ps1"
-        Pattern      = '(?i)\$result\s*=\s*&\s*"\$FRAMEWORK_POWERSHELL/validate-backlog\.ps1".*2>&1'
-        Reason       = "PowerShell script invocation for backlog validation before handoff."
+        Pattern      = '(?i)\$result\s*=\s*&\s*\(Get-PwshCommand\).*validate-backlog\.ps1.*2>&1'
+        Reason       = "Child PowerShell process captures Console.Error refusal diagnostics for the backlog gate."
     },
     @{
         RelativePath = "powershell/new-handoff.ps1"
-        Pattern      = '(?i)\$validationRaw\s*=\s*&\s*\$validatorPath.*2>&1'
-        Reason       = "PowerShell script invocation for handoff JSON validation against schema."
+        Pattern      = '(?i)\$validationRaw\s*=\s*&\s*\(Get-PwshCommand\).*validatorPath.*2>&1'
+        Reason       = "Child PowerShell process captures Console.Error refusal diagnostics for handoff schema validation."
     },
     @{
         RelativePath = "powershell/watch-adopter-ci.ps1"

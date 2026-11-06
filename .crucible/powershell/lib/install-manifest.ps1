@@ -131,6 +131,10 @@ function Test-FrameworkDevOnlyFile {
         "powershell/tests/manifest-path-boundaries.tests.ps1",
         # Scans Crucible's runtime command call sites, not an adopter's source tree.
         "powershell/tests/printed-commands.tests.ps1",
+        # Framework runtime invocation inventory and its reasoned exclusion ledger.
+        "powershell/tests/script-invocations.tests.ps1",
+        # Extracts the framework's consuming boundaries for the item 370 audit.
+        "powershell/tests/script-diagnostics.tests.ps1",
         # Binds the advice the framework's own tests print, against its scripts. Item 364.
         "powershell/tests/test-command-advice.tests.ps1",
         # The static renderer only those two dev-only guards load. _command-binding.ps1 ships,

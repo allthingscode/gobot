@@ -29,7 +29,9 @@ $tempRoot = New-TestFixtureRoot -NameHint "research-gate-test"
 try {
     $results += Run-Test -Name "records approval and generates a gate-filing prompt listing approved items" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "approve")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "Gate approved" -Approved "C-350","C-351" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         Assert-Result "gate-filing written" (Test-Path -LiteralPath $p.GateFiling) "gate-filing.md was not generated"
         $body = Get-Content -LiteralPath $p.GateFiling -Raw
         Assert-Result "names approved C-350" ($body -match "C-350") "approved item C-350 not listed"
@@ -43,7 +45,9 @@ try {
     $results += Run-Test -Name "records an approved upstream referral without asking to file it" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "upstream")
         $ref = "U-044-01: preserve the first session-state write"
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "I approve both" -Approved "B-043" -ApprovedUpstream $ref -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $record = Get-ChildItem -LiteralPath (Join-Path $p.Root ".crucible/session/global/research_gate") -Filter "$($p.TaskId)-*.json" | Select-Object -First 1
         $decision = Get-Content -LiteralPath $record.FullName -Raw | ConvertFrom-Json
         Assert-Result "referral recorded" (@($decision.approved_upstream) -contains $ref) (Get-Content -LiteralPath $record.FullName -Raw)
@@ -53,7 +57,9 @@ try {
         Assert-Result "referral not in handoff IDs" (-not ($body -match '-HumanApproved[^\n]*U-044-01')) "the referral must not be passed as a backlog ID"
 
         $p2 = New-GateProject -Root (Join-Path $tempRoot "upstream-only")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p2.TaskId -Reason "route upstream" -ApprovedUpstream $ref -ProjectRoot $p2.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $body2 = Get-Content -LiteralPath $p2.GateFiling -Raw
         Assert-Result "upstream-only decision files no stubs" ($body2 -match 'No stubs to file') "an upstream-only decision must not ask for stubs"
     }
@@ -69,7 +75,9 @@ try {
     $results += Run-Test -Name "approved stub instructions use the configured backlog directory" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "custom-backlog")
         "paths:`n  backlog: tickets`n  session: .crucible/session`n" | Set-Content -LiteralPath (Join-Path $p.Root ".crucible/config.yaml") -Encoding UTF8
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $body = Get-Content -LiteralPath $p.GateFiling -Raw
         $backlog = Join-Path $p.Root "tickets"
         Assert-Result "configured stub directory" ($body.Contains($backlog + '/{bugs,chores,features}/active/')) "filing instructions must name the resolved tickets directory"
@@ -99,7 +107,9 @@ try {
 
     $results += Run-Test -Name "writes a structural decision record with the approved list" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "record")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -Deferred "C-352" -Rejected "C-999" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $gateDir = Join-Path $p.Root ".crucible/session/global/research_gate"
         $rec = @(Get-ChildItem -LiteralPath $gateDir -Filter "$($p.TaskId)-*.json")
         Assert-Result "one decision record" ($rec.Count -eq 1) "expected exactly one decision record"
@@ -127,7 +137,9 @@ try {
 
     $results += Run-Test -Name "all-deferred decision files no stubs but still records and hands off" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "defer")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "not now" -Deferred "C-350","C-351" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $body = Get-Content -LiteralPath $p.GateFiling -Raw
         Assert-Result "no-stub path" ($body -match "No stubs to file") "should take the no-stubs branch"
         Assert-Result "still hands off" ($body -match "new-handoff\.ps1") "should still write a handoff"
@@ -150,7 +162,9 @@ try {
         foreach ($case in @(@{ Name = "approved"; Args = @{ Approved = @("C-350") } }, @{ Name = "deferred"; Args = @{ Deferred = @("C-350") } })) {
             $p = New-GateProject -Root (Join-Path $tempRoot ("status-" + $case.Name))
             $gateArgs = $case.Args
+            $global:LASTEXITCODE = 0
             & $SCRIPT -TaskId $p.TaskId -Reason "ok" -ProjectRoot $p.Root @gateArgs | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
             $body = Get-Content -LiteralPath $p.GateFiling -Raw
             $sentences = @(($body -replace "\s+", " ") -split "(?<=[.:;])\s+")
             foreach ($status in $terminal) {
@@ -163,7 +177,9 @@ try {
 
     $results += Run-Test -Name "generated gate-filing.md is ASCII and BOM-free" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "encoding")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "clean" -Approved "C-350" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $bytes = [System.IO.File]::ReadAllBytes($p.GateFiling)
         $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
         Assert-Result "no BOM" (-not $hasBom) "gate-filing.md must be BOM-free"
@@ -215,7 +231,9 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
             [IO.File]::WriteAllText((Join-Path $bundle $name), ($ast.ParamBlock.Extent.Text + $capture), $utf8)
         }
         $reason = 'Approve C-350; costs $5 and it''s "cheap" `tick \\share' + [char]0x2019 + 's'
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason $reason -Approved "C-350","C-351" -Deferred "C-352,C-353" -Rejected "C-999" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $body = [IO.File]::ReadAllText($p.GateFiling)
         $steps = $body.Substring($body.IndexOf("## Step 3"))
         $lines = @($steps -split "`n" | Where-Object { $_ -match '^    \S' -and $_ -notmatch '^    #' } | ForEach-Object { $_.Substring(4) })
@@ -278,7 +296,9 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
 
     $results += Run-Test -Name "a handoff command the builder cannot write leaves a runner that exits nonzero" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "unavailable-handoff")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "line one`nline two" -Approved "C-350" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $runnerPath = Join-Path (Split-Path -Parent $p.GateFiling) "gate-handoff.ps1"
         $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runnerPath }
         Assert-Result "unavailable handoff runner exits 2 and says why" ($run.ExitCode -eq 2 -and $run.Output -match 'command unavailable' -and $run.Output -match 'newline') ("exit " + $run.ExitCode + ": " + $run.Output)

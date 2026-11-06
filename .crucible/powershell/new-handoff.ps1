@@ -154,14 +154,20 @@ function Write-ValidatedHandoff {
             throw "Validator not found: $validatorPath"
         }
 
+        # A process boundary captures Console.Error as well as PowerShell errors.
+        # Keep native refusals as status data even when the embedding caller uses Stop.
+        $PSNativeCommandUseErrorActionPreference = $false
         $global:LASTEXITCODE = 0
-        $validationRaw = & $validatorPath -HandoffFile $tempPath -SchemaPath $SchemaPath 2>&1
+        $validationRaw = & (Get-PwshCommand) -NoProfile -File (Resolve-FilesystemPath -Path $validatorPath) -HandoffFile (Resolve-FilesystemPath -Path $tempPath) -SchemaPath (Resolve-FilesystemPath -Path $SchemaPath) 2>&1
         if ($LASTEXITCODE -ne 0) {
             $validationText = ($validationRaw -join "`n").Trim()
             if ([string]::IsNullOrWhiteSpace($validationText)) {
                 $validationText = "unknown validation error"
             }
             throw "Schema validation failed: $validationText"
+        }
+        foreach ($line in $validationRaw) {
+            if ($line -is [System.Management.Automation.ErrorRecord]) { [Console]::Error.WriteLine([string]$line) }
         }
 
         Move-Item -LiteralPath $tempPath -Destination $Path -Force

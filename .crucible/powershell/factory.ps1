@@ -62,4 +62,5 @@ try {
 # quoting mangles embedded quotes - which -GateReason routinely carries.
 $global:LASTEXITCODE = 0
 & $crucibleScript @args
+if (-not $? -and $LASTEXITCODE -eq 0) { exit 1 }
 exit $LASTEXITCODE

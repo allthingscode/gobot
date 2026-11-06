@@ -1604,20 +1604,32 @@ function Invoke-RepositoryIntegrityGates {
     # Run automatically when Groomer or Operator hands off (they own BACKLOG.md).
     if ($handoff.source_phase -eq "grooming" -or $handoff.source_phase -eq "deployment") {
         Write-Quiet "`n[BACKLOG] Running backlog integrity check..." -ForegroundColor Cyan
+        $previousNativePreference = if (Test-Path variable:PSNativeCommandUseErrorActionPreference) { $PSNativeCommandUseErrorActionPreference } else { $false }
         try {
+            # A process boundary brings Console.Error into the captured diagnostic.
+            # Native nonzero status must reach the unconditional refusal below.
+            $PSNativeCommandUseErrorActionPreference = $false
             $global:LASTEXITCODE = 0
-            $result = & "$FRAMEWORK_POWERSHELL/validate-backlog.ps1" -FixSummary -Quiet:$Quiet -ProjectRoot $repoRoot 2>&1
+            $result = & (Get-PwshCommand) -NoProfile -File (Resolve-FilesystemPath -Path "$FRAMEWORK_POWERSHELL/validate-backlog.ps1") -FixSummary -Quiet:$Quiet -ProjectRoot (Resolve-FilesystemPath -Path $repoRoot) 2>&1
             if ($LASTEXITCODE -ne 0) {
+                # Capturing must not take the child's refusal off stderr.
+                [Console]::Error.WriteLine(($result -join "`n"))
                 Write-Host "[BACKLOG] VALIDATION FAILED:" -ForegroundColor Red
                 $result | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Red }
                 Write-Host "`n[STOP] [NEXT SESSION COMMAND]: YOU must fix BACKLOG.md before proceeding." -ForegroundColor Red
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "blocked" -Notes "Backlog validation failed before handoff" -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
                 exit 2
             }
+            foreach ($line in $result) {
+                if ($line -is [System.Management.Automation.ErrorRecord]) { [Console]::Error.WriteLine([string]$line) }
+                else { Write-Host ([string]$line) }
+            }
             Write-Quiet "[BACKLOG] Validation passed." -ForegroundColor Green
         } catch {
             Write-Host ("[BACKLOG] Validation script error: " + $_) -ForegroundColor Red
             exit 1
+        } finally {
+            $PSNativeCommandUseErrorActionPreference = $previousNativePreference
         }
     }
 

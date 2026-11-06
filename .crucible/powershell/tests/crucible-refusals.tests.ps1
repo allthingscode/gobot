@@ -323,10 +323,10 @@ function Resolve-StickyTarget { 'agent' }
                         $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source $path), [ref]$null, [ref]$null)
                         $needle = switch ($name) {
                             'affinity' { '& $affinityScript' }
-                            'backlog' { '& "$FRAMEWORK_POWERSHELL/validate-backlog.ps1"' }
+                            'backlog' { '& (Get-PwshCommand) -NoProfile -File (Resolve-FilesystemPath -Path "$FRAMEWORK_POWERSHELL/validate-backlog.ps1")' }
                             'dev-log' { '& "$FRAMEWORK_POWERSHELL/validate-dev-log.ps1"' }
                             'init-backlog' { '& (Join-Path $PSScriptRoot "validate-backlog.ps1")' }
-                            'handoff-validator' { '& $validatorPath' }
+                            'handoff-validator' { '& (Get-PwshCommand) -NoProfile -File (Resolve-FilesystemPath -Path $validatorPath)' }
                             'preflight-validator' { '& $preflightScript' }
                         }
                         $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.Text.StartsWith($needle) }, $true)
@@ -365,8 +365,14 @@ if ($HandoffFile) { '{"ok":true}' }
                         $stub = $stub.Replace("if (`$scenario -eq 'failure') { [Console]::Error.WriteLine('CHILD_FAILURE'); exit 7 }", $childAst.EndBlock.Traps[0].Extent.Text + "`nif (`$scenario -eq 'failure') { throw 'CHILD_FAILURE' }")
                         Write-FixtureText $stubPath $stub
                     }
+                    if ($name -in @('backlog', 'handoff-validator')) {
+                        $stubPath = Join-Path $root $childScript
+                        Write-FixtureText $stubPath ([IO.File]::ReadAllText($stubPath).Replace('$scenario', '$env:CRUCIBLE_REFUSAL_SCENARIO'))
+                    }
                     $setup = @"
 Set-StrictMode -Version Latest
+function Get-PwshCommand { (Get-Process -Id `$PID).Path }
+function Resolve-FilesystemPath { param(`$Path) `$Path }
 function Write-Quiet {}
 function Write-EventLog { Write-Host 'EVENT_AFTER_FAILURE' }
 function Write-WedgeReport {}
@@ -383,11 +389,13 @@ function Get-RecoveryProjectRoot { `$PSScriptRoot }
 `$tempPath = 'unused'; `$SchemaPath = 'unused'; `$handoffFile = 'unused'
 `$Context = @{ RepoRoot = `$PSScriptRoot }
 `$scenario = 'success'
+`$env:CRUCIBLE_REFUSAL_SCENARIO = 'success'
 `$global:LASTEXITCODE = 7
 $invoke
 if (`$LASTEXITCODE -ne 0) { throw 'SUCCESS_STATUS_STALE' }
 Write-Host 'CALLER_SUCCESS'
 `$scenario = 'failure'
+`$env:CRUCIBLE_REFUSAL_SCENARIO = 'failure'
 "@
                     $call = $invoke
                 }
@@ -507,6 +515,7 @@ $scenario = 'failure'
                     Write-FixtureText (Join-Path $lib 'project-root.ps1') 'function Resolve-CrucibleProjectRoot { param($ProjectRoot) $ProjectRoot }'
                     Write-FixtureText (Join-Path $root 'crucible-lib.ps1') @'
 function Get-ConfiguredPath { param($Key) Join-Path $REPO_ROOT $Key }
+function Get-PwshCommand { (Get-Process -Id $PID).Path }
 function Test-BacklogTaskRow { $true }
 function Resolve-FilesystemPath { param($Path) $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) }
 function Sort-HandoffFiles { param($Files) $Files }
@@ -537,7 +546,7 @@ function git {
                     Write-FixtureText (Join-Path $root '.git') 'fixture marker'
                     Write-FixtureText (Join-Path $root 'validate-handoff.ps1') @'
 param($HandoffFile, $SchemaPath)
-if ($scenario -eq 'validator-exit') { 'INVALID_HANDOFF'; exit 7 }
+if ($env:CRUCIBLE_REFUSAL_SCENARIO -eq 'validator-exit') { 'INVALID_HANDOFF'; exit 7 }
 exit 0
 '@
                     $extra = switch ($case.Name) {
@@ -562,7 +571,7 @@ exit 0
                     } else {
                         $extra = '-Source grooming -Target implementation -Reason fixture ' + $extra
                     }
-                    $setup = "`$scenario = '$($case.Name)'"
+                    $setup = "`$scenario = '$($case.Name)'`n`$env:CRUCIBLE_REFUSAL_SCENARIO = '$($case.Name)'"
                     $call = "& './new-handoff.ps1' -TaskId F-261 -ProjectRoot `$PSScriptRoot -OutputPath './output.json' $extra"
                 }
                 'archive' {
@@ -1061,6 +1070,7 @@ exit $LASTEXITCODE
 Set-StrictMode -Version Latest
 Set-Location `$PSScriptRoot
 `$scenario = 'success'
+`$env:CRUCIBLE_REFUSAL_SCENARIO = 'success'
 `$global:LASTEXITCODE = 7
 $successCall
 exit `$LASTEXITCODE
