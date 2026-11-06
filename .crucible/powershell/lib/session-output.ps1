@@ -151,6 +151,12 @@ function Resolve-ImplementationWorkdir {
 function New-CruciblePromptText {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "LatestHandoff", "PromptLib", "SessionDir", "TaskId", "Ceiling", "LogFile", "CircuitBreakerHistoryFile", "WorkspacesDir", "CrucibleRoot", "RepoRoot"
     )
@@ -386,6 +392,12 @@ function New-CruciblePromptText {
 function Write-CruciblePromptOutput {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "SessionDir", "TaskId", "PromptText", "PromptVersion", "Ceiling"
     )
@@ -435,6 +447,12 @@ function Write-CruciblePromptOutput {
 
 function Initialize-CrucibleTargetSession {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "SessionDir", "BacklogDir", "RepoRoot", "CrucibleRoot", "FrameworkPowerShell", "TaskId",
@@ -624,6 +642,12 @@ function Initialize-CrucibleTargetSession {
 function Write-CrucibleCiStatusBanner {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "Target", "PromptFilePath", "AutoAdvance", "IsBootstrap", "NextCrucibleCommand", "SessionDir"
     )
@@ -726,6 +750,12 @@ function Write-CrucibleCiStatusBanner {
 
 function Start-CrucibleTargetSessionLog {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @("Handoff", "Recover", "LogFile", "CircuitBreakerHistoryFile")
 

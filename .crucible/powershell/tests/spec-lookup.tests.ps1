@@ -87,7 +87,9 @@ try {
         $root = Join-Path $tempRoot "restore"
         Write-SpecLookupFixture $root "archived" "Resolved"
         New-Item -ItemType Directory -Force -Path (Join-Path $root "backlog/features/active") | Out-Null
-        [System.IO.File]::WriteAllText((Join-Path $root "backlog/features/active/F-190_slug.md"), "---`nstatus: Ready`n---`n", $utf8)
+        # The sibling must satisfy validation too; this case exercises selection
+        # precedence, so give both legal filename forms their matching identity.
+        [System.IO.File]::WriteAllText((Join-Path $root "backlog/features/active/F-190_slug.md"), "---`nitem_id: F-190`nstatus: Ready`n---`n", $utf8)
         Restore-BacklogTask -TaskId "F-190" -ProjectRoot $root
         $active = Join-Path $root "backlog/features/active/F-190.md"
         Assert-Result "bare spec restored" ((Test-Path -LiteralPath $active) -and -not (Test-Path -LiteralPath (Join-Path $root "backlog/features/archived/F-190.md"))) "expected archived bare spec to move to active"

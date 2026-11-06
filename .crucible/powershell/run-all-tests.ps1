@@ -751,13 +751,15 @@ try {
         }
     }
 }
-exit $exitCode
+if ($exitCode -ne 0) { exit $exitCode }
+exit 0
 } catch {
     if ($Changed) {
-        Write-Host "Changed test run failed: $_" -ForegroundColor Red
+        [Console]::Error.WriteLine("Changed test run failed: $_")
         exit 1
     }
-    throw
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
 } finally {
     if ($Changed) {
         # Empty selections exit before the normal runner cleanup. Item 201.

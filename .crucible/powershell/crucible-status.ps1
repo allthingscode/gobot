@@ -23,6 +23,11 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 
 $helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
 if (-not (Test-Path -LiteralPath $helpersPath)) {
@@ -132,7 +137,7 @@ $RECENT_CB_WINDOW_HOURS = 72
 # --- 1. Load Data ---
 
 if (-not (Test-Path $STATE_FILE)) {
-    Write-Error "Session state file not found: $STATE_FILE"
+    [Console]::Error.WriteLine("Session state file not found: $STATE_FILE")
     exit 1
 }
 $sessionState = Get-Content $STATE_FILE | ConvertFrom-Json
@@ -140,7 +145,7 @@ $sessionState = Get-Content $STATE_FILE | ConvertFrom-Json
 $taskIds = @($sessionState.tasks.PSObject.Properties | ForEach-Object { $_.Name })
 
 if (-not (Test-Path $BACKLOG_FILE)) {
-    Write-Error "Backlog file not found: $BACKLOG_FILE"
+    [Console]::Error.WriteLine("Backlog file not found: $BACKLOG_FILE")
     exit 1
 }
 $backlogLines = Get-Content $BACKLOG_FILE
@@ -418,3 +423,4 @@ if (-not $Tasks -or $Summary) {
     }
 }
 Write-Host "`n"
+exit 0

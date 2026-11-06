@@ -354,6 +354,12 @@ function Read-CrucibleHandoffContext {
 function Invoke-HandoffPreflightValidation {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context `
         -RequiredKeys @("TaskId", "SessionDir", "HandoffDir", "CrucibleRoot", "Init", "Quiet", "LatestHandoff") `
         -NonNullKeys @("FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile")
@@ -386,8 +392,13 @@ function Invoke-HandoffPreflightValidation {
         exit 2
     }
 
+    $global:LASTEXITCODE = 0
     $preflightRaw = & $preflightScript -HandoffFile $handoffFile -SchemaPath (Join-Path (Split-Path -Parent $FRAMEWORK_POWERSHELL) "schemas/handoff.schema.json") 2>&1
     $preflightExit = $LASTEXITCODE
+    if ($preflightExit -ne 0 -and $preflightExit -ne 1) {
+        [Console]::Error.WriteLine("validate-handoff.ps1 crashed or failed internally (exit $preflightExit).")
+        exit 2
+    }
     $preflightResult = $null
     try {
         $preflightResult = ($preflightRaw | Out-String).Trim() | ConvertFrom-Json
@@ -600,6 +611,12 @@ function Test-LockNameForTaskPhase {
 
 function Normalize-CrucibleInputState {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() `
         -NonNullKeys @("Handoff", "LatestHandoff", "SessionDir", "Recover", "FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile")

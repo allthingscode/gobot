@@ -17,6 +17,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 $errors = @()
 
 . (Join-Path (Join-Path $PSScriptRoot "lib") "backlog-io.ps1")
@@ -68,7 +73,7 @@ if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
     } catch {
         # Reported the way every other failure here is reported, so a caller reading the
         # output sees one convention rather than a bare unhandled exception on stderr.
-        Write-Host "BACKLOG VALIDATION ERROR: $_"
+        [Console]::Error.WriteLine("BACKLOG VALIDATION ERROR: $_")
         exit 2
     }
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
@@ -654,6 +659,6 @@ try {
         exit 0
     }
 } catch {
-    Write-Host "BACKLOG VALIDATION ERROR: $_"
+    [Console]::Error.WriteLine("BACKLOG VALIDATION ERROR: $_")
     exit 2
 }

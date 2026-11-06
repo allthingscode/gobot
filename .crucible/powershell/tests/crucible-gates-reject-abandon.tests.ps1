@@ -1410,6 +1410,10 @@ Spec content
         New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
         "paths:`n  backlog: `"backlog`"" | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
         "---`nitem_id: `"F-501`"`ntitle: Test Feature 501`ntype: feature`npriority: P1`nstatus: In Progress`n---`nSpec content`n" | Set-Content -LiteralPath (Join-Path $caseRoot "backlog/features/active/F-501_Spec.md") -Encoding UTF8
+        # Restore now propagates validator failure; the unrelated sibling must
+        # have the archived spec its row promises.
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot "backlog/features/archived") -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $caseRoot "backlog/features/archived/F-502_Spec.md"), "---`nitem_id: F-502`ntitle: Test Feature 502`ntype: feature`npriority: P1`nstatus: Production`n---`nSpec content`n", [Text.UTF8Encoding]::new($false))
         $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
         @"
 # Project Backlog
@@ -1499,6 +1503,7 @@ $f14Row
         [System.IO.File]::WriteAllText((Join-Path $caseRoot ".crucible/config.yaml"), "paths:`n  backlog: `"backlog`"`n", [System.Text.UTF8Encoding]::new($false))
         [System.IO.File]::WriteAllText((Join-Path $caseRoot "backlog/features/active/F-1_Spec.md"), "---`nitem_id: `"F-1`"`ntitle: Feature One`ntype: feature`npriority: P1`nstatus: In Progress`n---`nSpec content`n", [System.Text.UTF8Encoding]::new($false))
         $f2Row = "| [F-2](features/active/F-2_Spec.md) | P2 | Ready | Follow-up to F-1 | Casey |"
+        [IO.File]::WriteAllText((Join-Path $caseRoot "backlog/features/active/F-2_Spec.md"), "---`nitem_id: F-2`ntitle: Follow-up to F-1`ntype: feature`npriority: P2`nstatus: Ready`n---`nSpec content`n", [Text.UTF8Encoding]::new($false))
         $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
         $backlogText = @(
             "# Project Backlog",

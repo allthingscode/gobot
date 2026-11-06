@@ -1,4 +1,4 @@
-# Item 261 phases 1, 2 and 3a: refusals run inside a caller's catch under Stop.
+# Item 261 phases 1, 2, 3a and 3b: refusals run inside a caller's catch under Stop.
 # Invoked scripts return a nonzero LASTEXITCODE; dot-sourced libraries terminate
 # the hosting script. Neither boundary permits a catch to swallow the refusal.
 # Dependency stubs select otherwise difficult failure paths; the boundary code is
@@ -21,6 +21,57 @@ function Write-FixtureText {
 $helpers = @('config-helpers', 'task-checklist', 'time', 'crucible-context', 'event-log',
     'blocked', 'handoff', 'worktree', 'pipeline-dag', 'crucible-gates', 'session-output', 'task-rewind')
 $cases = @(
+    foreach ($pair in @(
+        @('affinity', 'Required helper script not found'),
+        @('merge', 'Required helper script not found'),
+        @('doctor-crucible-lib', 'Required helper script not found'),
+        @('doctor-platform', 'Required helper script not found'),
+        @('doctor-gitignore-conformance', 'Required helper script not found'),
+        @('doctor-line-ending-conformance', 'Required helper script not found'),
+        @('status-helper', 'Required helper script not found'),
+        @('status-state', 'Session state file not found'),
+        @('status-backlog', 'Backlog file not found'),
+        @('status-manifest', 'MANIFEST_FAILURE'),
+        @('docs-empty', 'BUDGET_TIERS is empty'),
+        @('docs-ceiling', 'has no entry in BUDGET_CEILINGS'),
+        @('docs-block', 'returned no block'),
+        @('mirror-manifest', 'MANIFEST_FAILURE'),
+        @('mirror-catch', 'git ls-files --others failed'),
+        @('bundle-catch', 'FrameworkSource must be a git repository'),
+        @('backlog-config-helpers', 'Required helper script not found'),
+        @('backlog-archive-task', 'Required helper script not found'),
+        @('backlog-project-root', 'Required helper script not found'),
+        @('dev-log', 'File not found'),
+        @('launcher-project', 'path does not exist'),
+        @('clear-project', 'path does not exist'),
+        @('state-project', 'path does not exist'),
+        @('research-project', 'path does not exist'),
+        @('test-runner', 'RUNNER_FAILURE'),
+        @('linux-gate', 'STAMP_FAILURE'),
+        @('linux-command', 'WSL not found')
+    )) { @{ Kind = 'remaining-command'; Name = $pair[0]; Expected = $pair[1] } }
+    foreach ($name in @('Invoke-CircuitBreakerGates', 'Resolve-CrucibleInputHandoff',
+        'Restore-MisplacedHandoff', 'Read-CrucibleHandoffContext', 'Invoke-HandoffPreflightValidation',
+        'Normalize-CrucibleInputState', 'Invoke-HumanGate', 'Complete-CrucibleSourceSession',
+        'Invoke-CrucibleRuntimeValidation', 'Invoke-CrucibleScopeGates', 'Test-CompletionArtifactGate',
+        'Invoke-RepositoryIntegrityGates', 'Resolve-CrucibleTransition', 'New-CruciblePromptText',
+        'Write-CruciblePromptOutput', 'Initialize-CrucibleTargetSession', 'Write-CrucibleCiStatusBanner',
+        'Start-CrucibleTargetSessionLog')) {
+        @{ Kind = 'remaining-library'; Name = $name; Expected = 'Required key' }
+    }
+    foreach ($name in @('doctor', 'status', 'health', 'affinity', 'backlog', 'dev-log', 'init-backlog', 'handoff-validator', 'preflight-validator')) {
+        @{ Kind = 'remaining-caller'; Name = $name; Expected = 'CHILD_FAILURE|exit 7|exited 7|validation failed' }
+    }
+    foreach ($name in @('action', 'accept', 'integrity', 'merge')) {
+        @{ Kind = 'remaining-helper'; Name = $name; Expected = 'HELPER_FAILURE' }
+    }
+    @{ Kind = 'remaining-restore'; Name = 'validator'; Expected = 'Could not update backlog.*Backlog validation exited 7' }
+    foreach ($name in @('analyze', 'health', 'agents', 'launcher-bundle', 'validator-config', 'handoff-config')) {
+        @{ Kind = 'remaining-config'; Name = $name; Expected = 'CONFIG_FAILURE|crucible_root value is empty|Cannot qualify a filesystem path' }
+    }
+    foreach ($name in @('init', 'update')) {
+        @{ Kind = 'remaining-agent-caller'; Name = $name; Expected = 'generation exited 7' }
+    }
     foreach ($pair in @(
         @('backlog-dir', 'Backlog directory not found'),
         @('backlog-file', 'BACKLOG.md not found'),
@@ -128,6 +179,329 @@ try {
             $setup = ''
             $call = ''
             switch ($case.Kind) {
+                'remaining-command' {
+                    # Dependencies select the real script boundary without launching
+                    # tools, WSL, installers or specialist runtimes.
+                    Copy-TestRunnerLibraries -Destination $lib
+                    Write-FixtureText (Join-Path $lib 'config-helpers.ps1') @'
+function Resolve-FilesystemPath { param($Path) $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) }
+function Resolve-ConfigProjectRoot { $PSScriptRoot }
+function Get-ConfiguredPath { param($Key) Join-Path (Split-Path $PSScriptRoot) $Key }
+'@
+                    $name = $case.Name
+                    $script = switch -Regex ($name) {
+                        '^affinity' { 'check-file-affinity'; break }
+                        '^merge' { 'check-merge-conflicts'; break }
+                        '^doctor-' { 'crucible-doctor'; break }
+                        '^status-' { 'crucible-status'; break }
+                        '^docs-' { 'gates/check-generated-docs'; break }
+                        '^mirror-' { 'sync-example-mirror'; break }
+                        '^bundle-' { 'update-bundle'; break }
+                        '^backlog-' { 'validate-backlog'; break }
+                        '^dev-log' { 'validate-dev-log'; break }
+                        '^launcher-' { 'launch-codex-specialist'; break }
+                        '^clear-' { 'clear-session-state'; break }
+                        '^state-' { 'update-session-state'; break }
+                        '^research-' { 'record-research-gate'; break }
+                        '^test-runner' { 'run-all-tests'; break }
+                        '^linux-gate' { 'gates/check-linux-leg'; break }
+                        '^linux-command' { 'scripts/test-linux'; break }
+                    }
+                    $target = Join-Path $root ($script + '.ps1')
+                    New-Item -ItemType Directory (Split-Path $target) -Force | Out-Null
+                    $original = if ($name -eq 'linux-command') { Join-Path $source '../scripts/test-linux.ps1' } else { Join-Path $source ($script + '.ps1') }
+                    Copy-Item -LiteralPath $original -Destination $target
+                    $extra = ''
+                    switch -Regex ($name) {
+                        '^affinity' { Remove-Item (Join-Path $lib 'config-helpers.ps1') -Force; $extra = '-TaskId F-261 -Affinity src/' }
+                        '^merge' { $extra = '-TaskId F-261' }
+                        '^doctor-' {
+                            Write-FixtureText (Join-Path $root 'crucible-lib.ps1') ''
+                            foreach ($helper in @('platform', 'gitignore-conformance', 'line-ending-conformance')) { Write-FixtureText (Join-Path $lib ($helper + '.ps1')) '' }
+                            $missing = $name.Substring(7)
+                            $path = if ($missing -eq 'crucible-lib') { Join-Path $root 'crucible-lib.ps1' } else { Join-Path $lib ($missing + '.ps1') }
+                            Remove-Item $path -Force
+                        }
+                        '^status-' {
+                            Write-FixtureText (Join-Path $lib 'backlog-io.ps1') ''
+                            if ($name -eq 'status-helper') { Remove-Item (Join-Path $lib 'config-helpers.ps1') -Force }
+                            if ($name -eq 'status-backlog') { Write-FixtureText (Join-Path $root 'session/global/session_state.json') '{"tasks":{}}' }
+                            if ($name -eq 'status-manifest') {
+                                Write-FixtureText (Join-Path $lib 'install-manifest.ps1') "function Get-InstallManifest { throw 'MANIFEST_FAILURE' }"
+                                $extra = '-Drift'
+                            }
+                        }
+                        '^docs-' {
+                            Write-FixtureText (Join-Path $root 'powershell/crucible-lib.ps1') @'
+function Get-BudgetTierList { if ($scenario -eq 'docs-empty') { @() } else { 'low' } }
+function Get-BudgetCeilings { if ($scenario -eq 'docs-ceiling') { @{} } else { @{ low = 1 } } }
+'@
+                            Write-FixtureText (Join-Path $root 'powershell/lib/instruction-blocks.ps1') 'function Get-CrucibleBlock { @{} }'
+                            # The gate derives its repo root two levels above itself.
+                            $target = Join-Path $root 'powershell/gates/check-generated-docs.ps1'
+                            New-Item -ItemType Directory (Split-Path $target) -Force | Out-Null
+                            Copy-Item -LiteralPath $original -Destination $target
+                            $region = if ($name -eq 'docs-block') { 'instruction-block-agents' } else { 'budget-tier-ceilings' }
+                            $doc = if ($name -eq 'docs-block') { 'agent-instructions.md' } else { 'policy.md' }
+                            Write-FixtureText (Join-Path $root ('docs/' + $doc)) "<!-- crucible:generated $region -->`n<!-- crucible:end $region -->`n"
+                        }
+                        '^mirror-' {
+                            Copy-Item (Join-Path $lib 'config-helpers.ps1') (Join-Path $lib 'config-saved.ps1')
+                            Write-FixtureText (Join-Path $root 'powershell/lib/config-helpers.ps1') ([IO.File]::ReadAllText((Join-Path $lib 'config-saved.ps1')))
+                            Write-FixtureText (Join-Path $root 'powershell/lib/platform.ps1') 'function Invoke-Git { [pscustomobject]@{ ExitCode = 7; Lines = @() } }'
+                            $manifestStub = if ($name -eq 'mirror-manifest') { "function Get-InstallManifest { throw 'MANIFEST_FAILURE' }" } else { "function Get-InstallManifest { @{} }; function Get-InstallSourceRoot { 'powershell' }" }
+                            Write-FixtureText (Join-Path $root 'powershell/lib/install-manifest.ps1') $manifestStub
+                            # SCRIPT_ROOT is the parent of the script directory.
+                            $target = Join-Path $root 'powershell/sync-example-mirror.ps1'
+                            Copy-Item -LiteralPath $original -Destination $target
+                        }
+                        '^bundle-' { $extra = '-FrameworkSource $PSScriptRoot -AdopterRoot $PSScriptRoot -Mode auto-safe' }
+                        '^backlog-' {
+                            Write-FixtureText (Join-Path $lib 'backlog-io.ps1') ''
+                            Write-FixtureText (Join-Path $lib 'crucible-command.ps1') ''
+                            Write-FixtureText (Join-Path $lib 'worktree.ps1') ''
+                            foreach ($helper in @('config-helpers', 'archive-task', 'project-root')) { Write-FixtureText (Join-Path $lib ($helper + '.ps1')) '' }
+                            Remove-Item (Join-Path $lib ($name.Substring(8) + '.ps1')) -Force
+                            $extra = '-BacklogPath ./BACKLOG.md'
+                        }
+                        '^dev-log' { $extra = '-FileToPublish ./missing.md' }
+                        '^launcher-' {
+                            Copy-Item (Join-Path $source 'lib/config-helpers.ps1') $lib -Force
+                            $extra = '-ProjectRoot ./missing'
+                        }
+                        '^(clear|state|research)-project' {
+                            Copy-Item (Join-Path $source 'lib/config-helpers.ps1') $lib -Force
+                            $extra = switch ($name) {
+                                'clear-project' { '-Specialist implementation -ProjectRoot ./missing' }
+                                'state-project' { '-Specialist implementation -UpdateJson invalid -ProjectRoot ./missing' }
+                                'research-project' { '-TaskId F-261 -Reason fixture -ProjectRoot ./missing' }
+                            }
+                        }
+                        '^test-runner' { Write-FixtureText (Join-Path $root 'tests/_harness.ps1') "throw 'RUNNER_FAILURE'" }
+                        '^linux-gate' {
+                            Write-FixtureText (Join-Path $lib 'platform.ps1') 'function Invoke-Git { [pscustomobject]@{ ExitCode = 0; Lines = @($PSScriptRoot) } }'
+                            Write-FixtureText (Join-Path $lib 'linux-leg-stamp.ps1') "throw 'STAMP_FAILURE'"
+                        }
+                        '^linux-command' { $setup = 'function Get-Command { $null }' }
+                    }
+                    $setup += "`n`$scenario = '$name'"
+                    $escaped = $target.Replace("'", "''")
+                    $call = "& '$escaped' $extra"
+                }
+                'remaining-library' {
+                    Copy-TestRunnerLibraries -Destination $lib
+                    $setup = ". './lib/crucible-gates.ps1'`n. './lib/session-output.ps1'"
+                    $call = $case.Name + ' -Context @{}'
+                    if ($case.Name -in @('Resolve-CrucibleInputHandoff', 'Restore-MisplacedHandoff', 'Read-CrucibleHandoffContext')) {
+                        # Readers remain reusable. Exercise the consuming command's
+                        # real trap with their real context failure, under caller Stop.
+                        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'crucible.ps1'), [ref]$null, [ref]$null)
+                        $boundary = ($ast.EndBlock.Traps | ForEach-Object { $_.Extent.Text }) -join "`n"
+                        Write-FixtureText (Join-Path $root 'reader-command.ps1') ($setup + "`n" + $boundary + "`n" + $call)
+                        $setup = ''
+                        $call = "& './reader-command.ps1'"
+                    }
+                }
+                'remaining-caller' {
+                    $name = $case.Name
+                    if ($name -in @('doctor', 'status', 'health')) {
+                        Copy-Item (Join-Path $source 'crucible.ps1') $root
+                        foreach ($helper in @('config-helpers', 'instruction-blocks', 'language-presets')) { Write-FixtureText (Join-Path $lib ($helper + '.ps1')) '' }
+                        Write-FixtureText (Join-Path $lib 'project-root.ps1') 'function Resolve-CrucibleProjectRoot { Split-Path $PSScriptRoot }'
+                        Write-FixtureText (Join-Path $root 'crucible-lib.ps1') @'
+function Get-ConfiguredPath { param($Key) Join-Path $PSScriptRoot $Key }
+function Get-BudgetCeilings { @{} }
+function Resolve-StickyTarget { 'agent' }
+'@
+                        $invoke = "& './crucible.ps1' -$name -Quiet"
+                        $childScript = 'crucible-' + $name + '.ps1'
+                    } else {
+                        # Execute the production invocation and its immediate guard,
+                        # preserving their AST extents. Surrounding setup is unrelated
+                        # to this caller's child-status contract.
+                        $path = switch ($name) { 'init-backlog' { 'init-project.ps1' }; 'handoff-validator' { 'new-handoff.ps1' }; 'preflight-validator' { 'lib/crucible-gates-handoff.ps1' }; default { 'lib/crucible-gates.ps1' } }
+                        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source $path), [ref]$null, [ref]$null)
+                        $needle = switch ($name) {
+                            'affinity' { '& $affinityScript' }
+                            'backlog' { '& "$FRAMEWORK_POWERSHELL/validate-backlog.ps1"' }
+                            'dev-log' { '& "$FRAMEWORK_POWERSHELL/validate-dev-log.ps1"' }
+                            'init-backlog' { '& (Join-Path $PSScriptRoot "validate-backlog.ps1")' }
+                            'handoff-validator' { '& $validatorPath' }
+                            'preflight-validator' { '& $preflightScript' }
+                        }
+                        $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.Text.StartsWith($needle) }, $true)
+                        if ($null -eq $node) { throw "Caller invocation not found: $name" }
+                        while ($null -ne $node.Parent -and $node.Parent -isnot [Management.Automation.Language.StatementBlockAst] -and $node.Parent -isnot [Management.Automation.Language.NamedBlockAst]) { $node = $node.Parent }
+                        if ($null -eq $node.Parent) { throw "Caller statement block not found: $name" }
+                        $statements = @($node.Parent.Statements)
+                        $index = [array]::IndexOf($statements, $node)
+                        $start = $index
+                        if ($index -gt 0 -and $statements[$index - 1].Extent.Text -match 'global:LASTEXITCODE = 0') { $start-- }
+                        $end = $index
+                        while ($end + 1 -lt $statements.Count -and $statements[$end + 1].Extent.Text -match '^if \(\$LASTEXITCODE -ne 0') { $end++ }
+                        if ($name -eq 'preflight-validator') {
+                            while ($end -lt $statements.Count -and $statements[$end].Extent.Text -notmatch '^if \(\$preflightExit -ne 0 -or') { $end++ }
+                            if ($end -eq $statements.Count) { throw 'Preflight status guard not found' }
+                        }
+                        $body = ($statements[$start..$end] | ForEach-Object { $_.Extent.Text }) -join "`n"
+                        # init-project owns a command trap around its sample install;
+                        # the gate callers refuse inside their immediate status guard.
+                        if ($name -eq 'init-backlog') { $body = $ast.EndBlock.Traps[0].Extent.Text + "`n" + $body }
+                        if ($name -eq 'handoff-validator') { $body = $ast.EndBlock.Traps[0].Extent.Text + "`n" + $body }
+                        Write-FixtureText (Join-Path $root 'boundary.ps1') $body
+                        $invoke = "& './boundary.ps1'"
+                        $childScript = switch ($name) { 'affinity' { 'check-file-affinity.ps1' }; 'dev-log' { 'validate-dev-log.ps1' }; { $_ -in @('handoff-validator', 'preflight-validator') } { 'validate-handoff.ps1' }; default { 'validate-backlog.ps1' } }
+                    }
+                    Write-FixtureText (Join-Path $root $childScript) @'
+param($TaskId, $Affinity, $ProjectRoot, $FileToPublish, $BacklogPath, $HandoffFile, $SchemaPath, [switch]$Quiet, [switch]$FixSummary, [switch]$Health, [switch]$Cleanup, [switch]$Force)
+if ($scenario -eq 'failure') { [Console]::Error.WriteLine('CHILD_FAILURE'); exit 7 }
+if ($HandoffFile) { '{"ok":true}' }
+# Intentionally leave status untouched to verify caller initialization.
+'@
+                    if ($name -in @('affinity', 'dev-log', 'preflight-validator')) {
+                        $childAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source $childScript), [ref]$null, [ref]$null)
+                        $stubPath = Join-Path $root $childScript
+                        $stub = [IO.File]::ReadAllText($stubPath)
+                        $stub = $stub.Replace("if (`$scenario -eq 'failure') { [Console]::Error.WriteLine('CHILD_FAILURE'); exit 7 }", $childAst.EndBlock.Traps[0].Extent.Text + "`nif (`$scenario -eq 'failure') { throw 'CHILD_FAILURE' }")
+                        Write-FixtureText $stubPath $stub
+                    }
+                    $setup = @"
+Set-StrictMode -Version Latest
+function Write-Quiet {}
+function Write-EventLog { Write-Host 'EVENT_AFTER_FAILURE' }
+function Write-WedgeReport {}
+function Get-RecoveryProjectRoot { `$PSScriptRoot }
+`$FRAMEWORK_POWERSHELL = `$PSScriptRoot
+`$affinityScript = Join-Path `$PSScriptRoot 'check-file-affinity.ps1'
+`$handoff = [pscustomobject]@{ task_id = 'F-261'; file_affinity = @('src/'); source_phase = 'deployment'; target_phase = 'done'; cumulative_handoff_count = 1 }
+`$Quiet = `$true
+`$repoRoot = `$PSScriptRoot
+`$LOG_FILE = 'unused'; `$CB_HISTORY_FILE = 'unused'
+`$backlogFilePath = 'unused'; `$validateQuiet = `$true; `$devLogPath = 'unused'
+`$validatorPath = Join-Path `$PSScriptRoot 'validate-handoff.ps1'
+`$preflightScript = `$validatorPath
+`$tempPath = 'unused'; `$SchemaPath = 'unused'; `$handoffFile = 'unused'
+`$Context = @{ RepoRoot = `$PSScriptRoot }
+`$scenario = 'success'
+`$global:LASTEXITCODE = 7
+$invoke
+if (`$LASTEXITCODE -ne 0) { throw 'SUCCESS_STATUS_STALE' }
+Write-Host 'CALLER_SUCCESS'
+`$scenario = 'failure'
+"@
+                    $call = $invoke
+                }
+                'remaining-helper' {
+                    Copy-TestRunnerLibraries -Destination $lib
+                    $setup = @'
+. './lib/crucible-gates.ps1'
+function Get-ConfiguredPrimaryBranch { throw 'HELPER_FAILURE: primary branch' }
+function Get-ConfiguredPath { throw 'HELPER_FAILURE: backlog path' }
+function Get-CrucibleFrameworkStatusChanges { @() }
+function Write-EventLog {}
+function Write-Quiet {}
+function Write-CheckNotRun { throw 'HELPER_FAILURE: skipped-check record' }
+function Test-GitDiscardSafe { $true }
+function Invoke-GitChecked { $global:LASTEXITCODE = 1 }
+'@
+                    $call = if ($case.Name -eq 'action') {
+                        'Invoke-HumanGateAction -TaskId F-261 -Outcome accepted -LogFile unused -CircuitBreakerHistoryFile unused'
+                    } elseif ($case.Name -eq 'integrity') {
+                        'Assert-CrucibleFrameworkIntegrity -Context @{ FrameworkIntegrityBaseline = $null; TaskId = "F-261"; SessionDir = $PSScriptRoot; LogFile = "unused"; CircuitBreakerHistoryFile = "unused" }'
+                    } elseif ($case.Name -eq 'merge') {
+                        'Invoke-HumanGateMerge -TaskId F-261 -PrimaryBranch main -ProjectRoot $PSScriptRoot -LogFile unused -CircuitBreakerHistoryFile unused -DecisionRecordPath unused'
+                    } else {
+                        'Invoke-HumanGateAcceptRedirect -TaskId F-261 -Outcome accepted -LogFile unused -CircuitBreakerHistoryFile unused -ProjectRoot $PSScriptRoot -PrimaryBranch main -SourcePhase grooming'
+                    }
+                }
+                'remaining-restore' {
+                    Copy-TestRunnerLibraries -Destination $lib
+                    Write-FixtureText (Join-Path $root 'features/active/F-261.md') "---`nstatus: Ready`n---`nfixture`n"
+                    Write-FixtureText (Join-Path $root 'BACKLOG.md') "| ID | Priority | Status | Title |`n|---|---|---|---|`n| [F-261](features/active/F-261.md) | P2 | Ready | Fixture |`n"
+                    Write-FixtureText (Join-Path $root 'validate-backlog.ps1') 'exit 0'
+                    Write-FixtureText (Join-Path $root 'new-handoff.ps1') "Write-Host 'NEW_HANDOFF_AFTER_FAILURE'; exit 0"
+                    $setup = @'
+Set-StrictMode -Version Latest
+. './lib/crucible-gates.ps1'
+. './lib/archive-task.ps1'
+function Get-ConfiguredPath { $PSScriptRoot }
+function Resolve-ConfigProjectRoot { $PSScriptRoot }
+function Write-Quiet {}
+function Assert-HumanGateReworkAvailable {}
+function Test-GitDiscardSafe { $true }
+function Invoke-GitChecked {}
+function Invoke-Git { [pscustomobject]@{ ExitCode = 1; Raw = ''; Lines = @() } }
+function Get-HumanGateRejectUnwind { @{ CurrentHead = 'head'; ParentList = @(); HeadIsTaskMerge = $false; UnwindTarget = '' } }
+function git { $global:LASTEXITCODE = 1 }
+$global:LASTEXITCODE = 7
+Restore-BacklogTask -TaskId F-261 -ProjectRoot $PSScriptRoot
+if ($LASTEXITCODE -ne 0) { throw 'SUCCESS_STATUS_STALE' }
+Write-Host 'CALLER_SUCCESS'
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'validate-backlog.ps1'), "Write-Host 'ROW_F261_INVALID'; exit 7")
+'@
+                    $call = 'Invoke-HumanGateRejectAbandon -TaskId F-261 -Outcome rejected -ProjectRoot $PSScriptRoot -PrimaryBranch main'
+                }
+                'remaining-config' {
+                    Copy-TestRunnerLibraries -Destination $lib
+                    $script = switch ($case.Name) { 'analyze' { 'analyze-evals' }; 'health' { 'crucible-health' }; 'agents' { 'sync-claude-agents' }; 'validator-config' { 'validate-config' }; 'handoff-config' { 'validate-handoff' }; default { 'launch-codex-specialist' } }
+                    Copy-Item (Join-Path $source ($script + '.ps1')) $root
+                    $config = [IO.File]::ReadAllText((Join-Path $lib 'config-helpers.ps1'))
+                    if ($case.Name -eq 'agents') {
+                        $config += "`nfunction Get-ClaudeLevel { throw 'CONFIG_FAILURE: model level' }`n"
+                    } elseif ($case.Name -ne 'launcher-bundle') {
+                        $config += "`nfunction Get-ConfiguredPath { throw 'CONFIG_FAILURE: session path' }`n"
+                    }
+                    Write-FixtureText (Join-Path $lib 'config-helpers.ps1') $config
+                    Write-FixtureText (Join-Path $root 'crucible-lib.ps1') ". (Join-Path `$PSScriptRoot 'lib/config-helpers.ps1')"
+                    if ($case.Name -eq 'validator-config') { $setup = "`$env:ITEM261_CONFIG = 'fixture'" }
+                    if ($case.Name -eq 'handoff-config') {
+                        Write-FixtureText (Join-Path $root 'handoff.json') '{"generated_by":"new-handoff.ps1","tool_version":"1.0.0"}'
+                        Write-FixtureText (Join-Path $root 'schema.json') '{}'
+                    }
+                    $extra = switch ($case.Name) {
+                        'health' { '-ProjectRoot $PSScriptRoot -Health' }
+                        'agents' { '-ProjectRoot $PSScriptRoot' }
+                        'launcher-bundle' { "-ProjectRoot `$PSScriptRoot -CrucibleRoot ''" }
+                        'validator-config' { '-ConfigPath Env:ITEM261_CONFIG' }
+                        'handoff-config' { '-HandoffFile ./handoff.json -SchemaPath ./schema.json' }
+                        default { '' }
+                    }
+                    $call = "& './$script.ps1' $extra"
+                }
+                'remaining-agent-caller' {
+                    $script = if ($case.Name -eq 'init') { 'init-project.ps1' } else { 'update-bundle.ps1' }
+                    $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source $script), [ref]$null, [ref]$null)
+                    $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.Text.StartsWith('& $agentSync') }, $true)
+                    if ($case.Name -eq 'init') {
+                        while ($node -isnot [Management.Automation.Language.IfStatementAst] -or $node.Extent.Text -notmatch '^if \(Test-Path') { $node = $node.Parent }
+                        $body = $ast.EndBlock.Traps[0].Extent.Text + "`n" + $node.Extent.Text
+                    } else {
+                        while ($node -isnot [Management.Automation.Language.TryStatementAst]) { $node = $node.Parent }
+                        $body = $node.Extent.Text
+                    }
+                    Write-FixtureText (Join-Path $root 'boundary.ps1') $body
+                    Write-FixtureText (Join-Path $root 'powershell/lib/claude-agents.ps1') 'function Get-ClaudeAgentDrift { @() }'
+                    Write-FixtureText (Join-Path $root 'sync-claude-agents.ps1') @'
+param($ProjectRoot)
+if ($scenario -eq 'failure') { exit 7 }
+'@
+                    $setup = @'
+Set-StrictMode -Version Latest
+$agentSync = Join-Path $PSScriptRoot 'sync-claude-agents.ps1'
+$adopterCrucibleRoot = $PSScriptRoot
+$adopterRootResolved = $PSScriptRoot
+$resolvedProjectRoot = $PSScriptRoot
+$Quiet = $false
+$scenario = 'success'
+$global:LASTEXITCODE = 7
+& './boundary.ps1'
+if ($LASTEXITCODE -ne 0) { throw 'SUCCESS_STATUS_STALE' }
+Write-Host 'CALLER_SUCCESS'
+$scenario = 'failure'
+'@
+                    $call = "& './boundary.ps1'"
+                    if ($case.Name -eq 'update') { $call += "; `$global:LASTEXITCODE = 0" }
+                }
                 'handoff' {
                     Copy-Item -LiteralPath (Join-Path $source 'new-handoff.ps1') -Destination $root
                     Write-FixtureText (Join-Path $lib 'project-root.ps1') 'function Resolve-CrucibleProjectRoot { param($ProjectRoot) $ProjectRoot }'
@@ -573,7 +947,8 @@ function Invoke-Git {
                 }
             }
             $child = Join-Path $root 'caller.ps1'
-            $isCommand = $case.Kind -in @('bootstrap', 'entry', 'research', 'runner', 'init', 'hooks', 'state', 'handoff', 'archive') -or ($case.Kind -eq 'handoff-caller' -and $case.Name -in @('cli', 'research-runner'))
+            $isCommand = $case.Kind -in @('bootstrap', 'entry', 'research', 'runner', 'init', 'hooks', 'state', 'handoff', 'archive', 'remaining-command', 'remaining-caller', 'remaining-config', 'remaining-agent-caller') -or ($case.Kind -eq 'handoff-caller' -and $case.Name -in @('cli', 'research-runner'))
+            if ($case.Kind -eq 'remaining-library' -and $case.Name -in @('Resolve-CrucibleInputHandoff', 'Restore-MisplacedHandoff', 'Read-CrucibleHandoffContext')) { $isCommand = $true }
             # A .ps1 caller may continue after & script.ps1. Record the status
             # immediately and propagate it to the child process's own exit.
             $afterCall = if ($isCommand) {
@@ -608,10 +983,13 @@ $afterCall
             }
             $diagnostic = [IO.File]::ReadAllText($stderr)
             $evidence = "exit=$($res.ExitCode)`n$($res.Output)`n$diagnostic"
-            $advisory = $case.Kind -eq 'state-caller' -and $case.Name -in @('human', 'blocked')
+            $advisory = ($case.Kind -eq 'state-caller' -and $case.Name -in @('human', 'blocked')) -or ($case.Kind -eq 'remaining-agent-caller' -and $case.Name -eq 'update')
             if ($advisory) {
                 Assert-Result 'advisory caller continues' ($res.ExitCode -eq 0 -and $res.Output -match 'CALLER_CONTINUED') $evidence
                 Assert-Result 'advisory failure is reported' ($res.Output -match $case.Expected) $evidence
+                if ($case.Kind -eq 'remaining-agent-caller') {
+                    Assert-Result 'advisory caller success works under StrictMode' ($res.Output -match 'CALLER_SUCCESS') $evidence
+                }
                 if ($case.Name -eq 'blocked') {
                     Assert-Result 'raw console diagnostic suppressed' ($diagnostic -notmatch 'RAW_STATE_FAILURE') $evidence
                     Assert-Result 'console error writer restored' ($diagnostic -match 'CONSOLE_RESTORED') $evidence
@@ -635,8 +1013,29 @@ $afterCall
                 Assert-Result 'no success or event after failed update' ($res.Output -notmatch 'Pipeline Complete|EVENT_AFTER_UPDATE') $evidence
             }
             Assert-Result 'refusal identifies the selected path on stderr' ($diagnostic -match $case.Expected) $evidence
-            if ($case.Kind -eq 'handoff-caller') {
+            if ($case.Kind -in @('handoff-caller', 'remaining-caller', 'remaining-restore', 'remaining-agent-caller')) {
                 Assert-Result 'caller success works under StrictMode' ($res.Output -match 'CALLER_SUCCESS') $evidence
+            }
+            if ($case.Kind -eq 'remaining-restore') {
+                Assert-Result 'restore retains validator row diagnostic' ($diagnostic -match 'ROW_F261_INVALID') $evidence
+                Assert-Result 'failed validation prevents rework handoff' ($res.Output -notmatch 'NEW_HANDOFF_AFTER_FAILURE') $evidence
+            }
+            if ($case.Kind -eq 'remaining-caller' -and $case.Name -in @('affinity', 'dev-log', 'preflight-validator')) {
+                Assert-Result 'crash produces no finding or breaker event' ($res.Output -notmatch 'EVENT_AFTER_FAILURE|File affinity overlap detected|PII/secrets') $evidence
+                Assert-Result 'caller names internal crash on stderr' ($diagnostic -match '(check-file-affinity|validate-dev-log|validate-handoff)\.ps1 crashed or failed internally') $evidence
+                Assert-Result 'crash has distinct exit code' ($res.ExitCode -eq 2) $evidence
+            }
+            if ($case.Kind -eq 'remaining-command' -and $case.Name -eq 'dev-log') {
+                Write-FixtureText (Join-Path $root 'publish.md') 'A public release note.'
+                Write-FixtureText $child @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$global:LASTEXITCODE = 7
+& (Join-Path $PSScriptRoot 'validate-dev-log.ps1') -FileToPublish (Join-Path $PSScriptRoot 'publish.md')
+exit $LASTEXITCODE
+'@
+                $success = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $child 2>$stderr }
+                Assert-Result 'dev log success clears stale status under StrictMode' ($success.ExitCode -eq 0) ($success.Output + [IO.File]::ReadAllText($stderr))
             }
             if ($case.Kind -eq 'handoff' -and $case.Name -in @('validator-missing', 'validator-exit')) {
                 Assert-Result 'failed validation removes temporary output' (-not (Test-Path (Join-Path $root 'output.json.tmp'))) $evidence

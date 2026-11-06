@@ -584,7 +584,7 @@ try {
         # Rejection's rework dispatch requires an exact backlog row (item 250).
         $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
         New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
-        '| F-999 | P2 | In Progress | Rework | Architect |' |
+        "| ID | Priority | Status | Title | Specialist |`n|---|---|---|---|---|`n| [F-999](features/archived/F-999_fixture.md) | P2 | Production | Rework | Architect |" |
             Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
         $scriptContentReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
@@ -866,7 +866,7 @@ try {
         # Rejection's rework dispatch requires an exact backlog row (item 250).
         $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
         New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
-        '| F-100 | P2 | In Progress | Rework | Architect |' |
+        "| ID | Priority | Status | Title | Specialist |`n|---|---|---|---|---|`n| [F-100](features/archived/F-100_fixture.md) | P2 | Production | Rework | Architect |" |
             Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
 
         # Remove task branch first to test restoration

@@ -127,7 +127,11 @@ try {
 '@
             [System.IO.File]::WriteAllText($child, $childText, $utf8)
             $output = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -File $child -Root $root -Case $case 2>&1 })
-            Assert-Result "missing-library gate behavior preserved" ($LASTEXITCODE -eq 0) ($output -join "`n")
+            if ($case -eq "accept") {
+                Assert-Result "missing-library accept refuses unconditionally" ($LASTEXITCODE -ne 0 -and ($output -join "`n") -match 'archive-task helper not found' -and ($output -join "`n") -notmatch 'EXPECTED:') ($output -join "`n")
+            } else {
+                Assert-Result "missing-library advisory behavior preserved" ($LASTEXITCODE -eq 0) ($output -join "`n")
+            }
             Assert-Result "spec stays in its original directory" (Test-Path -LiteralPath $spec) "expected no archival move"
             if ($case -eq "abandon-archived") {
                 Assert-Result "missing-library legacy repair updates frontmatter" ((Get-Content -LiteralPath $spec -Raw) -match 'status: "Abandoned"') "expected Abandoned frontmatter"

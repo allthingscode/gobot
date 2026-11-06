@@ -11,6 +11,12 @@ param (
     [Parameter(Mandatory=$false)][string]$ProjectRoot = ""
 )
 
+# I11: configuration helpers remain reusable; this command owns refusal.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 $ErrorActionPreference = "Stop"
 $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
 . $crucibleLibPath
@@ -440,3 +446,4 @@ try {
 } finally {
     Pop-Location
 }
+exit 0

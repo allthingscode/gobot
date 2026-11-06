@@ -6,6 +6,11 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 
@@ -608,4 +613,5 @@ if ($exitCode -eq 0) {
 }
 
 Pop-Location
-exit $exitCode
+if ($exitCode -ne 0) { exit $exitCode }
+exit 0

@@ -26,21 +26,35 @@ try {
     . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
     foreach ($minutesKey in @('ci_timeout_minutes', 'ci_queued_grace_minutes')) {
         $results += Run-Test -Name "Accept refuses invalid $minutesKey before side effects" -Body {
-            Import-SubjectFunction "$REPO_ROOT/powershell/lib/crucible-gates-human.ps1" @('Invoke-HumanGateAcceptRedirect', 'Get-HumanGateAcceptConfig')
             $root = Join-Path $tempRoot 'accept'
             $null = New-Item -ItemType Directory "$root/.crucible" -Force
             [IO.File]::WriteAllText("$root/.crucible/config.yaml", "review:`n  ${minutesKey}: invalid`n")
-            $script:merged = $false
-            $script:finalized = $false
-            function git { $global:LASTEXITCODE = 0; return 'fixture-sha' }
-            function Get-ConfiguredPath { return $root }
-            function Invoke-HumanGateAcceptMerge { $script:merged = $true }
-            function Invoke-HumanGateBacklogFinalization { $script:finalized = $true; return $true }
-            $message = ''
-            try {
-                Invoke-HumanGateAcceptRedirect -TaskId F-001 -Outcome accepted -ProjectRoot $root -PrimaryBranch main -LogFile fixture -CircuitBreakerHistoryFile fixture
-            } catch { $message = $_.Exception.Message }
-            Assert-Result -Name "invalid $minutesKey refuses with no merge or finalization" -Condition ($message -match "review\.$minutesKey" -and -not $script:merged -and -not $script:finalized) -FailureMessage "message=$message merged=$script:merged finalized=$script:finalized"
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile("$REPO_ROOT/powershell/lib/crucible-gates-human.ps1", [ref]$null, [ref]$null)
+            $definitions = ($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -in @('Invoke-HumanGateAcceptRedirect', 'Get-HumanGateAcceptConfig') }, $false) | ForEach-Object { $_.Extent.Text }) -join "`n"
+            $configLib = "$REPO_ROOT/powershell/lib/config-helpers.ps1".Replace("'", "''")
+            $fixtureRoot = $root.Replace("'", "''")
+            $child = Join-Path $root 'invalid-accept.ps1'
+            $childText = @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+. '$configLib'
+$definitions
+function git { `$global:LASTEXITCODE = 0; return 'fixture-sha' }
+function Get-ConfiguredPath { return '$fixtureRoot' }
+function Invoke-HumanGateAcceptMerge { [IO.File]::WriteAllText((Join-Path `$PSScriptRoot 'merged'), 'merged') }
+function Invoke-HumanGateBacklogFinalization { [IO.File]::WriteAllText((Join-Path `$PSScriptRoot 'finalized'), 'finalized'); return `$true }
+try {
+    Invoke-HumanGateAcceptRedirect -TaskId F-001 -Outcome accepted -ProjectRoot '$fixtureRoot' -PrimaryBranch main -LogFile fixture -CircuitBreakerHistoryFile fixture
+} catch { Write-Host 'CALLER_CAUGHT' }
+Write-Host 'CALLER_CONTINUED'
+exit 0
+"@
+            [IO.File]::WriteAllText($child, $childText.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
+            $stderr = Join-Path $root 'stderr.txt'
+            $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $child 2>$stderr }
+            $message = [IO.File]::ReadAllText($stderr)
+            Assert-Result -Name "invalid $minutesKey refuses unconditionally" -Condition ($run.ExitCode -ne 0 -and $run.Output -notmatch 'CALLER_CAUGHT|CALLER_CONTINUED' -and $message -match "review\.$minutesKey") -FailureMessage ("exit=$($run.ExitCode) output=$($run.Output) stderr=$message")
+            Assert-Result -Name "invalid $minutesKey refuses with no merge or finalization" -Condition (-not (Test-Path -LiteralPath (Join-Path $root 'merged')) -and -not (Test-Path -LiteralPath (Join-Path $root 'finalized'))) -FailureMessage 'merge or finalization ran before configuration refusal'
         }
     }
 

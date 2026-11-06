@@ -407,7 +407,9 @@ if ($WithSampleTask) {
         if ($Quiet) {
             $validateQuiet = $true
         }
+        $global:LASTEXITCODE = 0
         & (Join-Path $PSScriptRoot "validate-backlog.ps1") -FixSummary -BacklogPath $backlogFilePath -Quiet:$validateQuiet | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Backlog validation failed (exit $LASTEXITCODE)." }
     }
 }
 
@@ -447,7 +449,9 @@ if (Test-Path -LiteralPath (Join-Path $resolvedProjectRoot ".git")) {
 # installed copy so the bundle ships what it runs; only crucible-*.md in .claude/agents/.
 $agentSync = Join-Path $targetCrucible "powershell/sync-claude-agents.ps1"
 if (Test-Path -LiteralPath $agentSync -PathType Leaf) {
+    $global:LASTEXITCODE = 0
     if ($Quiet) { $null = & $agentSync -ProjectRoot $resolvedProjectRoot 6>$null } else { $null = & $agentSync -ProjectRoot $resolvedProjectRoot }
+    if ($LASTEXITCODE -ne 0) { throw "Agent definition generation exited $LASTEXITCODE." }
 }
 
 Write-Info ""

@@ -371,6 +371,12 @@ function Get-CrucibleFrameworkStatusChanges {
 function Assert-CrucibleFrameworkIntegrity {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # Recording an omitted check is part of the gate, so its failure also refuses.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     # A check that could not run is not a check that passed. Both outcomes stop the
     # pipeline; they are kept apart so the event log and the operator can tell a real
     # violation from a broken environment, and so the remediation text differs.
@@ -454,6 +460,12 @@ function Assert-CrucibleFrameworkIntegrity {
 
 function Complete-CrucibleSourceSession {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @("Ceiling", "Quiet") `
         -NonNullKeys @("SessionDir", "Handoff", "LogFile", "CircuitBreakerHistoryFile")
@@ -801,6 +813,12 @@ function Complete-CrucibleSourceSession {
 function Invoke-CrucibleRuntimeValidation {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() `
         -NonNullKeys @("Handoff", "LogFile", "CircuitBreakerHistoryFile")
 
@@ -1007,6 +1025,12 @@ function Invoke-CrucibleRuntimeValidation {
 function Invoke-CrucibleScopeGates {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() `
         -NonNullKeys @("Handoff", "FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile", "BacklogDir", "WorkspacesDir")
 
@@ -1028,7 +1052,12 @@ function Invoke-CrucibleScopeGates {
             Write-CheckNotRun -SessionDir (Get-GateNotRunSessionDir -Context $Context) -TaskId $handoff.task_id -Source "scope gate" `
                 -Check $conflictCheck -Reason ("check-file-affinity.ps1 not found at " + $affinityScript + ", so overlap with other active tasks was not checked")
         } else {
+            $global:LASTEXITCODE = 0
             & $affinityScript -TaskId $handoff.task_id -Affinity $handoff.file_affinity
+            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
+                [Console]::Error.WriteLine("check-file-affinity.ps1 crashed or failed internally (exit $LASTEXITCODE).")
+                exit 2
+            }
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "Error: File affinity overlap detected with another active task." -ForegroundColor Red
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" `
@@ -1178,8 +1207,14 @@ function Test-ResearchGateFilingPath {
 function Test-CompletionArtifactGate {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() `
-        -NonNullKeys @("Handoff", "BacklogDir", "SessionDir", "LogFile", "CircuitBreakerHistoryFile", "RepoRoot", "WorkspacesDir")
+        -NonNullKeys @("Handoff", "BacklogDir", "SessionDir", "LogFile", "CircuitBreakerHistoryFile", "RepoRoot", "WorkspacesDir", "FrameworkPowerShell")
 
     $handoff = $Context.Handoff
     $backlogDir = $Context.BacklogDir
@@ -1410,7 +1445,7 @@ function Test-CompletionArtifactGate {
                 -Outcome "artifact_verification_failed" -Notes ("Artifact verification failed: " + $errorMsg) `
                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
             Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "artifact_verification_failed" -AttemptCount $handoff.cumulative_handoff_count `
-                -LastSpecialist $handoff.source_phase -Summary $errorMsg
+                -LastSpecialist $handoff.source_phase -Summary $errorMsg -BacklogDir $backlogDir -FrameworkPowerShell $Context.FrameworkPowerShell
             exit 1
         }
     }
@@ -1511,6 +1546,12 @@ function Get-ResearchMisrouteAdvisory {
 function Invoke-RepositoryIntegrityGates {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context `
         -RequiredKeys @("Handoff", "IsBootstrap", "Quiet", "FrameworkPowerShell", "SessionDir") `
         -NonNullKeys @("LogFile", "CircuitBreakerHistoryFile")
@@ -1564,6 +1605,7 @@ function Invoke-RepositoryIntegrityGates {
     if ($handoff.source_phase -eq "grooming" -or $handoff.source_phase -eq "deployment") {
         Write-Quiet "`n[BACKLOG] Running backlog integrity check..." -ForegroundColor Cyan
         try {
+            $global:LASTEXITCODE = 0
             $result = & "$FRAMEWORK_POWERSHELL/validate-backlog.ps1" -FixSummary -Quiet:$Quiet -ProjectRoot $repoRoot 2>&1
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "[BACKLOG] VALIDATION FAILED:" -ForegroundColor Red
@@ -1594,7 +1636,12 @@ function Invoke-RepositoryIntegrityGates {
             exit 2
         }
         
+        $global:LASTEXITCODE = 0
         & "$FRAMEWORK_POWERSHELL/validate-dev-log.ps1" -FileToPublish $devLogPath
+        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
+            [Console]::Error.WriteLine("validate-dev-log.ps1 crashed or failed internally (exit $LASTEXITCODE).")
+            exit 2
+        }
         if ($LASTEXITCODE -ne 0) {
             Write-Host "`n[STOP] [NEXT SESSION COMMAND]: YOU must fix the Dev Log PII/secrets before proceeding." -ForegroundColor Red
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase -Outcome "blocked" -Notes "Dev Log validation failed before handoff" -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
@@ -1640,6 +1687,12 @@ function Invoke-RepositoryIntegrityGates {
 
 function Resolve-CrucibleTransition {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 
     Assert-CrucibleContextKeys -Context $Context `
         -RequiredKeys @("Handoff", "IsBootstrap", "SessionDir", "FrameworkPowerShell", "NextCrucibleCommand", "Quiet") `

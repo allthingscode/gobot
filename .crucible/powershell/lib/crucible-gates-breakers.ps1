@@ -16,6 +16,12 @@
 function Invoke-CircuitBreakerGates {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context `
         -RequiredKeys @("Handoff", "Ceiling", "FrameworkPowerShell", "RepoRoot", "WorkspacesDir") `
         -NonNullKeys @("LogFile", "CircuitBreakerHistoryFile")

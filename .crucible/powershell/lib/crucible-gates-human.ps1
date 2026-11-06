@@ -45,6 +45,11 @@ function Invoke-HumanGateMerge {
         [string]$HandoffScript = ""
     )
 
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     if ([string]::IsNullOrEmpty($CheckScript)) {
         $CheckScript = Join-Path (Split-Path -Parent $PSScriptRoot) "run-isolated-checks.ps1"
     }
@@ -453,6 +458,11 @@ function Invoke-HumanGateAction {
         # The record Write-HumanGateDecision returned for this decision. Item 267.
         [string]$DecisionRecordPath = ""
     )
+    # I11: shared config and backlog helpers keep exceptions for recovery callers.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
     $primaryBranch = Get-ConfiguredPrimaryBranch
     $resolvedProjectRoot = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
 
@@ -490,6 +500,10 @@ function Invoke-HumanGateAcceptRedirect {
         [string]$DecisionRecordPath = ""
     )
 
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
     $backlogPath = Join-Path $backlogDir "BACKLOG.md"
 
@@ -1192,6 +1206,12 @@ Copy-Item `$right `$rightCopy -Force
 
 function Invoke-HumanGate {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 
     if ($null -eq $Context) {
         throw "CrucibleContext is null."

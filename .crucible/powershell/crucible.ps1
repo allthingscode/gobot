@@ -110,6 +110,11 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 foreach ($lib in "config-helpers.ps1", "instruction-blocks.ps1", "language-presets.ps1", "project-root.ps1") {
     $libPath = Join-Path $PSScriptRoot "lib/$lib"
     if (-not (Test-Path -LiteralPath $libPath)) {
@@ -146,7 +151,7 @@ try {
     # unhandled exception. $ErrorActionPreference = "Stop" would exit non-zero either way,
     # but the operator would be reading a stack trace instead of the one sentence that says
     # which parameter to pass.
-    Write-Host ("Error: " + $_.Exception.Message) -ForegroundColor Red
+    [Console]::Error.WriteLine("Error: " + $_.Exception.Message)
     exit 1
 }
 $crucibleRoot = Get-CrucibleRoot -ProjectRoot $ProjectRoot
@@ -218,6 +223,7 @@ if ($Doctor) {
         Write-Host ("Error: Doctor script not found at " + $doctorScript) -ForegroundColor Red
         exit 1
     }
+    $global:LASTEXITCODE = 0
     & $doctorScript
     exit $LASTEXITCODE
 }
@@ -338,6 +344,7 @@ if ($Health -or $Cleanup) {
         Write-Host ("Error: Health script not found at " + $healthScript) -ForegroundColor Red
         exit 1
     }
+    $global:LASTEXITCODE = 0
     & $healthScript -Health:$Health -Cleanup:$Cleanup -Force:$Force -Quiet:$Quiet -TaskId $TaskId
     exit $LASTEXITCODE
 }
@@ -348,6 +355,7 @@ if ($Status) {
         Write-Host ("Error: Status script not found at " + $statusScript) -ForegroundColor Red
         exit 1
     }
+    $global:LASTEXITCODE = 0
     & $statusScript
     exit $LASTEXITCODE
 }

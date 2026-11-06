@@ -105,6 +105,7 @@ Set-Location '$($caseRoot.Replace("'", "''"))'
     BacklogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
     SessionDir = '$($ctx.SessionDir.Replace("'", "''"))'
     WorkspacesDir = '$($ctx.WorkspacesDir.Replace("'", "''"))'
+    FrameworkPowerShell = '$($ctx.FrameworkPowerShell.Replace("'", "''"))'
     LogFile = '$($ctx.LogFile.Replace("'", "''"))'
     CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
     Handoff = [PSCustomObject]@{
@@ -310,6 +311,7 @@ Write-Host 'HANDOFF_PASSED'
         $scriptPath = Join-Path $caseRoot "run-d21.ps1"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $frameworkPath = (Split-Path -Parent $CRUCIBLE_LIB).Replace("'", "''")
         @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -326,6 +328,7 @@ New-Item -ItemType Directory -Path `$verifyDir -Force | Out-Null
     CircuitBreakerHistoryFile = Join-Path `$sessionDir 'global/circuit_breakers.jsonl'
     RepoRoot = '$caseRoot'
     WorkspacesDir = Join-Path '$caseRoot' 'workspaces'
+    FrameworkPowerShell = '$frameworkPath'
     Quiet = `$true
     Handoff = [PSCustomObject]@{
         task_id = 'F-004'
@@ -350,22 +353,21 @@ if (`$logContent -match "accepted plain-text APPROVED") {
     Write-Host "PASSED_UNQUOTED"
 }
 
-# Sub-test 2: YAML CHANGES_REQUESTED with APPROVED in prose - should block (exit 1)
-try {
-    `$yaml2 = "---`nreview_decision: CHANGES_REQUESTED`nacceptance_criteria_met: false`n---`nProse has APPROVED somewhere in it."
-    `$yaml2 | Set-Content -LiteralPath `$reportPath -Encoding UTF8
+# Sub-test 2: YAML CHANGES_REQUESTED with APPROVED in prose - must block with exit 1 and a blocked record
+`$yaml2 = "---`nreview_decision: CHANGES_REQUESTED`nacceptance_criteria_met: false`n---`nProse has APPROVED somewhere in it."
+`$yaml2 | Set-Content -LiteralPath `$reportPath -Encoding UTF8
 
-    Test-CompletionArtifactGate -Context `$ctx
-    Write-Host "FAILED_SHOULD_HAVE_BLOCKED"
-} catch {
-    Write-Host "PASSED_BLOCKED"
-}
+Test-CompletionArtifactGate -Context `$ctx
+Write-Host "FAILED_SHOULD_HAVE_BLOCKED"
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "D21: unquoted YAML parses without fallback warning" -Condition ($output -match "PASSED_UNQUOTED") -FailureMessage ("expected PASSED_UNQUOTED, got: " + $output)
-        Assert-Result -Name "D21: CHANGES_REQUESTED YAML blocks even if APPROVED in prose" -Condition ($output -match "PASSED_BLOCKED") -FailureMessage ("expected PASSED_BLOCKED, got: " + $output)
+        $exitCode = $LASTEXITCODE
+        Assert-Result -Name "D21: CHANGES_REQUESTED YAML blocks even if APPROVED in prose" -Condition ($exitCode -eq 1 -and $output -notmatch "FAILED_SHOULD_HAVE_BLOCKED") -FailureMessage ("expected exit 1 without continuation, got exit " + $exitCode + ": " + $output)
+        $blockedRecords = @(Get-ChildItem -LiteralPath (Join-Path $caseRoot "backlog/blocked") -File -ErrorAction SilentlyContinue)
+        Assert-Result -Name "D21: blocked completion writes its blocked record" -Condition ($blockedRecords.Count -eq 1) -FailureMessage ("expected one blocked record, found " + $blockedRecords.Count + ": " + $output)
     }
 
     $results += Run-Test -Name "Invoke-CrucibleRuntimeValidation D20 regression: artifact resolution inside worktree" -Body {
@@ -398,6 +400,7 @@ try {
 
         $scriptPath = Join-Path $caseRoot "run-d20.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $frameworkPath = (Split-Path -Parent $CRUCIBLE_LIB).Replace("'", "''")
         @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -452,6 +455,7 @@ try {
 
         $scriptPath = Join-Path $caseRoot "run-d35.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $frameworkPath = (Split-Path -Parent $CRUCIBLE_LIB).Replace("'", "''")
         @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -739,6 +743,7 @@ Complete-CrucibleSourceSession -Context `$ctx
                 BacklogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
                 SessionDir = '$($ctx.SessionDir.Replace("'", "''"))'
                 WorkspacesDir = '$($ctx.WorkspacesDir.Replace("'", "''"))'
+                FrameworkPowerShell = '$($ctx.FrameworkPowerShell.Replace("'", "''"))'
                 LogFile = '$($ctx.LogFile.Replace("'", "''"))'
                 CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
                 Handoff = [PSCustomObject]@{

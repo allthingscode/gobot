@@ -72,6 +72,12 @@ param(
     [string]$ProjectRoot = ""
 )
 
+# I11: configuration helpers remain reusable; this command owns refusal.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 . (Join-Path $PSScriptRoot "lib/project-root.ps1")
@@ -262,7 +268,7 @@ function Invoke-CodexExec {
 }
 
 try { $REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoot }
-catch { Write-Host ("[CODEX] Error: " + $_.Exception.Message) -ForegroundColor Red; exit 2 }
+catch { [Console]::Error.WriteLine("[CODEX] Error: " + $_.Exception.Message); exit 2 }
 
 # -CrucibleRoot is joined onto the repo root, so relativize absolute paths within
 # that root and reject paths outside it before filesystem operations.
@@ -581,4 +587,5 @@ try {
     $outcome = New-CodexLaunchUnclassifiedRecord -Evidence $evidence -Reason $_.Exception.Message
 }
 Write-CodexLaunchStatus -StatusPath $statusPath -Record $outcome
+if ($outcome.ExitCode -eq 0) { exit 0 }
 exit $outcome.ExitCode

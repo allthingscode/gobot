@@ -540,7 +540,9 @@ function Restore-BacklogTask {
     # Reconcile Priority-Summary and validate
     $validateScript = Join-Path (Split-Path -Parent $PSScriptRoot) "validate-backlog.ps1"
     if (Test-Path $validateScript) {
-        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $resolvedProjectRoot | Out-Null
+        $global:LASTEXITCODE = 0
+        $validationOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $resolvedProjectRoot 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Backlog validation exited $LASTEXITCODE during restore: $($validationOutput | Out-String)" }
     }
 }
 

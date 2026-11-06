@@ -8,6 +8,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 . (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 $AdopterRoot = Resolve-ConfigProjectRoot -ProjectRoot $AdopterRoot
@@ -570,7 +575,9 @@ function Invoke-UpdateBundle {
             try {
                 . (Join-Path $adopterCrucibleRoot "powershell/lib/claude-agents.ps1")
                 $agentsChanged = @(Get-ClaudeAgentDrift -ProjectRoot $adopterRootResolved).Count -gt 0
+                $global:LASTEXITCODE = 0
                 $null = & $agentSync -ProjectRoot $adopterRootResolved
+                if ($LASTEXITCODE -ne 0) { throw "Agent definition generation exited $LASTEXITCODE." }
             } catch {
                 Write-Warning ("Could not regenerate .claude/agents/crucible-*.md: " + $_.Exception.Message)
             }
@@ -648,8 +655,9 @@ function Invoke-UpdateBundle {
 
 try {
     $exitCode = Invoke-UpdateBundle
-    exit $exitCode
+    if ($exitCode -ne 0) { exit $exitCode }
+    exit 0
 } catch {
-    Write-Host $_.Exception.Message -ForegroundColor Red
+    [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 }

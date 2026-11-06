@@ -154,6 +154,7 @@ function Write-ValidatedHandoff {
             throw "Validator not found: $validatorPath"
         }
 
+        $global:LASTEXITCODE = 0
         $validationRaw = & $validatorPath -HandoffFile $tempPath -SchemaPath $SchemaPath 2>&1
         if ($LASTEXITCODE -ne 0) {
             $validationText = ($validationRaw -join "`n").Trim()

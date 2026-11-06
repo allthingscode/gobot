@@ -4,6 +4,12 @@
 
 param([switch]$Json)
 
+# I11: configuration helpers remain reusable; this command owns refusal.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -376,7 +382,7 @@ if ($Json) {
 		eval_records         = $evalResults.Count
 		prompt_version_stats = @($versionSummary)
 	} | ConvertTo-Json -Depth 4
-	return
+	exit 0
 }
 
 # ?? Markdown Report ???????????????????????????????????????????????????????????
@@ -564,3 +570,4 @@ if ($recs.Count -eq 0) { $recs += "No critical issues detected. Continue monitor
 $recs | ForEach-Object { $report += "- $_" }
 
 $report -join "`n"
+exit 0

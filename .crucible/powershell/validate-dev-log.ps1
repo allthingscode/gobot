@@ -4,10 +4,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+# Exit 1 reports content findings; exit 2 reports an internal failure.
+trap {
+    [Console]::Error.WriteLine("validate-dev-log.ps1 crashed: " + $_.Exception.Message)
+    exit 2
+}
 
 if (-Not (Test-Path $FileToPublish)) {
-    Write-Error "File not found: $FileToPublish"
-    exit 1
+    [Console]::Error.WriteLine("validate-dev-log.ps1 internal failure: File not found: $FileToPublish")
+    exit 2
 }
 
 $Content = Get-Content -Path $FileToPublish -Raw
@@ -55,3 +61,4 @@ if ($HasErrors) {
 
 Write-Host "Scan Passed: No PII or secrets detected." -ForegroundColor Green
 Write-Host "You may manually publish the contents of '$FileToPublish' to GitHub Discussions."
+exit 0

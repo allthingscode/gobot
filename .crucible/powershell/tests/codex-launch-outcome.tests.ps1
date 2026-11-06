@@ -160,7 +160,7 @@ try {
         $afterRun = $launcherText.Substring($launcherText.IndexOf($runAnchor))
         $exits = @([regex]::Matches($afterRun, '(?m)^\s*exit\b.*$') | ForEach-Object { $_.Value.Trim() })
         Assert-Result -Name "one exit after the run, from the record" -Condition ($exits.Count -eq 1 -and $exits[0] -eq 'exit $outcome.ExitCode') -FailureMessage ("exits after the run: " + ($exits -join " | "))
-        Assert-Result -Name "the record is emitted before that exit" -Condition ($afterRun -match 'Write-CodexLaunchStatus -StatusPath \$statusPath -Record \$outcome\s+exit \$outcome\.ExitCode') -FailureMessage "the outcome must be emitted immediately before the launcher exits"
+        Assert-Result -Name "the record is emitted before that exit" -Condition ($afterRun -match 'Write-CodexLaunchStatus -StatusPath \$statusPath -Record \$outcome\s+if \(\$outcome.ExitCode -eq 0\) \{ exit 0 \}\s+exit \$outcome\.ExitCode') -FailureMessage "the outcome must be emitted before either recorded exit"
 
         # Nothing between the RUNNING record and the outcome may throw past the emitter: after
         # RUNNING the launcher builds the evidence from plain values, runs everything else inside
@@ -172,7 +172,7 @@ try {
         Assert-Result -Name "RUNNING emitted at the top level" -Condition ($runningIdx -ge 0) -FailureMessage "no top-level Write-CodexLaunchStatus for RUNNING"
         $after = @($top[($runningIdx + 1)..($top.Count - 1)])
         $shape = ($after | ForEach-Object { $_.GetType().Name }) -join ","
-        Assert-Result -Name "after RUNNING: evidence, one try, emit, exit" -Condition ($shape -eq "AssignmentStatementAst,TryStatementAst,PipelineAst,ExitStatementAst") -FailureMessage ("top-level statements after RUNNING: " + $shape)
+        Assert-Result -Name "after RUNNING: evidence, one try, emit, recorded exits" -Condition ($shape -eq "AssignmentStatementAst,TryStatementAst,PipelineAst,IfStatementAst,ExitStatementAst") -FailureMessage ("top-level statements after RUNNING: " + $shape)
         $evidenceCommands = @($after[0].FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true))
         Assert-Result -Name "evidence built from plain values" -Condition ($after[0].Left.Extent.Text -eq '$evidence' -and $evidenceCommands.Count -eq 0) -FailureMessage ("the evidence assignment runs commands: " + $after[0].Extent.Text)
         Assert-Result -Name "the try yields a record" -Condition (@($after[1].CatchClauses).Count -ge 1 -and $after[1].CatchClauses[-1].Body.Extent.Text -match '\$outcome = New-CodexLaunchUnclassifiedRecord') -FailureMessage "the outer catch must set the outcome"
@@ -180,7 +180,7 @@ try {
         Assert-Result -Name "codex runs inside the try" -Condition ($invoke.Count -eq 1) -FailureMessage ("Invoke-CodexExec calls inside the outer try: " + $invoke.Count)
         $all = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq "Invoke-CodexExec" -and $node.Extent.Text -match '\$codexArgs' }, $true))
         Assert-Result -Name "no phase run outside the try" -Condition ($all.Count -eq 1) -FailureMessage ("phase runs of Invoke-CodexExec: " + $all.Count)
-        Assert-Result -Name "emit and exit use the outcome" -Condition ($after[2].Extent.Text -eq 'Write-CodexLaunchStatus -StatusPath $statusPath -Record $outcome' -and $after[3].Extent.Text -eq 'exit $outcome.ExitCode') -FailureMessage ("emit: " + $after[2].Extent.Text + " exit: " + $after[3].Extent.Text)
+        Assert-Result -Name "emit and exits use the outcome" -Condition ($after[2].Extent.Text -eq 'Write-CodexLaunchStatus -StatusPath $statusPath -Record $outcome' -and $after[3].Extent.Text -eq 'if ($outcome.ExitCode -eq 0) { exit 0 }' -and $after[4].Extent.Text -eq 'exit $outcome.ExitCode') -FailureMessage ("emit and exits: " + (($after[2..4] | ForEach-Object { $_.Extent.Text }) -join '; '))
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

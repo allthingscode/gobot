@@ -532,6 +532,28 @@ exit 0
     }
 
     $results += Run-Test -Name "Extracted functions enforce required context keys" -Body {
+        # Gates exit their host on contract failure. Keep the existing message
+        # checks while exercising each gate in a child, including an outer catch.
+        function Invoke-MissingContextGate {
+            param([string]$Function)
+            $child = Join-Path $tempRoot ("context-" + $Function + '.ps1')
+            $lib = $CRUCIBLE_LIB.Replace("'", "''")
+            $body = @"
+`$ErrorActionPreference = 'Stop'
+`$Quiet = `$true
+. '$lib'
+try { $Function -Context @{ RepoRoot = 'foo' } }
+catch { Write-Host 'CALLER_CAUGHT' }
+Write-Host 'CALLER_CONTINUED'
+exit 0
+"@
+            [IO.File]::WriteAllText($child, $body.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
+            $run = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $child 2>&1 }
+            if ($run.ExitCode -eq 0 -or $run.Output -match 'CALLER_CAUGHT|CALLER_CONTINUED') {
+                throw 'Gate context refusal was catchable or continued.'
+            }
+            throw $run.Output
+        }
         # Test null context
         try {
             Invoke-CrucibleRuntimeValidation -Context $null
@@ -543,7 +565,7 @@ exit 0
         # Test missing key for Invoke-CrucibleRuntimeValidation
         $badCtx = @{ RepoRoot = "foo" }
         try {
-            Invoke-CrucibleRuntimeValidation -Context $badCtx
+            Invoke-MissingContextGate -Function Invoke-CrucibleRuntimeValidation
             Assert-Result -Name "runtime missing key check" -Condition $false -FailureMessage "Did not fail on missing keys"
         } catch {
             Assert-Result -Name "runtime key check passed" -Condition ($_.Exception.Message -match "Required key '.*' is missing") -FailureMessage "Incorrect missing key error message"
@@ -551,7 +573,7 @@ exit 0
 
         # Test missing key for Invoke-CrucibleScopeGates
         try {
-            Invoke-CrucibleScopeGates -Context $badCtx
+            Invoke-MissingContextGate -Function Invoke-CrucibleScopeGates
             Assert-Result -Name "scope missing key check" -Condition $false -FailureMessage "Did not fail on missing keys"
         } catch {
             Assert-Result -Name "scope key check passed" -Condition ($_.Exception.Message -match "Required key '.*' is missing") -FailureMessage "Incorrect missing key error message"
@@ -559,7 +581,7 @@ exit 0
 
         # Test missing key for Test-CompletionArtifactGate
         try {
-            Test-CompletionArtifactGate -Context $badCtx
+            Invoke-MissingContextGate -Function Test-CompletionArtifactGate
             Assert-Result -Name "artifact missing key check" -Condition $false -FailureMessage "Did not fail on missing keys"
         } catch {
             Assert-Result -Name "artifact key check passed" -Condition ($_.Exception.Message -match "Required key '.*' is missing") -FailureMessage "Incorrect missing key error message"
@@ -567,7 +589,7 @@ exit 0
 
         # Test missing key for Normalize-CrucibleInputState
         try {
-            Normalize-CrucibleInputState -Context $badCtx
+            Invoke-MissingContextGate -Function Normalize-CrucibleInputState
             Assert-Result -Name "normalize missing key check" -Condition $false -FailureMessage "Did not fail on missing keys"
         } catch {
             Assert-Result -Name "normalize key check passed" -Condition ($_.Exception.Message -match "Required key '.*' is missing") -FailureMessage "Incorrect missing key error message"
@@ -575,7 +597,7 @@ exit 0
 
         # Test missing key for Invoke-CircuitBreakerGates
         try {
-            Invoke-CircuitBreakerGates -Context $badCtx
+            Invoke-MissingContextGate -Function Invoke-CircuitBreakerGates
             Assert-Result -Name "breaker missing key check" -Condition $false -FailureMessage "Did not fail on missing keys"
         } catch {
             Assert-Result -Name "breaker key check passed" -Condition ($_.Exception.Message -match "Required key '.*' is missing") -FailureMessage "Incorrect missing key error message"
@@ -583,7 +605,7 @@ exit 0
 
         # Test missing key for Invoke-HumanGate
         try {
-            Invoke-HumanGate -Context $badCtx
+            Invoke-MissingContextGate -Function Invoke-HumanGate
             Assert-Result -Name "human gate missing key check" -Condition $false -FailureMessage "Did not fail on missing keys"
         } catch {
             Assert-Result -Name "human gate key check passed" -Condition ($_.Exception.Message -match "Required key '.*' is missing") -FailureMessage "Incorrect missing key error message"
@@ -591,7 +613,7 @@ exit 0
 
         # Test missing key for Invoke-RepositoryIntegrityGates
         try {
-            Invoke-RepositoryIntegrityGates -Context $badCtx
+            Invoke-MissingContextGate -Function Invoke-RepositoryIntegrityGates
             Assert-Result -Name "integrity gates missing key check" -Condition $false -FailureMessage "Did not fail on missing keys"
         } catch {
             Assert-Result -Name "integrity gates key check passed" -Condition ($_.Exception.Message -match "Required key '.*' is missing") -FailureMessage "Incorrect missing key error message"
@@ -599,7 +621,7 @@ exit 0
 
         # Test missing key for Resolve-CrucibleTransition
         try {
-            Resolve-CrucibleTransition -Context $badCtx
+            Invoke-MissingContextGate -Function Resolve-CrucibleTransition
             Assert-Result -Name "transition missing key check" -Condition $false -FailureMessage "Did not fail on missing keys"
         } catch {
             Assert-Result -Name "transition key check passed" -Condition ($_.Exception.Message -match "Required key '.*' is missing") -FailureMessage "Incorrect missing key error message"

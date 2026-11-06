@@ -6,6 +6,12 @@ param(
     [switch]$Check
 )
 
+# I11: configuration helpers remain reusable; this command owns refusal.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")

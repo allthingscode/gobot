@@ -4,6 +4,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 2
+}
 $errors = @()
 $warnings = @()
 

@@ -45,6 +45,12 @@ Set-StrictMode -Version Latest
 
 $ErrorActionPreference = "Stop"
 
+# I11: project/config helpers keep exceptions; this command owns refusal.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 $REPO_ROOT = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
 
 function Split-ItemList {
@@ -289,3 +295,4 @@ Write-Host ("    Codex:  " + $dispatchCommand)
 Write-Host ("    Claude: Agent tool, prompt = `"$pointer`"")
 Write-Host ""
 Write-Host "  The gate is CLOSED; the specialist will file the approved stubs and hand off without re-presenting."
+exit 0
