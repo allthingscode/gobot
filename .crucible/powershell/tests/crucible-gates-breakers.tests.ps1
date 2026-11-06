@@ -190,6 +190,7 @@ function Invoke-ResearchBreakerRun {
                 return (Join-Path '$safeCaseRoot' ('.crucible/' + `$Key))
             }
             `$ctx = @{
+                BacklogDir = `$backlogDir
                 RepoRoot = '$safeCaseRoot'
                 WorkspacesDir = '$(Join-Path $CaseRoot ".crucible/.agent-workspaces")'
                 LogFile = '$safeLogFile'
@@ -515,6 +516,8 @@ Complete-CrucibleSourceSession -Context `$ctx
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot "workspaces")'
                 LogFile = '$($ctx.LogFile.Replace("'", "''"))'
@@ -553,6 +556,8 @@ Complete-CrucibleSourceSession -Context `$ctx
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot "workspaces")'
                 LogFile = '$($ctx.LogFile.Replace("'", "''"))'
@@ -591,6 +596,8 @@ Complete-CrucibleSourceSession -Context `$ctx
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot "workspaces")'
                 LogFile = '$($ctx.LogFile.Replace("'", "''"))'
@@ -675,6 +682,7 @@ verification:
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
                 LogFile = '$($logFile.Replace("'", "''"))'
@@ -774,6 +782,7 @@ verification:
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
                 LogFile = '$($logFile.Replace("'", "''"))'
@@ -851,6 +860,7 @@ verification:
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
                 LogFile = '$($logFile.Replace("'", "''"))'
@@ -920,6 +930,7 @@ verification:
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
                 LogFile = '$($logFile.Replace("'", "''"))'
@@ -993,6 +1004,7 @@ verification:
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
                 LogFile = '$($logFile.Replace("'", "''"))'
@@ -1036,6 +1048,7 @@ verification:
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
                 LogFile = '$($logFile.Replace("'", "''"))'
@@ -1456,6 +1469,8 @@ verification:
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
+                FrameworkPowerShell = `$FRAMEWORK_POWERSHELL
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot "workspaces")'
                 LogFile = '$($ctx.LogFile.Replace("'", "''"))'
@@ -1532,6 +1547,7 @@ verification:
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot ".crucible/.agent-workspaces")'
                 LogFile = '$($logFile.Replace("'", "''"))'
@@ -1613,6 +1629,7 @@ verification:
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
             . '$libPath'
             `$ctx = @{
+                BacklogDir = `$backlogDir
                 RepoRoot = '$caseRoot'
                 WorkspacesDir = '$(Join-Path $caseRoot "workspaces")'
                 SessionDir = '$($ctx.SessionDir.Replace("'", "''"))'

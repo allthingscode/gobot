@@ -33,6 +33,7 @@ if ($FailRead) {
     }
 }
 $ctx = @{
+    BacklogDir = $backlogDir
     RepoRoot = $Project
     WorkspacesDir = Join-Path $Project 'workspaces'
     SessionDir = Join-Path $Project '.crucible/session'

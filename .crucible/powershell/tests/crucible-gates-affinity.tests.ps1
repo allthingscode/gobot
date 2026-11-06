@@ -978,6 +978,99 @@ exit 0
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+$repo = (Resolve-Path "$PSScriptRoot/../..").Path
+$source = Join-Path $repo 'powershell'
+$tempRoot = New-TestFixtureRoot -NameHint 'gate-recovery-findings'
+try {
+    foreach ($scenario in @('known-tip', 'unknown-tip')) {
+        $results += Run-Test -Name "Branch restore $scenario prints complete ordered recovery" -Body {
+            $child = Join-Path $tempRoot "$scenario.ps1"
+            @"
+`$ErrorActionPreference = 'Stop'
+`$Quiet = `$true
+. '$source/crucible-lib.ps1'
+function Assert-HumanGateReworkAvailable {}
+function Test-GitDiscardSafe { `$true }
+function Write-Quiet {}
+function Get-CrucibleCommandRoot { '$repo' }
+function Get-HumanGateRejectUnwind {
+    if ('$scenario' -eq 'known-tip') { @{ CurrentHead = 'saved-sha'; ParentList = @(); HeadIsTaskMerge = `$false; UnwindTarget = '' } }
+    else { @{ CurrentHead = 'other-merge'; ParentList = @('base', 'other-task'); HeadIsTaskMerge = `$false; UnwindTarget = '' } }
+}
+function Invoke-GitChecked { param(`$Action) if (`$Action.ToString() -match 'show-ref|git branch') { `$global:LASTEXITCODE = 1 } else { `$global:LASTEXITCODE = 0 } }
+Invoke-HumanGateRejectAbandon -TaskId F-368 -Outcome rejected -PrimaryBranch main -ProjectRoot '$tempRoot' -GateReason 'repair tests'
+"@ | Set-Content -LiteralPath $child -Encoding utf8
+            $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $child }
+            Assert-Result 'branch refusal exits' ($res.ExitCode -eq 1) $res.Output
+            Assert-Result 'all three recovery commands in order' ($res.Output -match '(?s)1\. Recreate the branch.*git -C .* branch .*2\. Restore the backlog entry: .*backlog-io\.ps1.*Restore-BacklogTask.*-TaskId.*-ProjectRoot.*-ActiveStatus.*3\. Generate the rework handoff: .*new-handoff\.ps1.*-TaskId.*Do not reject again') $res.Output
+            # Bind the actual printed commands without performing recovery. Preserve
+            # the real script/function signatures and capture the bound arguments.
+            $lines = @($res.Output -split "`r?`n")
+            $restore = ($lines | Where-Object { $_ -like '2. Restore*' }) -replace '^2\. Restore the backlog entry: ', ''
+            $rework = ($lines | Where-Object { $_ -like '3. Generate*' }) -replace '^3\. Generate the rework handoff: ', ''
+            Assert-Result 'two PowerShell commands captured' (@($restore).Count -eq 1 -and @($rework).Count -eq 1) $res.Output
+            $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'new-handoff.ps1'), [ref]$null, [ref]$null)
+            $params = $ast.ParamBlock.Extent.Text
+            $backlogAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'lib/backlog-io.ps1'), [ref]$null, [ref]$null)
+            $restoreFunction = $backlogAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Restore-BacklogTask' }, $true)
+            $restoreParams = $restoreFunction.Body.ParamBlock.Extent.Text
+            $bind = Join-Path $tempRoot "bind-$scenario.ps1"
+            @"
+`$ErrorActionPreference = 'Stop'
+$restore
+"@.Replace('; Restore-BacklogTask ', "; function Restore-BacklogTask { [CmdletBinding()] $restoreParams if (`$TaskId -ne 'F-368' -or `$ActiveStatus -ne 'In Progress') { throw 'wrong restore arguments' }; 'RESTORE_BOUND' }; Restore-BacklogTask ") | Set-Content -LiteralPath $bind -Encoding utf8
+            $bound = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $bind }
+            Assert-Result 'printed restore loads real library and binds' ($bound.ExitCode -eq 0 -and $bound.Output -match 'RESTORE_BOUND') $bound.Output
+            # Replace only the invocation target with a function bearing the real
+            # generator's param block; unknown names fail PowerShell binding.
+            $rework = $rework -replace "^& '[^']*new-handoff\.ps1'", 'Invoke-TestHandoff'
+            "function Invoke-TestHandoff { [CmdletBinding()] $params 'HANDOFF_BOUND' }`n$rework" | Set-Content -LiteralPath $bind -Encoding utf8
+            $bound = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $bind }
+            Assert-Result 'printed rework binds real generator parameters' ($bound.ExitCode -eq 0 -and $bound.Output -match 'HANDOFF_BOUND') $bound.Output
+        }
+    }
+    foreach ($gate in @('affinity', 'dev-log')) {
+        $results += Run-Test -Name "Exit 1 $gate finding retains message and breaker event" -Body {
+            # Execute the actual child call and both following status branches.
+            # AST extraction keeps unrelated gates out of this focused fixture.
+            $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'lib/crucible-gates.ps1'), [ref]$null, [ref]$null)
+            $needle = if ($gate -eq 'affinity') { '& $affinityScript' } else { '& "$FRAMEWORK_POWERSHELL/validate-dev-log.ps1"' }
+            $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.Text.StartsWith($needle) }, $true)
+            while ($node.Parent -isnot [Management.Automation.Language.StatementBlockAst]) { $node = $node.Parent }
+            $statements = @($node.Parent.Statements)
+            $index = [array]::IndexOf($statements, $node)
+            $body = ($statements[($index - 1)..($index + 2)] | ForEach-Object { $_.Extent.Text }) -join "`n"
+            $stub = Join-Path $tempRoot 'validate-dev-log.ps1'
+            'param($TaskId, $Affinity, $FileToPublish); exit 1' | Set-Content -LiteralPath $stub -Encoding utf8
+            $child = Join-Path $tempRoot "finding-$gate.ps1"
+            @"
+`$ErrorActionPreference = 'Stop'
+`$Quiet = `$true
+. '$source/crucible-lib.ps1'
+`$FRAMEWORK_POWERSHELL = '$tempRoot'
+`$affinityScript = '$stub'
+`$devLogPath = 'unused'
+`$handoff = [pscustomobject]@{ task_id = 'F-371'; file_affinity = @('src/'); source_phase = 'deployment' }
+`$LOG_FILE = '$tempRoot/$gate-log.jsonl'
+`$CB_HISTORY_FILE = '$tempRoot/$gate-breakers.jsonl'
+$body
+"@ | Set-Content -LiteralPath $child -Encoding utf8
+            $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $child }
+            $message = if ($gate -eq 'affinity') { 'File affinity overlap detected' } else { 'fix the Dev Log PII/secrets' }
+            $outcome = if ($gate -eq 'affinity') { 'file_affinity_conflict' } else { 'blocked' }
+            Assert-Result 'finding message survives crash guard' ($res.Output -match $message -and $res.Output -notmatch 'crashed or failed internally') $res.Output
+            $expectedExit = if ($gate -eq 'affinity') { 1 } else { 2 }
+            Assert-Result 'finding gate exits with refusal status' ($res.ExitCode -eq $expectedExit) $res.Output
+            foreach ($log in @("$gate-log.jsonl", "$gate-breakers.jsonl")) {
+                $events = @(if (Test-Path (Join-Path $tempRoot $log)) { Get-Content (Join-Path $tempRoot $log) | ConvertFrom-Json })
+                Assert-Result "finding breaker persisted in $log" ($events.Count -eq 1 -and $events[0].event -eq 'circuit_breaker' -and $events[0].outcome -eq $outcome -and $events[0].task_id -eq 'F-371') $res.Output
+            }
+        }
+    }
+} finally {
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 $failed = @($results | Where-Object { -not $_ }).Count
 if ($failed -gt 0) {
     Write-Host ("`n$failed Crucible gate test(s) failed.") -ForegroundColor Red

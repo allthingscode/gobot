@@ -42,6 +42,31 @@ $payload | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot "u
 '@ | Set-Content -LiteralPath $stubScript -Encoding UTF8
 
 try {
+    foreach ($parameter in @('BacklogDir', 'FrameworkPowerShell')) {
+        foreach ($mode in @('missing', 'empty')) {
+            $results += Run-Test -Name "Required $parameter refuses $mode despite ambient defaults" -Body {
+                $caseRoot = Join-Path $tempRoot "$parameter-$mode"
+                New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+                $child = Join-Path $caseRoot 'required.ps1'
+                $supplied = if ($parameter -eq 'BacklogDir') { "-FrameworkPowerShell '$frameworkDir'" } else { "-BacklogDir '$caseRoot'" }
+                if ($mode -eq 'empty') { $supplied += " -$parameter ''" }
+                @"
+`$ErrorActionPreference = 'Stop'
+`$PSStyle.OutputRendering = 'PlainText'
+. '$CRUCIBLE_LIB'
+`$Quiet = `$true
+`$backlogDir = '$caseRoot'
+`$FRAMEWORK_POWERSHELL = '$frameworkDir'
+Write-BlockedTaskRecord -TaskId F-369 -CircuitBreaker fixture -AttemptCount 1 -LastPhase implementation -Summary fixture $supplied
+Write-Host 'SILENT_SUCCESS'
+"@ | Set-Content -LiteralPath $child -Encoding utf8
+                $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -NonInteractive -File $child }
+                Assert-Result 'required input refuses' ($res.ExitCode -ne 0 -and $res.Output -notmatch 'SILENT_SUCCESS') $res.Output
+                Assert-Result 'refusal names required parameter' (($res.Output -match ("mandatory[\s|]+parameters:[\s|]*\b" + $parameter + "\b")) -or ($res.Output -match ("parameter '" + $parameter + "'"))) $res.Output
+                Assert-Result 'no partial blocked record' (-not (Test-Path (Join-Path $caseRoot 'blocked'))) $res.Output
+            }
+        }
+    }
     $results += Run-Test -Name "Item255 blocked record asks the owner for the backlog ancestor" -Body {
         $caseRoot = Join-Path $tempRoot "item255-ancestor"
         $caseBacklog = Join-Path $caseRoot "external/backlog"

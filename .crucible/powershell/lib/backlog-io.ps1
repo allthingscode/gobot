@@ -1,3 +1,6 @@
+# A recovery command dot-sources this library through the command builder.
+param()
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 

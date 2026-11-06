@@ -836,7 +836,7 @@ function Invoke-CrucibleRuntimeValidation {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
             -Outcome "git_hook_bypass" -Notes "Handoff reported or referenced a git hook bypass attempt." `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-        Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "git_hook_bypass" -AttemptCount $handoff.cumulative_handoff_count `
+        Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "git_hook_bypass" -AttemptCount $handoff.cumulative_handoff_count `
             -LastSpecialist $handoff.source_phase -Summary "Handoff reported or referenced use of --no-verify or CRUCIBLE_BYPASS_LINUX_LEG, which bypass required git hooks."
         Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "git_hook_bypass" `
             -Why "Git hook bypass attempt detected. '--no-verify' and CRUCIBLE_BYPASS_LINUX_LEG require human review. Fix the hook failure or complete Linux leg verification instead of bypassing it."
@@ -981,7 +981,7 @@ function Invoke-CrucibleRuntimeValidation {
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
                     -Outcome "blocked" -Notes ("Fabricated artifact path(s) in handoff: " + $joined) `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "fabricated_artifacts" -AttemptCount $handoff.cumulative_handoff_count `
+                Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "fabricated_artifacts" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary ("Handoff listed artifact paths that do not exist: " + $joined) -Artifacts $missingArtifacts
                 Write-Host "[STOP] Artifact integrity gate failed. Fabricated artifact paths must be corrected before handoff can proceed." -ForegroundColor Red
                 exit 2
@@ -990,7 +990,7 @@ function Invoke-CrucibleRuntimeValidation {
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
                     -Outcome "unreadable_retry_history" -Notes $unreadableRetryHistoryReason `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count `
+                Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary $unreadableRetryHistoryReason -Artifacts $missingArtifacts
                 Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_retry_history" `
                     -Why $unreadableRetryHistoryReason
@@ -1103,7 +1103,7 @@ function Invoke-CrucibleScopeGates {
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" `
                     -Outcome "scope_violation" -Notes ("Architect modified files outside file_affinity: " + $joined) `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "scope_violation" -AttemptCount $handoff.cumulative_handoff_count `
+                Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "scope_violation" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary ("Architect modified files outside declared file_affinity: " + $joined) -Artifacts $outOfScopeFiles
                 Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "scope_violation" `
                     -Why ("Scope boundary violation detected. Out-of-scope files: " + $joined + ". Expand file_affinity or revert out-of-scope changes.")

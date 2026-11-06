@@ -11,8 +11,8 @@ function Write-BlockedTaskRecord {
         [Parameter(Mandatory=$true)][string]$Summary,
         [string]$HumanDecisionNeeded = "Should we reduce scope, split the task, or abandon it?",
         [string[]]$Artifacts = @(),
-        [string]$BacklogDir = $backlogDir,
-        [string]$FrameworkPowerShell = $FRAMEWORK_POWERSHELL
+        [Parameter(Mandatory=$true)][string]$BacklogDir,
+        [Parameter(Mandatory=$true)][string]$FrameworkPowerShell
     )
     $blockedDir = Join-Path $BacklogDir "blocked"
     if (-not (Test-Path $blockedDir)) { New-Item -ItemType Directory -Force -Path $blockedDir | Out-Null }

@@ -120,7 +120,7 @@ function Invoke-HumanGateMerge {
         Write-EventLog -Event "circuit_breaker" -TaskId $TaskId -Specialist "deployment" -Outcome "blocked" -Notes "Recurring Merge Conflicts - $MaxRebaseAttempts strikes at human gate" `
             -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
         if (Test-Path -LiteralPath Function:Write-BlockedTaskRecord) {
-            Write-BlockedTaskRecord -TaskId $TaskId -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $currentRebase -LastSpecialist "deployment" -Summary "Recurring Merge Conflicts at human gate. Manual conflict resolution required."
+            Write-BlockedTaskRecord -BacklogDir (Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot) -FrameworkPowerShell (Split-Path -Parent $PSScriptRoot) -TaskId $TaskId -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $currentRebase -LastSpecialist "deployment" -Summary "Recurring Merge Conflicts at human gate. Manual conflict resolution required."
         }
         Write-WedgeReport -TaskId $TaskId -ProjectRoot $ProjectRoot -SourcePhase "deployment" -TargetPhase "deployment" -BreakerCode "recurring_merge_conflicts" `
             -Why "Recurring Merge Conflicts: task/$TaskId rebased $currentRebase time(s) and still conflicts with $PrimaryBranch. Reduce scope or resolve the conflict manually."
@@ -882,6 +882,22 @@ function Get-HumanGateRejectUnwind {
     }
 }
 
+function Get-HumanGateBranchRecoverySteps {
+    param(
+        [Parameter(Mandatory=$true)][string]$TaskId,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot,
+        [string]$GateReason = "",
+        $Handoff = $null
+    )
+    # Dot-source the real library before invoking its restore function.
+    $loadBacklog = New-CrucibleCommand -Script "powershell/lib/backlog-io.ps1" -Transport PowerShell -Parameters ([ordered]@{}) -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot)
+    $restoreCommand = if ($loadBacklog.StartsWith("#")) { $loadBacklog } else {
+        ". " + $loadBacklog.Substring(2) + "; Restore-BacklogTask -TaskId '" + $TaskId.Replace("'", "''") + "' -ProjectRoot '" + $ProjectRoot.Replace("'", "''") + "' -ActiveStatus 'In Progress'"
+    }
+    $reworkCommand = Get-HumanGateReworkRecoveryCommand -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff
+    return "2. Restore the backlog entry: $restoreCommand`n3. Generate the rework handoff: $reworkCommand`nDo not reject again."
+}
+
 function Invoke-HumanGateRejectAbandon {
     # Return unaccepted work through backlog restore or Abandoned archival, then
     # the rework handoff to implementation.
@@ -926,13 +942,13 @@ function Invoke-HumanGateRejectAbandon {
             Invoke-GitChecked { git show-ref --quiet "refs/heads/task/$TaskId" }
             if ($LASTEXITCODE -ne 0) {
                 if (-not $taskTip) {
-                    [Console]::Error.WriteLine("[STOP] Cannot identify the tip of task/$TaskId from another task's merge. The rejection is already recorded and $primaryState. Identify and verify the task sha with git reflog --all, then restore task/$TaskId manually before resuming rework (do not reject again).")
+                    [Console]::Error.WriteLine("[STOP] Cannot identify the tip of task/$TaskId from another task's merge. The rejection is already recorded and $primaryState. Identify and verify the task sha with git reflog --all, then complete recovery in order:`n1. Recreate the branch (replace <verified-task-sha>): git -C '$($ProjectRoot.Replace("'", "''"))' branch 'task/$($TaskId.Replace("'", "''"))' '<verified-task-sha>'`n$(Get-HumanGateBranchRecoverySteps -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff)")
                     exit 1
                 }
                 $global:LASTEXITCODE = 0
                 Invoke-GitChecked { git branch "task/$TaskId" $taskTip }
                 if ($LASTEXITCODE -ne 0) {
-                    [Console]::Error.WriteLine("[STOP] Could not restore task/$TaskId. The rejection is already recorded and $primaryState; no backlog update or rework handoff was attempted. Restore the saved task tip manually: $branchCommand. Resume rework after repairing the cause (do not reject again).")
+                    [Console]::Error.WriteLine("[STOP] Could not restore task/$TaskId. The rejection is already recorded and $primaryState; no backlog update or rework handoff was attempted. Complete recovery in order:`n1. Recreate the branch: $branchCommand`n$(Get-HumanGateBranchRecoverySteps -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff)")
                     exit 1
                 }
                 Write-Quiet "[HUMAN GATE] Restored task branch task/$TaskId"
