@@ -17,7 +17,7 @@ $results = @()
 $PRODUCTION_2TO1_ALLOWLIST = @(
     @{
         RelativePath = "powershell/lib/backlog-io.ps1"
-        Pattern      = '(?i)\$validationOutput\s*=\s*&\s*\(Get-PwshCommand\).*validateScript.*2>&1'
+        Pattern      = '(?i)\$validationOutput\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*validateScript.*2>&1'
         Reason       = "Item 261: native child PowerShell restore validation captures stdout and stderr so refusal includes the failing backlog row."
     },
     @{
@@ -47,7 +47,7 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
     },
     @{
         RelativePath = "powershell/lib/crucible-gates-breakers.ps1"
-        Pattern      = '(?i)\$testOutput\s*=\s*&\s*\(Get-PwshCommand\).*isolatedChecksScript.*2>&1'
+        Pattern      = '(?i)\$testOutput\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*isolatedChecksScript.*2>&1'
         Reason       = "Child PowerShell process running isolated checks test suite to capture full runner output."
     },
     @{
@@ -57,22 +57,22 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
     },
     @{
         RelativePath = "powershell/lib/crucible-gates-human.ps1"
-        Pattern      = '(?i)\$ciOutput\s*=\s*@\(&\s*\(Get-PwshCommand\).*watchScript.*2>&1\)'
+        Pattern      = '(?i)\$ciOutput\s*=\s*@\(&\s*\(Get-RunningPowerShellCommand\).*watchScript.*2>&1\)'
         Reason       = "Child PowerShell process running CI watcher during automated promotion."
     },
     @{
         RelativePath = "powershell/lib/crucible-gates-human.ps1"
-        Pattern      = '(?i)\$postPushOutput\s*=\s*@\(&\s*\(Get-PwshCommand\).*watchScript.*2>&1\)'
+        Pattern      = '(?i)\$postPushOutput\s*=\s*@\(&\s*\(Get-RunningPowerShellCommand\).*watchScript.*2>&1\)'
         Reason       = "Child PowerShell process running post-push CI watcher during automated promotion."
     },
     @{
         RelativePath = "powershell/lib/crucible-gates.ps1"
-        Pattern      = '(?i)\$result\s*=\s*&\s*\(Get-PwshCommand\).*validate-backlog\.ps1.*2>&1'
+        Pattern      = '(?i)\$result\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*validate-backlog\.ps1.*2>&1'
         Reason       = "Child PowerShell process captures Console.Error refusal diagnostics for the backlog gate."
     },
     @{
         RelativePath = "powershell/new-handoff.ps1"
-        Pattern      = '(?i)\$validationRaw\s*=\s*&\s*\(Get-PwshCommand\).*validatorPath.*2>&1'
+        Pattern      = '(?i)\$validationRaw\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*validatorPath.*2>&1'
         Reason       = "Child PowerShell process captures Console.Error refusal diagnostics for handoff schema validation."
     },
     @{

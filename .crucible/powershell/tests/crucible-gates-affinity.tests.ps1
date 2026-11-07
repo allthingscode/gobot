@@ -982,11 +982,14 @@ $repo = (Resolve-Path "$PSScriptRoot/../..").Path
 $source = Join-Path $repo 'powershell'
 $tempRoot = New-TestFixtureRoot -NameHint 'gate-recovery-findings'
 try {
+    $recoveryRoot = Join-Path $tempRoot ("operator" + [char]0x2019 + "s project")
+    $recoveryLiteral = ConvertTo-CrucibleCommandPowerShellLiteral -Value $recoveryRoot
     foreach ($scenario in @('known-tip', 'unknown-tip')) {
         $results += Run-Test -Name "Branch restore $scenario prints complete ordered recovery" -Body {
             $child = Join-Path $tempRoot "$scenario.ps1"
             @"
 `$ErrorActionPreference = 'Stop'
+`$PSStyle.OutputRendering = 'PlainText'
 `$Quiet = `$true
 . '$source/crucible-lib.ps1'
 function Assert-HumanGateReworkAvailable {}
@@ -998,7 +1001,7 @@ function Get-HumanGateRejectUnwind {
     else { @{ CurrentHead = 'other-merge'; ParentList = @('base', 'other-task'); HeadIsTaskMerge = `$false; UnwindTarget = '' } }
 }
 function Invoke-GitChecked { param(`$Action) if (`$Action.ToString() -match 'show-ref|git branch') { `$global:LASTEXITCODE = 1 } else { `$global:LASTEXITCODE = 0 } }
-Invoke-HumanGateRejectAbandon -TaskId F-368 -Outcome rejected -PrimaryBranch main -ProjectRoot '$tempRoot' -GateReason 'repair tests'
+Invoke-HumanGateRejectAbandon -TaskId F-368 -Outcome rejected -PrimaryBranch main -ProjectRoot $recoveryLiteral -GateReason 'repair tests'
 "@ | Set-Content -LiteralPath $child -Encoding utf8
             $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $child }
             Assert-Result 'branch refusal exits' ($res.ExitCode -eq 1) $res.Output
@@ -1006,6 +1009,14 @@ Invoke-HumanGateRejectAbandon -TaskId F-368 -Outcome rejected -PrimaryBranch mai
             # Bind the actual printed commands without performing recovery. Preserve
             # the real script/function signatures and capture the bound arguments.
             $lines = @($res.Output -split "`r?`n")
+            $branch = (($lines | Where-Object { $_ -like '1. Recreate*' }) -replace '^1\. Recreate the branch[^:]*: ', '')
+            $branchErrors = $null
+            $branchAst = [Management.Automation.Language.Parser]::ParseInput($branch, [ref]$null, [ref]$branchErrors)
+            Assert-Result 'printed git recovery parses smart apostrophe' (@($branchErrors).Count -eq 0) ($branchErrors -join '; ')
+            # A redirected legacy code page folds U+2019 to an ASCII apostrophe in the
+            # capture. An unescaped path fails to parse either way, so fold both sides.
+            $printedRoot = $branchAst.EndBlock.Statements[0].PipelineElements[0].CommandElements[2].Value
+            Assert-Result 'printed git recovery preserves project root' (($printedRoot -replace '[\u2018-\u201B]', "'") -eq ($recoveryRoot -replace '[\u2018-\u201B]', "'")) $branch
             $restore = ($lines | Where-Object { $_ -like '2. Restore*' }) -replace '^2\. Restore the backlog entry: ', ''
             $rework = ($lines | Where-Object { $_ -like '3. Generate*' }) -replace '^3\. Generate the rework handoff: ', ''
             Assert-Result 'two PowerShell commands captured' (@($restore).Count -eq 1 -and @($rework).Count -eq 1) $res.Output
@@ -1015,10 +1026,13 @@ Invoke-HumanGateRejectAbandon -TaskId F-368 -Outcome rejected -PrimaryBranch mai
             $restoreFunction = $backlogAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Restore-BacklogTask' }, $true)
             $restoreParams = $restoreFunction.Body.ParamBlock.Extent.Text
             $bind = Join-Path $tempRoot "bind-$scenario.ps1"
-            @"
-`$ErrorActionPreference = 'Stop'
-$restore
-"@.Replace('; Restore-BacklogTask ', "; function Restore-BacklogTask { [CmdletBinding()] $restoreParams if (`$TaskId -ne 'F-368' -or `$ActiveStatus -ne 'In Progress') { throw 'wrong restore arguments' }; 'RESTORE_BOUND' }; Restore-BacklogTask ") | Set-Content -LiteralPath $bind -Encoding utf8
+            $commandAst = [Management.Automation.Language.Parser]::ParseInput($restore, [ref]$null, [ref]$null)
+            $outer = $commandAst.EndBlock.Statements[0].PipelineElements[0]
+            Assert-Result 'restore uses child host' ($outer.CommandElements[0].Extent.Text -eq 'pwsh' -and $outer.CommandElements[1].Extent.Text -eq '-NoProfile' -and $outer.CommandElements[2].Extent.Text -eq '-Command') $restore
+            $restoreBody = $outer.CommandElements[3].Value
+            $restoreBody = $restoreBody.Replace('; Restore-BacklogTask ', "; function Restore-BacklogTask { [CmdletBinding()] $restoreParams if (`$TaskId -ne 'F-368' -or `$ActiveStatus -ne 'In Progress') { throw 'wrong restore arguments' }; 'RESTORE_BOUND' }; Restore-BacklogTask ")
+            $restore = 'pwsh -NoProfile -Command ' + (ConvertTo-CrucibleCommandPowerShellLiteral -Value $restoreBody)
+            "`$ErrorActionPreference = 'Stop'`n$restore" | Set-Content -LiteralPath $bind -Encoding utf8
             $bound = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $bind }
             Assert-Result 'printed restore loads real library and binds' ($bound.ExitCode -eq 0 -and $bound.Output -match 'RESTORE_BOUND') $bound.Output
             # Replace only the invocation target with a function bearing the real
@@ -1069,6 +1083,49 @@ $body
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$results += Run-Test -Name 'Printed restore preserves caller preferences and quotes apostrophes' -Body {
+    $root = New-TestFixtureRoot -NameHint 'restore-session'
+    try {
+        $project = Join-Path $root ("operator's" + (-join @(0x2018, 0x2019, 0x201A, 0x201B | ForEach-Object { [char]$_ })) + " project")
+        New-Item -ItemType Directory -Path (Join-Path $project 'powershell/lib') -Force | Out-Null
+        # A library with the same side effects as backlog-io, capturing arguments.
+        @'
+param()
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+function Restore-BacklogTask {
+    param($TaskId, $ProjectRoot, $ActiveStatus)
+    if ($TaskId -ne "F-373'quoted" -or $ProjectRoot -ne (Split-Path (Split-Path $PSScriptRoot)) -or $ActiveStatus -ne 'In Progress') { throw 'incorrect restore arguments' }
+    Write-Host 'RESTORED'
+}
+'@ | Set-Content -LiteralPath (Join-Path $project 'powershell/lib/backlog-io.ps1') -Encoding utf8
+        function Get-CrucibleCommandRoot { $project }
+        $steps = Get-HumanGateBranchRecoverySteps -TaskId "F-373'quoted" -ProjectRoot $project
+        $restore = (($steps -split "`n" | Where-Object { $_ -like '2. Restore*' }) -replace '^2\. Restore the backlog entry: ', '')
+        foreach ($strict in @('Off', 'Latest')) {
+            $caller = Join-Path $root "caller-$strict.ps1"
+            $strictCommand = if ($strict -eq 'Off') { 'Set-StrictMode -Off' } else { 'Set-StrictMode -Version Latest' }
+            @"
+`$PSStyle.OutputRendering = 'PlainText'
+$strictCommand
+`$ErrorActionPreference = 'Continue'
+`$global:LASTEXITCODE = 0
+$restore
+if (`$LASTEXITCODE -ne 0) { exit 2 }
+if (`$ErrorActionPreference -ne 'Continue') { throw 'caller error preference changed' }
+`$strictActive = `$false
+try { `$null = `$undefined373 } catch { `$strictActive = `$true }
+if (`$strictActive -ne `$('${strict}' -eq 'Latest')) { throw 'caller strict mode changed' }
+Write-Host 'CALLER_UNCHANGED'
+"@ | Set-Content -LiteralPath $caller -Encoding utf8
+            $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $caller }
+            Assert-Result "caller $strict preferences preserved" ($run.ExitCode -eq 0 -and $run.Output -match 'RESTORED' -and $run.Output -match 'CALLER_UNCHANGED') $run.Output
+        }
+    } finally {
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 $failed = @($results | Where-Object { -not $_ }).Count

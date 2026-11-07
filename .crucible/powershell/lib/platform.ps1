@@ -38,6 +38,25 @@ function Get-PwshCommand {
     return "pwsh"
 }
 
+# Child validators use the supported running host, independent of PATH.
+function Get-RunningPowerShellCommand {
+    foreach ($leaf in @('pwsh', 'pwsh.exe')) {
+        $candidate = Join-Path $PSHOME $leaf
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-FilesystemPath -Path $candidate)
+        }
+    }
+    # Embedded PowerShell can run inside dotnet or another application. Only a
+    # pwsh process is eligible when PSHOME does not contain the supported host.
+    $hostPath = (Get-Process -Id $PID -ErrorAction Stop).Path
+    if (-not [string]::IsNullOrWhiteSpace($hostPath) -and
+        (Split-Path -Leaf $hostPath) -in @('pwsh', 'pwsh.exe') -and
+        (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
+        return $hostPath
+    }
+    throw "Cannot resolve the running PowerShell executable: no pwsh in PSHOME or current process."
+}
+
 function Invoke-Git {
     <#
     .SYNOPSIS

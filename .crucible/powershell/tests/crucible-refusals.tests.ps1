@@ -323,10 +323,10 @@ function Resolve-StickyTarget { 'agent' }
                         $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source $path), [ref]$null, [ref]$null)
                         $needle = switch ($name) {
                             'affinity' { '& $affinityScript' }
-                            'backlog' { '& (Get-PwshCommand) -NoProfile -File (Resolve-FilesystemPath -Path "$FRAMEWORK_POWERSHELL/validate-backlog.ps1")' }
+                            'backlog' { '& (Get-RunningPowerShellCommand) -NoProfile -File (Resolve-FilesystemPath -Path "$FRAMEWORK_POWERSHELL/validate-backlog.ps1")' }
                             'dev-log' { '& "$FRAMEWORK_POWERSHELL/validate-dev-log.ps1"' }
                             'init-backlog' { '& (Join-Path $PSScriptRoot "validate-backlog.ps1")' }
-                            'handoff-validator' { '& (Get-PwshCommand) -NoProfile -File (Resolve-FilesystemPath -Path $validatorPath)' }
+                            'handoff-validator' { '& (Get-RunningPowerShellCommand) -NoProfile -File (Resolve-FilesystemPath -Path $validatorPath)' }
                             'preflight-validator' { '& $preflightScript' }
                         }
                         $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.Text.StartsWith($needle) }, $true)
@@ -371,7 +371,7 @@ if ($HandoffFile) { '{"ok":true}' }
                     }
                     $setup = @"
 Set-StrictMode -Version Latest
-function Get-PwshCommand { (Get-Process -Id `$PID).Path }
+. '$source/lib/platform.ps1'
 function Resolve-FilesystemPath { param(`$Path) `$Path }
 function Write-Quiet {}
 function Write-EventLog { Write-Host 'EVENT_AFTER_FAILURE' }
@@ -403,6 +403,7 @@ Write-Host 'CALLER_SUCCESS'
                     Copy-TestRunnerLibraries -Destination $lib
                     $setup = @'
 . './lib/crucible-gates.ps1'
+function Write-BlockedTaskRecord { throw 'UNEXPECTED_BLOCKED_WRITER' }
 function Get-ConfiguredPrimaryBranch { throw 'HELPER_FAILURE: primary branch' }
 function Get-ConfiguredPath { throw 'HELPER_FAILURE: backlog path' }
 function Get-CrucibleFrameworkStatusChanges { @() }
@@ -515,7 +516,7 @@ $scenario = 'failure'
                     Write-FixtureText (Join-Path $lib 'project-root.ps1') 'function Resolve-CrucibleProjectRoot { param($ProjectRoot) $ProjectRoot }'
                     Write-FixtureText (Join-Path $root 'crucible-lib.ps1') @'
 function Get-ConfiguredPath { param($Key) Join-Path $REPO_ROOT $Key }
-function Get-PwshCommand { (Get-Process -Id $PID).Path }
+function Get-RunningPowerShellCommand { (Get-Process -Id $PID).Path }
 function Test-BacklogTaskRow { $true }
 function Resolve-FilesystemPath { param($Path) $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) }
 function Sort-HandoffFiles { param($Files) $Files }
@@ -604,6 +605,7 @@ if ($handoffExit -ne 0) { [Console]::Error.WriteLine('HANDOFF_FAILURE'); exit $h
                     $setup = @'
 Set-StrictMode -Version Latest
 . './lib/crucible-gates.ps1'
+function Write-BlockedTaskRecord { throw 'UNEXPECTED_BLOCKED_WRITER' }
 function Write-Quiet {}
 function Write-EventLog {}
 function Test-GitDiscardSafe { $true }
@@ -810,7 +812,7 @@ $context = @{
                             'Normalize-CrucibleInputState -Context $context'
                         }
                         'human' { 'Invoke-HumanGateAcceptArchival -TaskId F-261 -ProjectRoot $PSScriptRoot' }
-                        'blocked' { 'Write-BlockedTaskRecord -TaskId F-261 -CircuitBreaker fixture -AttemptCount 1 -LastPhase implementation -Summary fixture -BacklogDir (Join-Path $PSScriptRoot "backlog") -FrameworkPowerShell $PSScriptRoot' }
+                        'blocked' { 'Write-BlockedTaskRecord -ProjectRoot $PSScriptRoot -TaskId F-261 -CircuitBreaker fixture -AttemptCount 1 -LastPhase implementation -Summary fixture -BacklogDir (Join-Path $PSScriptRoot "backlog") -FrameworkPowerShell $PSScriptRoot' }
                     }
                 }
                 'hooks' {
@@ -922,6 +924,7 @@ function Get-ConfiguredProjectHooksDir {
 }
 '@
                     Write-FixtureText (Join-Path $lib 'platform.ps1') @'
+function Get-RunningPowerShellCommand { (Get-Process -Id $PID).Path }
 function Test-PlatformIsWindows { $IsWindows }
 function Invoke-Git {
     param($Directory, [Parameter(ValueFromRemainingArguments=$true)]$GitArgs)

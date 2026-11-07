@@ -158,7 +158,7 @@ function Write-ValidatedHandoff {
         # Keep native refusals as status data even when the embedding caller uses Stop.
         $PSNativeCommandUseErrorActionPreference = $false
         $global:LASTEXITCODE = 0
-        $validationRaw = & (Get-PwshCommand) -NoProfile -File (Resolve-FilesystemPath -Path $validatorPath) -HandoffFile (Resolve-FilesystemPath -Path $tempPath) -SchemaPath (Resolve-FilesystemPath -Path $SchemaPath) 2>&1
+        $validationRaw = & (Get-RunningPowerShellCommand) -NoProfile -File (Resolve-FilesystemPath -Path $validatorPath) -HandoffFile (Resolve-FilesystemPath -Path $tempPath) -SchemaPath (Resolve-FilesystemPath -Path $SchemaPath) 2>&1
         if ($LASTEXITCODE -ne 0) {
             $validationText = ($validationRaw -join "`n").Trim()
             if ([string]::IsNullOrWhiteSpace($validationText)) {

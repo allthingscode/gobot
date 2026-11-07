@@ -186,7 +186,7 @@ if (`$verb -eq "run view") {
 exit 1
 "@ -replace "`r`n", "`n") | Set-Content -LiteralPath $impl -Encoding ASCII
 
-    $hostCmd = (Get-PwshCommand)
+    $hostCmd = Get-RunningPowerShellCommand
     if (Test-PlatformIsWindows) {
         $path = Join-Path $Dir "gh.cmd"
         @(
@@ -277,7 +277,8 @@ function Invoke-CiGateCase {
     param(
         [Parameter(Mandatory=$true)]$Case,
         [Parameter(Mandatory=$true)][string]$TaskId,
-        [switch]$OmitLogFile
+        [switch]$OmitLogFile,
+        [string]$PwshDecoyDir = ""
     )
     $scriptPath = Join-Path (Split-Path -Parent $Case.LocalRepo) ("run-" + $TaskId + ".ps1")
     $libPath = $CRUCIBLE_LIB.Replace("'", "''")
@@ -295,11 +296,16 @@ function Invoke-CiGateCase {
 "@
     }
 
+    $decoySetup = if ($PwshDecoyDir) {
+        "`$env:PATH = '" + $PwshDecoyDir.Replace("'", "''") + "' + [IO.Path]::PathSeparator + `$env:PATH"
+    } else { '' }
     Write-FinalizedBacklogFixture -ProjectRoot $Case.LocalRepo -TaskId $TaskId
     $scriptContent = @"
 `$ErrorActionPreference = "Stop"
+`$PSStyle.OutputRendering = 'PlainText'
 `$Quiet = `$true
 . '$libPath'
+$decoySetup
 $logSetup
 `$ctx = @{
     IsBootstrap = `$false
@@ -329,7 +335,7 @@ try {
 }
 "@
     $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-    $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
+    $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-RunningPowerShellCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
     return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = ($outputLines -join "`n")
@@ -2364,7 +2370,7 @@ try {
         Assert-Result -Name "ci 404 writes ci_check_failed event to log" -Condition ($logLines.Count -ge 1) -FailureMessage ("expected ci_check_failed in " + $result.LogFile + ", got: " + (Get-Content -LiteralPath $result.LogFile -ErrorAction SilentlyContinue | Out-String))
     }
 
-    $results += Run-Test -Name "F3: RED withholds the master push and deletes staging ref" -Body {
+    $results += Run-Test -Name "F3: exit-0 PATH pwsh cannot bypass RED CI and withholds the master push and deletes staging ref" -Body {
         $ErrorActionPreference = "Continue"
         $caseRoot = Join-Path $tempRoot "f3-ci-red"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
@@ -2374,18 +2380,23 @@ try {
 
         $binDir = Join-Path $caseRoot "bin"
         New-FakeGhForGate -Dir $binDir -Mode "red" | Out-Null
+        $decoy = if (Test-PlatformIsWindows) { Join-Path $binDir 'pwsh.cmd' } else { Join-Path $binDir 'pwsh' }
+        $body = if (Test-PlatformIsWindows) { "@echo off`nexit /b 0`n" } else { "#!/bin/sh`nexit 0`n" }
+        [IO.File]::WriteAllText($decoy, $body)
+        if (-not (Test-PlatformIsWindows)) { & chmod +x $decoy }
         $oldPath = $env:PATH
         try {
             $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
-            $result = Invoke-CiGateCase -Case $case -TaskId "F3-RED"
+            Assert-Result 'exit-0 decoy is first on PATH' (@(Get-Command pwsh -CommandType Application)[0].Source -eq $decoy) 'fixture did not shadow pwsh'
+            $result = Invoke-CiGateCase -Case $case -TaskId "F3-RED" -PwshDecoyDir $binDir
         } finally {
             $env:PATH = $oldPath
         }
 
-        Assert-Result -Name "f3 red exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
-        Assert-Result -Name "f3 red output indicates master not published" -Condition ($result.Output -match "master was NOT published \(still local only\)") -FailureMessage $result.Output
         $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
         Assert-Result -Name "f3 red master branch tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
+        Assert-Result -Name "f3 red exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
+        Assert-Result -Name "f3 red output indicates master not published" -Condition ($result.Output -match "master was NOT published \(still local only\)") -FailureMessage $result.Output
         git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-RED
         Assert-Result -Name "f3 red deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on red CI"
     }

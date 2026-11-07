@@ -819,8 +819,13 @@ function Invoke-CrucibleRuntimeValidation {
         exit 1
     }
 
-    Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() `
-        -NonNullKeys @("Handoff", "LogFile", "CircuitBreakerHistoryFile")
+    try {
+        Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() `
+            -NonNullKeys @("Handoff", "LogFile", "CircuitBreakerHistoryFile", "RepoRoot")
+    } catch {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 2
+    }
 
     $handoff = $Context.Handoff
     $LOG_FILE = $Context.LogFile
@@ -836,7 +841,7 @@ function Invoke-CrucibleRuntimeValidation {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
             -Outcome "git_hook_bypass" -Notes "Handoff reported or referenced a git hook bypass attempt." `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-        Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "git_hook_bypass" -AttemptCount $handoff.cumulative_handoff_count `
+        Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "git_hook_bypass" -AttemptCount $handoff.cumulative_handoff_count `
             -LastSpecialist $handoff.source_phase -Summary "Handoff reported or referenced use of --no-verify or CRUCIBLE_BYPASS_LINUX_LEG, which bypass required git hooks."
         Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "git_hook_bypass" `
             -Why "Git hook bypass attempt detected. '--no-verify' and CRUCIBLE_BYPASS_LINUX_LEG require human review. Fix the hook failure or complete Linux leg verification instead of bypassing it."
@@ -981,7 +986,7 @@ function Invoke-CrucibleRuntimeValidation {
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
                     -Outcome "blocked" -Notes ("Fabricated artifact path(s) in handoff: " + $joined) `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "fabricated_artifacts" -AttemptCount $handoff.cumulative_handoff_count `
+                Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "fabricated_artifacts" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary ("Handoff listed artifact paths that do not exist: " + $joined) -Artifacts $missingArtifacts
                 Write-Host "[STOP] Artifact integrity gate failed. Fabricated artifact paths must be corrected before handoff can proceed." -ForegroundColor Red
                 exit 2
@@ -990,7 +995,7 @@ function Invoke-CrucibleRuntimeValidation {
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.source_phase `
                     -Outcome "unreadable_retry_history" -Notes $unreadableRetryHistoryReason `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count `
+                Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary $unreadableRetryHistoryReason -Artifacts $missingArtifacts
                 Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_retry_history" `
                     -Why $unreadableRetryHistoryReason
@@ -1031,8 +1036,13 @@ function Invoke-CrucibleScopeGates {
         exit 1
     }
 
-    Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() `
-        -NonNullKeys @("Handoff", "FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile", "BacklogDir", "WorkspacesDir")
+    try {
+        Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() `
+            -NonNullKeys @("Handoff", "FrameworkPowerShell", "LogFile", "CircuitBreakerHistoryFile", "BacklogDir", "WorkspacesDir", "RepoRoot")
+    } catch {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 2
+    }
 
     $handoff = $Context.Handoff
     $FRAMEWORK_POWERSHELL = $Context.FrameworkPowerShell
@@ -1103,7 +1113,7 @@ function Invoke-CrucibleScopeGates {
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" `
                     -Outcome "scope_violation" -Notes ("Architect modified files outside file_affinity: " + $joined) `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "scope_violation" -AttemptCount $handoff.cumulative_handoff_count `
+                Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "scope_violation" -AttemptCount $handoff.cumulative_handoff_count `
                     -LastSpecialist $handoff.source_phase -Summary ("Architect modified files outside declared file_affinity: " + $joined) -Artifacts $outOfScopeFiles
                 Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "scope_violation" `
                     -Why ("Scope boundary violation detected. Out-of-scope files: " + $joined + ". Expand file_affinity or revert out-of-scope changes.")
@@ -1444,7 +1454,7 @@ function Test-CompletionArtifactGate {
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" `
                 -Outcome "artifact_verification_failed" -Notes ("Artifact verification failed: " + $errorMsg) `
                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-            Write-BlockedTaskRecord -TaskId $handoff.task_id -CircuitBreaker "artifact_verification_failed" -AttemptCount $handoff.cumulative_handoff_count `
+            Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -TaskId $handoff.task_id -CircuitBreaker "artifact_verification_failed" -AttemptCount $handoff.cumulative_handoff_count `
                 -LastSpecialist $handoff.source_phase -Summary $errorMsg -BacklogDir $backlogDir -FrameworkPowerShell $Context.FrameworkPowerShell
             exit 1
         }
@@ -1610,7 +1620,7 @@ function Invoke-RepositoryIntegrityGates {
             # Native nonzero status must reach the unconditional refusal below.
             $PSNativeCommandUseErrorActionPreference = $false
             $global:LASTEXITCODE = 0
-            $result = & (Get-PwshCommand) -NoProfile -File (Resolve-FilesystemPath -Path "$FRAMEWORK_POWERSHELL/validate-backlog.ps1") -FixSummary -Quiet:$Quiet -ProjectRoot (Resolve-FilesystemPath -Path $repoRoot) 2>&1
+            $result = & (Get-RunningPowerShellCommand) -NoProfile -File (Resolve-FilesystemPath -Path "$FRAMEWORK_POWERSHELL/validate-backlog.ps1") -FixSummary -Quiet:$Quiet -ProjectRoot (Resolve-FilesystemPath -Path $repoRoot) 2>&1
             if ($LASTEXITCODE -ne 0) {
                 # Capturing must not take the child's refusal off stderr.
                 [Console]::Error.WriteLine(($result -join "`n"))

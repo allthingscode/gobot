@@ -60,7 +60,18 @@ function New-DecisionRecord {
 
 # Silence event-log side effects; the merge helper only cares about control flow here.
 function Write-EventLog { param([Parameter(ValueFromRemainingArguments=$true)]$Rest) }
-function Write-BlockedTaskRecord { param([Parameter(ValueFromRemainingArguments=$true)]$Rest) }
+function Write-BlockedTaskRecord {
+    [CmdletBinding()]
+    param([string]$ProjectRoot, [string]$BacklogDir, [string]$FrameworkPowerShell,
+          [string]$TaskId, [string]$CircuitBreaker, [int]$AttemptCount,
+          [string]$LastSpecialist, [string]$Summary)
+    $script:blockedCalls++
+    Assert-Result 'breaker project root' ($ProjectRoot -eq $repo) "wrong project root: $ProjectRoot"
+    Assert-Result 'breaker backlog' ($BacklogDir -eq (Get-ConfiguredPath -Key backlog -ProjectRoot $ProjectRoot)) "wrong backlog: $BacklogDir"
+    Assert-Result 'breaker framework' ($FrameworkPowerShell -eq (Join-Path $REPO_ROOT 'powershell')) "wrong framework: $FrameworkPowerShell"
+    Assert-Result 'breaker task' ($TaskId -eq $expectedBlockedTaskId) "wrong task: $TaskId"
+    Assert-Result 'breaker metadata' ($CircuitBreaker -eq 'recurring_merge_conflicts' -and $AttemptCount -eq 3 -and $LastSpecialist -eq 'deployment' -and $Summary -eq 'Recurring Merge Conflicts at human gate. Manual conflict resolution required.') 'wrong blocked metadata'
+}
 
 $results += Run-Test "Clean merge returns 'merged' and lands the branch" {
     $root = New-TestFixtureRoot -NameHint "mr-a"
@@ -145,6 +156,8 @@ $results += Run-Test "Same-line conflict routes to 'rework', leaves tree clean, 
 }
 
 $results += Run-Test "rebase_count backstop trips the recurring-conflict breaker" {
+    $expectedBlockedTaskId = 'T-003'
+    $script:blockedCalls = 0
     $root = New-TestFixtureRoot -NameHint "mr-c"
     try {
         $repo = New-MergeRepo -Root $root
@@ -170,6 +183,7 @@ $results += Run-Test "rebase_count backstop trips the recurring-conflict breaker
                 -LogFile (Join-Path $repo "pipeline.log.jsonl") -CircuitBreakerHistoryFile (Join-Path $repo "circuit_breakers.jsonl")
         } finally { Pop-Location }
 
+        Assert-Result "breaker writer called once" ($script:blockedCalls -eq 1) "blocked writer was skipped or repeated"
         Assert-Result "breaker-result" ($result -eq "breaker") "Expected 'breaker', got '$result'"
         Assert-Result "no-merge-head" (-not (Test-Path (Join-Path $repo ".git/MERGE_HEAD"))) "master left mid-merge after breaker"
         $status = @(Invoke-ExternalCommand -AsLines { git -C $repo status --porcelain })
@@ -211,6 +225,7 @@ $results += Run-Test "D40: accepted-decision removal failure stops before stale 
         @'
 param($Lib, $Repo, $Record)
 $ErrorActionPreference = 'Stop'
+$PSStyle.OutputRendering = 'PlainText'
 $Quiet = $true
 . $Lib
 function Write-EventLog {}
@@ -325,6 +340,8 @@ function New-BreakerRepo {
 
 function Invoke-BreakerMerge {
     param([string]$Repo, [string]$TaskId, [string]$DecisionRecordPath)
+    $expectedBlockedTaskId = $TaskId
+    $script:blockedCalls = 0
     $outcome = @{ Result = ""; Error = $null }
     Push-Location $Repo
     try {
@@ -361,6 +378,7 @@ $results += Run-Test "Merge undo removes only the record this gate wrote, never 
 
         $run = Invoke-BreakerMerge -Repo $repo -TaskId "T-267" -DecisionRecordPath $currentPath
 
+        Assert-Result "breaker writer called once" ($script:blockedCalls -eq 1) "blocked writer was skipped or repeated"
         Assert-Result "breaker-result" ($run.Result -eq "breaker" -and $null -eq $run.Error) "Expected 'breaker', got '$($run.Result)' error '$($run.Error)'"
         Assert-Result "prior-cycle-record-intact" ((Test-Path -LiteralPath $priorPath) -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($priorPath)) -ceq $priorBytes) "the prior cycle's accepted record was removed or changed"
         Assert-Result "current-record-removed" (-not (Test-Path -LiteralPath $currentPath)) "the current cycle's premature accept survived the incomplete merge"
@@ -388,10 +406,16 @@ $results += Run-Test "Merge undo refuses when the record this gate wrote is abse
         @'
 param($Lib, $Repo, $Record, $Mode = '')
 $ErrorActionPreference = 'Stop'
+$PSStyle.OutputRendering = 'PlainText'
 $Quiet = $true
 . $Lib
-function Write-EventLog {}
+function Write-EventLog { Write-Host 'BREAKER_EVENT' }
 function Write-BlockedTaskRecord {}
+if ($Mode -eq 'missing-blocked') {
+    Remove-Item Function:Write-BlockedTaskRecord
+    function Remove-Item { param($LiteralPath, [switch]$Force) Write-Host 'ACCEPT_CLEANUP'; Microsoft.PowerShell.Management\Remove-Item -LiteralPath $LiteralPath -Force:$Force }
+}
+if ($Mode -eq 'missing-host') { function Get-RunningPowerShellCommand { throw 'injected no pwsh host' } }
 if ($Mode -eq 'probe-fails') {
     # The record's existence probe raises (an access or I/O error under Stop).
     function Test-Path {
@@ -414,6 +438,32 @@ Write-Host 'CALLER_CONTINUED'
 exit 0
 '@ | Set-Content -LiteralPath $runner -Encoding UTF8
         $lib = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
+
+        $missingRecord = Join-Path $gateDir 'T-268-missing-helper.json'
+        '{"task_id":"T-268","outcome":"accepted"}' | Set-Content -LiteralPath $missingRecord
+        $missing = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runner $lib $repo $missingRecord 'missing-blocked' }
+        $missingText = (($missing.Output -join "`n") -replace '(?m)^\s*\|\s?', '' -replace '\s+', ' ')
+        Assert-Result 'missing blocked helper refuses unconditionally' ($missing.ExitCode -eq 2 -and $missingText -match 'Write-BlockedTaskRecord is unavailable' -and $missing.Output -notmatch 'CALLER_RESULT|CALLER_CAUGHT_REFUSAL|CALLER_CONTINUED') $missing.Output
+
+        Assert-Result 'missing helper refuses before breaker event and cleans before diagnostic' ($missingText -notmatch 'BREAKER_EVENT' -and $missingText -match 'ACCEPT_CLEANUP.*Write-BlockedTaskRecord is unavailable') $missingText
+        Assert-Result 'missing helper removes accepted record' (-not (Test-Path -LiteralPath $missingRecord)) 'premature approval blocks retry'
+
+        $hostRecord = New-DecisionRecord -Root $root -TaskId 'T-268'
+        $hostRepo = New-MergeRepo -Root (Join-Path $root 'no-host')
+        [IO.File]::WriteAllText((Join-Path $hostRepo 'base.txt'), 'base')
+        git -C $hostRepo add .
+        git -C $hostRepo commit -qm base
+        git -C $hostRepo checkout -qb task/T-268
+        [IO.File]::WriteAllText((Join-Path $hostRepo 'feature.txt'), 'feature')
+        git -C $hostRepo add .
+        git -C $hostRepo commit -qm feature
+        git -C $hostRepo checkout -q master
+        $before = (Invoke-ExternalCommand -AsLines { git -C $hostRepo rev-parse HEAD }).Trim()
+        $noHost = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runner $lib $hostRepo $hostRecord 'missing-host' }
+        $hostText = (($noHost.Output -join "`n") -replace '(?m)^\s*\|\s?', '' -replace '\s+', ' ')
+        $after = (Invoke-ExternalCommand -AsLines { git -C $hostRepo rev-parse HEAD }).Trim()
+        Assert-Result 'missing host removes accepted record' (-not (Test-Path -LiteralPath $hostRecord)) 'premature approval blocks retry'
+        Assert-Result 'missing host refuses before merge or breaker event' ($noHost.ExitCode -eq 2 -and $hostText -match 'injected no pwsh host' -and $hostText -notmatch 'BREAKER_EVENT|CALLER_RESULT|CALLER_CAUGHT_REFUSAL|CALLER_CONTINUED' -and $after -eq $before) $hostText
 
         $absent = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runner $lib $repo (Join-Path $gateDir "T-268-20260902T120000Z.json") }
         $absentText = $absent.Output -join "`n"

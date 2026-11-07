@@ -321,7 +321,7 @@ $results += Run-Test -Name "Presence assertion applicability preserves stale ent
 # explicitly so deleting a guard fails here rather than shrinking the set being checked.
 $LOAD_TIME_GUARDS = [ordered]@{
     'archive-task' = @('Invoke-WithBacklogLock', 'Test-PathWithinDirectory')
-    'backlog-io' = @('Get-ConfiguredPath', 'Get-PwshCommand')
+    'backlog-io' = @('Get-ConfiguredPath', 'Get-RunningPowerShellCommand')
     'blocked' = @('Resolve-FilesystemPath')
     'checks-not-run' = @('Resolve-FilesystemPath')
     'claude-agents' = @('Get-ClaudeLevel', 'New-CrucibleCommand')

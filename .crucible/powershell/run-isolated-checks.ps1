@@ -215,7 +215,7 @@ if ($scanFiles.Count -gt 0 -and -not (Test-Path -LiteralPath $mojibakeScript)) {
     Write-Host "NOT RUN: Encoding guard (BOM/mojibake) - check-mojibake.ps1 not found" -ForegroundColor Yellow
     Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Encoding guard (BOM/mojibake)" -Reason ("check-mojibake.ps1 not found at " + $mojibakeScript)
 } elseif ($scanFiles.Count -gt 0) {
-    $host_exe = (Get-Process -Id $PID).Path
+    $host_exe = Get-RunningPowerShellCommand
     & $host_exe -NoProfile -ExecutionPolicy Bypass -File $mojibakeScript @scanFiles
     $mojibakeExit = $LASTEXITCODE
     Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Encoding guard (BOM/mojibake)"

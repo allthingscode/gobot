@@ -47,6 +47,32 @@ $results += Run-Test -Name "Assert-CrucibleContextKeys rejects a null context" -
     Assert-Result -Name "null context throws" -Condition ($message -match "CrucibleContext is null") -FailureMessage ("expected a null-context error, got: " + $message)
 }
 
+foreach ($gate in @('Invoke-CrucibleRuntimeValidation', 'Invoke-CrucibleScopeGates')) {
+    $results += Run-Test "$gate declares RepoRoot before state changes" {
+        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $REPO_ROOT 'powershell/lib/crucible-gates.ps1'), [ref]$null, [ref]$null)
+        $fn = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $gate }, $true)
+        $contract = $fn.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Assert-CrucibleContextKeys' }, $true)
+        $Context = @{ Handoff = 'h'; LogFile = 'log'; CircuitBreakerHistoryFile = 'cb'; FrameworkPowerShell = 'ps'; BacklogDir = 'backlog'; WorkspacesDir = 'wt' }
+        $message = Get-ThrownMessage { & ([scriptblock]::Create($contract.Extent.Text)) }
+        Assert-Result 'missing root refused by contract' ($message -match "Required key 'RepoRoot' is missing") $message
+        $root = New-TestFixtureRoot -NameHint 'context-root'
+        try {
+            $runner = Join-Path $root 'caller.ps1'
+            [IO.File]::WriteAllText($runner, @'
+param($Lib, $Gate)
+$PSStyle.OutputRendering = 'PlainText'
+$Quiet = $true
+. $Lib
+$Context = @{ Handoff = 'h'; LogFile = 'log'; CircuitBreakerHistoryFile = 'cb'; FrameworkPowerShell = 'ps'; BacklogDir = 'backlog'; WorkspacesDir = 'wt' }
+& $Gate -Context $Context
+Write-Host 'CONTINUED'
+'@)
+            $run = Invoke-ExternalCommand { & (Get-RunningPowerShellCommand) -NoProfile -File $runner $CRUCIBLE_LIB $gate }
+            Assert-Result 'missing root exits two before gate work' ($run.ExitCode -eq 2 -and $run.Output -match 'RepoRoot' -and $run.Output -notmatch 'CONTINUED') $run.Output
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+    }
+}
+
 # The gate library is split across powershell/lib/crucible-gates*.ps1 (item 14). Both sweeps
 # below read every file of it, and the file count is pinned so a new file is a deliberate
 # edit here rather than a file the sweeps never read.

@@ -206,7 +206,7 @@ function Invoke-CircuitBreakerGates {
 
                 Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes $distinctNotes `
                     -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary $summaryMsg
+                Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary $summaryMsg
                 Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
                     -Why $wedgeWhy `
                     -RecoveryOverride $recoveryOverride
@@ -219,7 +219,7 @@ function Invoke-CircuitBreakerGates {
     if ($null -ne $handoff.psobject.Properties["suspicious_content"] -and $null -ne $handoff.suspicious_content -and $handoff.suspicious_content -ne "") {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes ("Suspicious Content Flagged: " + $handoff.suspicious_content) `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-        Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Suspicious content flagged in handoff: " + $handoff.suspicious_content)
+        Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "human_escalation" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Suspicious content flagged in handoff: " + $handoff.suspicious_content)
         Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "human_escalation" `
             -Why ("Suspicious Content detected. Suspicious content flagged in handoff: " + $handoff.suspicious_content) `
             -RecoveryOverride ("Review external sources before continuing. Then archive the blocked record and run: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = (Get-RecoveryProjectRoot -Context $Context); Recover = $true }) -CrucibleRoot (Get-RecoveryCrucibleRoot -Context $Context)))
@@ -235,7 +235,7 @@ function Invoke-CircuitBreakerGates {
     if ($handoff.handoff_retry_count -gt 2 -and $handoff.source_phase -eq $handoff.target_phase) {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Persistent Task Failure - Retry over 2" `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-        Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "handoff_retry_exceeded" -AttemptCount $handoff.handoff_retry_count -LastSpecialist $handoff.target_phase -Summary "Persistent Task Failure - Retry over 2"
+        Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "handoff_retry_exceeded" -AttemptCount $handoff.handoff_retry_count -LastSpecialist $handoff.target_phase -Summary "Persistent Task Failure - Retry over 2"
         Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "handoff_retry_exceeded" `
             -Why ("Task " + $handoff.task_id + " has been handed off to " + $handoff.target_phase + " " + $handoff.handoff_retry_count + " times. Reason: " + $handoff.reason)
         exit 2
@@ -256,7 +256,7 @@ function Invoke-CircuitBreakerGates {
     if ($handoff.review_strike_count -ge 3) {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Review Stalemate - 3 strikes" `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-        Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "review_stalemate" -AttemptCount $handoff.review_strike_count -LastSpecialist $handoff.target_phase -Summary "Review Stalemate - 3 strikes"
+        Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "review_stalemate" -AttemptCount $handoff.review_strike_count -LastSpecialist $handoff.target_phase -Summary "Review Stalemate - 3 strikes"
         Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "review_stalemate" `
             -Why ("Task " + $handoff.task_id + " has failed review " + $handoff.review_strike_count + " times. Reason: " + $handoff.reason)
         exit 2
@@ -299,7 +299,7 @@ function Invoke-CircuitBreakerGates {
         if ($handoff.cumulative_handoff_count -gt $effectiveCeiling) {
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "budget_exceeded" -Notes ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling) `
                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-            Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "budget_exceeded" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling)
+            Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "budget_exceeded" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary ("Token Budget Exceeded - " + $handoff.cumulative_handoff_count + " over " + $effectiveCeiling)
             Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "budget_exceeded" `
                 -Why ("Task " + $handoff.task_id + " has reached " + $handoff.cumulative_handoff_count + " handoffs. Ceiling: " + $effectiveCeiling + " for tier " + $handoff.budget_tier + " (base " + $ceiling + " + " + $rebaseCycles + " rebase cycle(s)). Reason: " + $handoff.reason)
             exit 2
@@ -311,7 +311,7 @@ function Invoke-CircuitBreakerGates {
             $unreadableHandoffReason = "Handoff count is unverifiable: " + $handoffLogParseFailureCount + " unparseable pipeline-log line(s) could each hide a session_end, and " + $handoff.cumulative_handoff_count + " counted handoff(s) plus those lines would exceed the ceiling of " + $effectiveCeiling + "."
             Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "unreadable_handoff_history" -Notes $unreadableHandoffReason `
                 -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-            Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "unreadable_handoff_history" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary $unreadableHandoffReason
+            Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "unreadable_handoff_history" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist $handoff.source_phase -Summary $unreadableHandoffReason
             Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_handoff_history" `
                 -Why $unreadableHandoffReason
             exit 2
@@ -322,7 +322,7 @@ function Invoke-CircuitBreakerGates {
     if ($handoff.psobject.Properties["rebase_count"] -and $handoff.rebase_count -ge 3) {
         Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist $handoff.target_phase -Outcome "blocked" -Notes "Recurring Merge Conflicts - 3 strikes" `
             -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-        Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $handoff.rebase_count -LastSpecialist $handoff.target_phase -Summary "Recurring Merge Conflicts - 3 strikes. Task requires manual intervention."
+        Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $handoff.rebase_count -LastSpecialist $handoff.target_phase -Summary "Recurring Merge Conflicts - 3 strikes. Task requires manual intervention."
         Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "recurring_merge_conflicts" `
             -Why ("Task " + $handoff.task_id + " has been rebased " + $handoff.rebase_count + " times and still conflicts.")
         exit 2
@@ -359,7 +359,7 @@ function Invoke-CircuitBreakerGates {
             $previousPreference = $ErrorActionPreference
             $ErrorActionPreference = "Continue"
             try {
-                $testOutput = & (Get-PwshCommand) -ExecutionPolicy Bypass -File $isolatedChecksScript -TaskId $handoff.task_id -Mode full 2>&1
+                $testOutput = & (Get-RunningPowerShellCommand) -ExecutionPolicy Bypass -File $isolatedChecksScript -TaskId $handoff.task_id -Mode full 2>&1
             } finally {
                 $ErrorActionPreference = $previousPreference
             }
@@ -439,7 +439,7 @@ function Invoke-CircuitBreakerGates {
                 if ($hasPriorRetry) {
                     Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "reviewer_verification_failed" -Notes "Independent verification failed after Reviewer APPROVED again: $failedCheck" `
                         -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                    Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "reviewer_verification_failed" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "verification" -Summary "Verification command failed in worktree after Reviewer self-reported APPROVED: $failedCheck"
+                    Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "reviewer_verification_failed" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "verification" -Summary "Verification command failed in worktree after Reviewer self-reported APPROVED: $failedCheck"
                     $reviewerVerificationWhy = "Independent verification check failed on retry: " + $failedCheck + ". Route back to Architect."
                     if ($testOutput) {
                         $testOutputSummary = (($testOutput | ForEach-Object { [string]$_ }) -join " ")
@@ -452,7 +452,7 @@ function Invoke-CircuitBreakerGates {
                     $unreadableRetryHistoryReason = "Retry history is unreadable: " + $retryHistoryParseFailureCount + " unparseable line(s) prevented determining whether this is a repeat independent-verification failure."
                     Write-EventLog -Event "circuit_breaker" -TaskId $handoff.task_id -Specialist "crucible" -Outcome "unreadable_retry_history" -Notes $unreadableRetryHistoryReason `
                         -LogFile $LOG_FILE -CircuitBreakerHistoryFile $CB_HISTORY_FILE
-                    Write-BlockedTaskRecord -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "verification" -Summary $unreadableRetryHistoryReason
+                    Write-BlockedTaskRecord -ProjectRoot $Context.RepoRoot -BacklogDir $Context.BacklogDir -FrameworkPowerShell $Context.FrameworkPowerShell -TaskId $handoff.task_id -CircuitBreaker "unreadable_retry_history" -AttemptCount $handoff.cumulative_handoff_count -LastSpecialist "verification" -Summary $unreadableRetryHistoryReason
                     Write-WedgeReport -TaskId $handoff.task_id -ProjectRoot (Get-RecoveryProjectRoot -Context $Context) -SourcePhase $handoff.source_phase -TargetPhase $handoff.target_phase -BreakerCode "unreadable_retry_history" `
                         -Why $unreadableRetryHistoryReason
                     exit 2

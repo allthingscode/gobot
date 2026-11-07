@@ -12,7 +12,7 @@ if (-not (Test-Path -LiteralPath Function:Get-ConfiguredPath)) {
 }
 
 # TODO item 197: standalone restore callers also need the validator's shell resolver.
-if (-not (Test-Path -LiteralPath Function:Get-PwshCommand)) {
+if (-not (Test-Path -LiteralPath Function:Get-RunningPowerShellCommand)) {
     . (Join-Path $PSScriptRoot "platform.ps1")
 }
 
@@ -544,7 +544,7 @@ function Restore-BacklogTask {
     $validateScript = Join-Path (Split-Path -Parent $PSScriptRoot) "validate-backlog.ps1"
     if (Test-Path $validateScript) {
         $global:LASTEXITCODE = 0
-        $validationOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $resolvedProjectRoot 2>&1
+        $validationOutput = & (Get-RunningPowerShellCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $resolvedProjectRoot 2>&1
         if ($LASTEXITCODE -ne 0) { throw "Backlog validation exited $LASTEXITCODE during restore: $($validationOutput | Out-String)" }
     }
 }

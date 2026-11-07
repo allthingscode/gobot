@@ -95,6 +95,19 @@ function Invoke-HumanGateMerge {
         Write-Quiet "[HUMAN GATE] Removed premature gate decision $recordName (merge did not complete)."
     }
 
+    if (-not (Test-Path -LiteralPath Function:Write-BlockedTaskRecord)) {
+        & $removePrematureAccept
+        [Console]::Error.WriteLine("Cannot record recurring merge conflicts: Write-BlockedTaskRecord is unavailable.")
+        exit 2
+    }
+    try {
+        $checkHost = Get-RunningPowerShellCommand
+    } catch {
+        & $removePrematureAccept
+        [Console]::Error.WriteLine("Cannot run post-rebase checks: " + $_.Exception.Message)
+        exit 2
+    }
+
     if (-not (Test-GitDiscardSafe -Directory $ProjectRoot -Operation "human gate merge and abort" -IncludeUntracked:$false)) {
         try { & $removePrematureAccept } catch { Write-Host $_.Exception.Message -ForegroundColor Red }
         exit 2
@@ -119,9 +132,7 @@ function Invoke-HumanGateMerge {
     if ($nextRebase -gt $MaxRebaseAttempts) {
         Write-EventLog -Event "circuit_breaker" -TaskId $TaskId -Specialist "deployment" -Outcome "blocked" -Notes "Recurring Merge Conflicts - $MaxRebaseAttempts strikes at human gate" `
             -LogFile $LogFile -CircuitBreakerHistoryFile $CircuitBreakerHistoryFile
-        if (Test-Path -LiteralPath Function:Write-BlockedTaskRecord) {
-            Write-BlockedTaskRecord -BacklogDir (Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot) -FrameworkPowerShell (Split-Path -Parent $PSScriptRoot) -TaskId $TaskId -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $currentRebase -LastSpecialist "deployment" -Summary "Recurring Merge Conflicts at human gate. Manual conflict resolution required."
-        }
+        Write-BlockedTaskRecord -ProjectRoot $ProjectRoot -BacklogDir (Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot) -FrameworkPowerShell (Split-Path -Parent $PSScriptRoot) -TaskId $TaskId -CircuitBreaker "recurring_merge_conflicts" -AttemptCount $currentRebase -LastSpecialist "deployment" -Summary "Recurring Merge Conflicts at human gate. Manual conflict resolution required."
         Write-WedgeReport -TaskId $TaskId -ProjectRoot $ProjectRoot -SourcePhase "deployment" -TargetPhase "deployment" -BreakerCode "recurring_merge_conflicts" `
             -Why "Recurring Merge Conflicts: task/$TaskId rebased $currentRebase time(s) and still conflicts with $PrimaryBranch. Reduce scope or resolve the conflict manually."
         & $removePrematureAccept
@@ -151,7 +162,7 @@ function Invoke-HumanGateMerge {
         Write-Quiet "[HUMAN GATE] Auto-rebase clean; re-running isolated checks before merge..."
         $checksOk = $true
         if (Test-Path $CheckScript) {
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $CheckScript -TaskId $TaskId -Mode full -ProjectRoot $ProjectRoot | Out-Null
+            & $checkHost -NoProfile -ExecutionPolicy Bypass -File $CheckScript -TaskId $TaskId -Mode full -ProjectRoot $ProjectRoot | Out-Null
             if ($LASTEXITCODE -ne 0) { $checksOk = $false }
         }
         if ($checksOk) {
@@ -681,7 +692,7 @@ function Invoke-HumanGatePublish {
                 if (-not [string]::IsNullOrWhiteSpace($ciRequiredChecks)) {
                     $watchCmdArgs += @("-RequiredJobs", $ciRequiredChecks)
                 }
-                $ciOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript @watchCmdArgs 2>&1)
+                $ciOutput = @(& (Get-RunningPowerShellCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript @watchCmdArgs 2>&1)
                 $ciExitCode = $LASTEXITCODE
                 foreach ($line in $ciOutput) {
                     Write-Host $line
@@ -698,7 +709,7 @@ function Invoke-HumanGatePublish {
 
                     if ($ciPostPushWatch) {
                         Write-Host ("[HUMAN GATE] Watching origin CI post-push on " + $PrimaryBranch + " for " + $mergedSha + "...") -ForegroundColor Cyan
-                        $postPushOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript @watchCmdArgs 2>&1)
+                        $postPushOutput = @(& (Get-RunningPowerShellCommand) -NoProfile -ExecutionPolicy Bypass -File $watchScript @watchCmdArgs 2>&1)
                         $postPushExitCode = $LASTEXITCODE
                         foreach ($line in $postPushOutput) {
                             Write-Host $line
@@ -892,7 +903,8 @@ function Get-HumanGateBranchRecoverySteps {
     # Dot-source the real library before invoking its restore function.
     $loadBacklog = New-CrucibleCommand -Script "powershell/lib/backlog-io.ps1" -Transport PowerShell -Parameters ([ordered]@{}) -CrucibleRoot (Get-CrucibleCommandRoot -ProjectRoot $ProjectRoot)
     $restoreCommand = if ($loadBacklog.StartsWith("#")) { $loadBacklog } else {
-        ". " + $loadBacklog.Substring(2) + "; Restore-BacklogTask -TaskId '" + $TaskId.Replace("'", "''") + "' -ProjectRoot '" + $ProjectRoot.Replace("'", "''") + "' -ActiveStatus 'In Progress'"
+        $restoreBody = ". " + $loadBacklog.Substring(2) + "; Restore-BacklogTask -TaskId " + (ConvertTo-CrucibleCommandPowerShellLiteral -Value $TaskId) + " -ProjectRoot " + (ConvertTo-CrucibleCommandPowerShellLiteral -Value $ProjectRoot) + " -ActiveStatus 'In Progress'"
+        "pwsh -NoProfile -Command " + (ConvertTo-CrucibleCommandPowerShellLiteral -Value $restoreBody)
     }
     $reworkCommand = Get-HumanGateReworkRecoveryCommand -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff
     return "2. Restore the backlog entry: $restoreCommand`n3. Generate the rework handoff: $reworkCommand`nDo not reject again."
@@ -933,7 +945,8 @@ function Invoke-HumanGateRejectAbandon {
         # Only this task's proven merge supplies a second-parent task tip. Another
         # task's merge is not recovery evidence; require reflog verification instead.
         $taskTip = if ($headIsTaskMerge -and $parentList.Count -ge 2) { $parentList[1] } elseif ($parentList.Count -lt 2) { $currentHead } else { $null }
-        $branchCommand = if ($taskTip) { "git -C '" + $ProjectRoot.Replace("'", "''") + "' branch 'task/" + $TaskId.Replace("'", "''") + "' '" + $taskTip + "'" } else { "" }
+        $recoveryTip = if ($taskTip) { $taskTip } else { '<verified-task-sha>' }
+        $branchCommand = "git -C " + (ConvertTo-CrucibleCommandPowerShellLiteral -Value $ProjectRoot) + " branch " + (ConvertTo-CrucibleCommandPowerShellLiteral -Value ("task/" + $TaskId)) + " " + (ConvertTo-CrucibleCommandPowerShellLiteral -Value $recoveryTip)
         $primaryState = if ($headIsTaskMerge) { "$PrimaryBranch was reset to $unwindTarget" } else { "$PrimaryBranch was left untouched" }
 
         # Creating a ref cannot dirty files or bypass the unwind safety check. Preserve
@@ -942,7 +955,7 @@ function Invoke-HumanGateRejectAbandon {
             Invoke-GitChecked { git show-ref --quiet "refs/heads/task/$TaskId" }
             if ($LASTEXITCODE -ne 0) {
                 if (-not $taskTip) {
-                    [Console]::Error.WriteLine("[STOP] Cannot identify the tip of task/$TaskId from another task's merge. The rejection is already recorded and $primaryState. Identify and verify the task sha with git reflog --all, then complete recovery in order:`n1. Recreate the branch (replace <verified-task-sha>): git -C '$($ProjectRoot.Replace("'", "''"))' branch 'task/$($TaskId.Replace("'", "''"))' '<verified-task-sha>'`n$(Get-HumanGateBranchRecoverySteps -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff)")
+                    [Console]::Error.WriteLine("[STOP] Cannot identify the tip of task/$TaskId from another task's merge. The rejection is already recorded and $primaryState. Identify and verify the task sha with git reflog --all, then complete recovery in order:`n1. Recreate the branch (replace <verified-task-sha>): $branchCommand`n$(Get-HumanGateBranchRecoverySteps -TaskId $TaskId -ProjectRoot $ProjectRoot -GateReason $GateReason -Handoff $Handoff)")
                     exit 1
                 }
                 $global:LASTEXITCODE = 0
