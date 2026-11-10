@@ -513,7 +513,7 @@ $scenario = 'failure'
                 }
                 'handoff' {
                     Copy-Item -LiteralPath (Join-Path $source 'new-handoff.ps1') -Destination $root
-                    Copy-Item -LiteralPath (Join-Path $source 'lib/new-handoff-core.ps1') -Destination $lib
+                    Copy-Item -Path (Join-Path $source 'lib/*') -Destination $lib -Recurse -Force
                     Write-FixtureText (Join-Path $lib 'project-root.ps1') 'function Resolve-CrucibleProjectRoot { param($ProjectRoot) $ProjectRoot }'
                     Write-FixtureText (Join-Path $root 'crucible-lib.ps1') @'
 function Get-ConfiguredPath { param($Key) Join-Path $REPO_ROOT $Key }

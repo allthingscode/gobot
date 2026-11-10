@@ -60,7 +60,13 @@ try {
 # Invoked in-process rather than as a child process so arguments cross as objects.
 # Re-launching pwsh would re-quote them, and PowerShell 5.1's native-argument
 # quoting mangles embedded quotes - which -GateReason routinely carries.
-$global:LASTEXITCODE = 0
-& $crucibleScript @args
-if (-not $? -and $LASTEXITCODE -eq 0) { exit 1 }
-exit $LASTEXITCODE
+try {
+    $forwarderScript = Join-Path $PSScriptRoot "lib/forward-entrypoint.ps1"
+    $global:LASTEXITCODE = 0
+    & $forwarderScript -TargetScript $crucibleScript -Arguments $args -Entrypoint 'factory.ps1'
+    if (-not $? -and $LASTEXITCODE -eq 0) { exit 1 }
+    exit $LASTEXITCODE
+} catch {
+    [Console]::Error.WriteLine("factory.ps1: " + $_.Exception.Message)
+    exit 1
+}

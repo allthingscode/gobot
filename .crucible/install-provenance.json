@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "2742ec31e7b41e963cbae50efa9687795537aab2",
+  "source_commit": "8d57bd09b35a85233c44ba406f61f93caf9f4ed1",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -167,8 +167,8 @@
       "base_hash": "86e45f11e8fef3b722054794a135f2b2ddf43dcbb696e84b37e62c73fec02cca"
     },
     "powershell/factory.ps1": {
-      "hash": "223b4b32d962a36b7ac3f2ee08db23f36e467e40ade4b62aa13d7e73a1be79e6",
-      "base_hash": "223b4b32d962a36b7ac3f2ee08db23f36e467e40ade4b62aa13d7e73a1be79e6"
+      "hash": "40ce5e3de387ae81a090d5216da24090149c40e340cbe50dedbf9f60150c8f21",
+      "base_hash": "40ce5e3de387ae81a090d5216da24090149c40e340cbe50dedbf9f60150c8f21"
     },
     "powershell/gates/check-mojibake.ps1": {
       "hash": "25ffb88e3cebf00b24aae3888664761edb45fc48a335ebf0b4fc7a5222f2cc88",
@@ -253,6 +253,10 @@
     "powershell/lib/file-lock.ps1": {
       "hash": "8972cf11f80508b0b90abbc250a3fc25760843b8ba26f1b658f803c8c281770a",
       "base_hash": "8972cf11f80508b0b90abbc250a3fc25760843b8ba26f1b658f803c8c281770a"
+    },
+    "powershell/lib/forward-entrypoint.ps1": {
+      "hash": "1c80c18c5a79fecc7ceff94c02eefe33293c2d065f41b4767e3e9ebf718c1af8",
+      "base_hash": "1c80c18c5a79fecc7ceff94c02eefe33293c2d065f41b4767e3e9ebf718c1af8"
     },
     "powershell/lib/git.ps1": {
       "hash": "e392df2d1d33df20d9e3d5d9b5670706e40e927bf7272da3587e035dd70bc9b9",
@@ -347,8 +351,8 @@
       "base_hash": "3a64c48842dd43d0c551e64b818cd145e7d61e5e0a4c8540208b38b6451be9fb"
     },
     "powershell/new-handoff.ps1": {
-      "hash": "20bcaa5d5277af547b4a0665f3d74960584f660dc1a15220394f83e24b71c51b",
-      "base_hash": "20bcaa5d5277af547b4a0665f3d74960584f660dc1a15220394f83e24b71c51b"
+      "hash": "ca5aabbcd177ce5d6168bb88a053b9facf924bd757ee84d129f136ea5362bcbf",
+      "base_hash": "ca5aabbcd177ce5d6168bb88a053b9facf924bd757ee84d129f136ea5362bcbf"
     },
     "powershell/record-research-gate.ps1": {
       "hash": "4fcc727f6ace2ced0553f96b7cd5358e27aee427f411980a424b447ea58acf95",
@@ -539,8 +543,8 @@
       "base_hash": "f79e7bd41931ef8dee88cbf5c41fe7d14d9187b0414c19ad5b992a43eb3bfc7a"
     },
     "powershell/tests/crucible-refusals.tests.ps1": {
-      "hash": "14a4e7f72c231e0c2c951f2cdecba10cf606e14fa9235c9cd4d38df906434f13",
-      "base_hash": "14a4e7f72c231e0c2c951f2cdecba10cf606e14fa9235c9cd4d38df906434f13"
+      "hash": "5c5c2b702e8df844d8f4cbed89ac87783b564933cf18e84e307d6fc5773992f7",
+      "base_hash": "5c5c2b702e8df844d8f4cbed89ac87783b564933cf18e84e307d6fc5773992f7"
     },
     "powershell/tests/crucible-status.tests.ps1": {
       "hash": "a510b74363102e176bf96dd47ca1443bd51e33d3bd60055768dbf477d4011769",
@@ -575,8 +579,8 @@
       "base_hash": "c1ff0d621ae22a9db96fe405e61a153123770bf0fabecf68a685c81b9a01f60f"
     },
     "powershell/tests/factory-shim.tests.ps1": {
-      "hash": "cdf8271a6176cc39574688d5df82da81d3e4ab5db1b778321b48dfcc5139ea9b",
-      "base_hash": "cdf8271a6176cc39574688d5df82da81d3e4ab5db1b778321b48dfcc5139ea9b"
+      "hash": "f36535ce33be05fc618cb12a22f642ea2fa1532dc0e1fa8eedb6a30004cd5f93",
+      "base_hash": "f36535ce33be05fc618cb12a22f642ea2fa1532dc0e1fa8eedb6a30004cd5f93"
     },
     "powershell/tests/filesystem-qualification.tests.ps1": {
       "hash": "77991a5cee95b9aa3a72434d5b38f468cb4aee568594cfbcf76c2b427a060909",
@@ -851,8 +855,8 @@
       "base_hash": "9cb4a73cb2cd19202aa2e955b253035552db8f16ea3eda96de1fe602ab36fe73"
     },
     "powershell/tests/validate-backlog.tests.ps1": {
-      "hash": "a6fe91a49b59e90fc486bd5c9fad8c143f26affc901ab4fbb738b5d55a5f9b51",
-      "base_hash": "a6fe91a49b59e90fc486bd5c9fad8c143f26affc901ab4fbb738b5d55a5f9b51"
+      "hash": "80bab833f64fd0a9625b57cf17dc1a0bd5af628ef0a431a430dcd21f3875e32a",
+      "base_hash": "80bab833f64fd0a9625b57cf17dc1a0bd5af628ef0a431a430dcd21f3875e32a"
     },
     "powershell/tests/validate-config.tests.ps1": {
       "hash": "f936a4039753e5828d85f25d5070fc550ccd25299a67e1f146c269501b9d5c72",

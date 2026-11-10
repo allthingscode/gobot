@@ -265,21 +265,25 @@ Write-Output 'guarded dependencies loaded; zero dependency command-discovery cal
 
         . (Join-Path $REPO_ROOT "powershell/lib/backlog-io.ps1")
         $lockPath = Get-BacklogLockFilePath -BacklogPath $backlog
-        [System.IO.File]::WriteAllText($lockPath, "$PID;$(Get-Date -Format 'o')")
-        $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-PwshCommand))
-        foreach ($a in @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SCRIPT, "-BacklogPath", $backlog, "-FixSummary")) { $psi.ArgumentList.Add($a) }
-        $psi.RedirectStandardOutput = $true
-        $psi.UseShellExecute = $false
-        $proc = [System.Diagnostics.Process]::Start($psi)
+        # The handle holds the lock before the child reads the backlog; a pathname alone
+        # is immediately acquirable. Dispose only after the concurrent edit is complete.
+        $lockHandle = $null
         $seen = @()
         try {
+            $lockHandle = [System.IO.FileStream]::new($lockPath, [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite, [IO.FileShare]::None, 1, [IO.FileOptions]::DeleteOnClose)
+            $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-PwshCommand))
+            foreach ($a in @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SCRIPT, "-BacklogPath", $backlog, "-FixSummary")) { $psi.ArgumentList.Add($a) }
+            $psi.RedirectStandardOutput = $true
+            $psi.UseShellExecute = $false
+            $proc = [System.Diagnostics.Process]::Start($psi)
             while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
                 $seen += $line
                 if ($line -like "Auto-fixing Priority Summary*") { break }
             }
             Add-Content -LiteralPath $backlog -Value "| [C-002](chores/active/C-002_Added.md) | P2 | Ready | Added meanwhile | Architect |" -Encoding UTF8
         } finally {
-            Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+            if ($null -ne $lockHandle) { $lockHandle.Dispose() }
         }
         $rest = $proc.StandardOutput.ReadToEnd()
         $proc.WaitForExit()
