@@ -32,6 +32,15 @@ function Get-CrucibleCommandCompanionRules {
     )
 }
 
+# Entrypoints that declare no param block and bind every argument inside a protected call
+# to a core script, so a binding failure refuses with an exit (item 375). Their parameters
+# are read from the core. A forwarder that declares its own param block is read as written.
+function Get-CrucibleCommandForwarders {
+    return [ordered]@{
+        "powershell/new-handoff.ps1" = "powershell/lib/new-handoff-core.ps1"
+    }
+}
+
 # The bundle this file ships in: <bundle>/powershell/lib/crucible-command.ps1. Parameters are
 # bound against its scripts; a printed path names the project's configured bundle instead.
 function Get-CrucibleCommandBundleRoot {
@@ -109,6 +118,17 @@ function Get-CrucibleScriptParameters {
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$parseErrors)
     if ($null -ne $parseErrors -and @($parseErrors).Count -gt 0) {
         throw ("New-CrucibleCommand: " + $normalized + " does not parse: " + $parseErrors[0].Message)
+    }
+    $forwarders = Get-CrucibleCommandForwarders
+    if ($null -eq $ast.ParamBlock -and $forwarders.Contains($normalized)) {
+        $corePath = Resolve-FilesystemPath -Path (Join-Path $BundleRoot $forwarders[$normalized])
+        if (-not (Test-Path -LiteralPath $corePath -PathType Leaf)) {
+            throw ("New-CrucibleCommand: " + $normalized + " forwards to " + $forwarders[$normalized] + ", which is missing from the bundle at " + $BundleRoot + ".")
+        }
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-FilesystemPath -Path $corePath), [ref]$tokens, [ref]$parseErrors)
+        if ($null -ne $parseErrors -and @($parseErrors).Count -gt 0) {
+            throw ("New-CrucibleCommand: " + $forwarders[$normalized] + " does not parse: " + $parseErrors[0].Message)
+        }
     }
     if ($null -eq $ast.ParamBlock) {
         throw ("New-CrucibleCommand: " + $normalized + " declares no param block, so no parameter can be bound to it.")

@@ -1020,7 +1020,7 @@ Invoke-HumanGateRejectAbandon -TaskId F-368 -Outcome rejected -PrimaryBranch mai
             $restore = ($lines | Where-Object { $_ -like '2. Restore*' }) -replace '^2\. Restore the backlog entry: ', ''
             $rework = ($lines | Where-Object { $_ -like '3. Generate*' }) -replace '^3\. Generate the rework handoff: ', ''
             Assert-Result 'two PowerShell commands captured' (@($restore).Count -eq 1 -and @($rework).Count -eq 1) $res.Output
-            $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'new-handoff.ps1'), [ref]$null, [ref]$null)
+            $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'lib/new-handoff-core.ps1'), [ref]$null, [ref]$null)
             $params = $ast.ParamBlock.Extent.Text
             $backlogAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'lib/backlog-io.ps1'), [ref]$null, [ref]$null)
             $restoreFunction = $backlogAst.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Restore-BacklogTask' }, $true)

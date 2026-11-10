@@ -580,6 +580,106 @@ Invoke-HandoffPreflightValidation -Context `$ctx
         Assert-Result -Name "preflight wedge recovery" -Condition ($outputText -match "(?m)^RECOVERY:\s+\S") -FailureMessage "missing recovery line. Output:`n$outputText"
     }
 
+    # Item 374: the preflight validator runs in a child process, so its Console.Error
+    # diagnostic reaches the parent's message. The caller uses Stop, StrictMode and an
+    # outer catch; a refusal must still be an exit it cannot catch.
+    function Invoke-PreflightCase {
+        param([string]$Name, [string]$Validator, [string]$SourcePhase = 'grooming', [string]$TargetPhase = 'implementation')
+        $caseRoot = Join-Path $tempRoot ("preflight-374-" + $Name)
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot 'powershell'), (Join-Path $caseRoot 'session/handoffs'), (Join-Path $caseRoot '.crucible') -Force | Out-Null
+        git -C $caseRoot init --quiet | Out-Null
+        git -C $caseRoot config user.name 'Test' | Out-Null
+        git -C $caseRoot config user.email 'test@example.com' | Out-Null
+        git -C $caseRoot config core.autocrlf false | Out-Null
+        git -C $caseRoot config commit.gpgSign false | Out-Null
+        [IO.File]::WriteAllText((Join-Path $caseRoot '.crucible/README.md'), "fixture`n", [Text.UTF8Encoding]::new($false))
+        git -C $caseRoot add -A | Out-Null
+        git -C $caseRoot commit -m 'init' --quiet | Out-Null
+        [IO.File]::WriteAllText((Join-Path $caseRoot 'powershell/validate-handoff.ps1'), $Validator, [Text.UTF8Encoding]::new($false))
+        $handoffPath = Join-Path $caseRoot 'session/handoffs/F-374-20260526T120000Z.json'
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = 'F-374'; source_phase = $SourcePhase; target_phase = $TargetPhase
+            cumulative_handoff_count = 1; handoff_retry_count = 0; review_strike_count = 0; rebase_count = 0
+            budget_tier = 'low'; reason = 'preflight'; artifacts = @(); file_affinity = @(); prompt_version = '1.0.0'
+        }
+        $runner = Join-Path $caseRoot 'run-preflight.ps1'
+        $template = @'
+$ErrorActionPreference = 'Stop'
+$PSStyle.OutputRendering = 'PlainText'
+$Quiet = $true
+. '__LIB__'
+Set-StrictMode -Version Latest
+$caseRoot = '__ROOT__'
+$handoffPath = Join-Path $caseRoot 'session/handoffs/F-374-20260526T120000Z.json'
+$ctx = @{
+    RepoRoot = $caseRoot; CrucibleRoot = '.crucible'; FrameworkPowerShell = (Join-Path $caseRoot 'powershell')
+    SessionDir = (Join-Path $caseRoot 'session'); HandoffDir = (Join-Path $caseRoot 'session/handoffs')
+    LogFile = (Join-Path $caseRoot 'session/F-374/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path $caseRoot 'session/global/circuit_breakers.jsonl')
+    TaskId = 'F-374'; Init = $true; Quiet = $true
+    LatestHandoff = (Get-Item -LiteralPath $handoffPath)
+    Handoff = (Get-Content -LiteralPath $handoffPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+}
+try {
+    Invoke-HandoffPreflightValidation -Context $ctx
+    Write-Host 'PREFLIGHT_CONTINUED'
+} catch {
+    Write-Host ('CALLER_CAUGHT: ' + $_.Exception.Message)
+    exit 0
+}
+exit 0
+'@
+        $text = $template.Replace('__LIB__', $CRUCIBLE_LIB.Replace("'", "''")).Replace('__ROOT__', $caseRoot.Replace("'", "''"))
+        [IO.File]::WriteAllText($runner, $text, [Text.UTF8Encoding]::new($false))
+        $stderr = Join-Path $caseRoot 'stderr.txt'
+        $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner 2>$stderr }
+        $logPath = Join-Path $caseRoot 'session/F-374/pipeline.log.jsonl'
+        return [pscustomobject]@{
+            ExitCode = $res.ExitCode
+            Output = (@($res.Output) -join "`n")
+            Stderr = [IO.File]::ReadAllText($stderr)
+            Events = @(if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath | Where-Object { $_.Trim() } | ConvertFrom-Json })
+        }
+    }
+
+    $results += Run-Test -Name "Handoff preflight carries a validator Console.Error crash into its refusal under caller Stop" -Body {
+        $run = Invoke-PreflightCase -Name 'crash' -Validator @'
+param([string]$HandoffFile, [string]$SchemaPath)
+[Console]::Error.WriteLine('PREFLIGHT_CONSOLE_DIAGNOSTIC_374')
+exit 2
+'@
+        $evidence = "exit=$($run.ExitCode)`n$($run.Output)`n$($run.Stderr)"
+        Assert-Result -Name "crash refusal is not caught" -Condition ($run.Output -notmatch 'CALLER_CAUGHT|PREFLIGHT_CONTINUED') -FailureMessage $evidence
+        Assert-Result -Name "crash refusal exits 2" -Condition ($run.ExitCode -eq 2) -FailureMessage $evidence
+        $crashLines = @($run.Stderr -split "`r?`n" | Where-Object { $_ -match 'validate-handoff\.ps1 crashed or failed internally \(exit 2\)' })
+        Assert-Result -Name "parent crash message carries the child Console.Error diagnostic" -Condition (@($crashLines | Where-Object { $_ -match 'PREFLIGHT_CONSOLE_DIAGNOSTIC_374' }).Count -eq 1) -FailureMessage $evidence
+        Assert-Result -Name "crash logs no preflight finding" -Condition (@($run.Events | Where-Object { $_.event -eq 'preflight_failed' }).Count -eq 0) -FailureMessage $evidence
+    }
+
+    $results += Run-Test -Name "Handoff preflight separates validator stderr from its JSON findings" -Body {
+        $finding = Invoke-PreflightCase -Name 'finding' -Validator @'
+param([string]$HandoffFile, [string]$SchemaPath)
+[Console]::Error.WriteLine('PREFLIGHT_FINDING_NOTE_374')
+Write-Output '{"ok":false,"reason_code":"invalid_field","message":"Handoff contains an invalid field."}'
+exit 1
+'@
+        $evidence = "exit=$($finding.ExitCode)`n$($finding.Output)`n$($finding.Stderr)"
+        Assert-Result -Name "finding refusal exits 2 uncaught" -Condition ($finding.ExitCode -eq 2 -and $finding.Output -notmatch 'CALLER_CAUGHT|PREFLIGHT_CONTINUED') -FailureMessage $evidence
+        Assert-Result -Name "JSON finding still parses beside stderr" -Condition (@($finding.Events | Where-Object { $_.event -eq 'preflight_failed' -and $_.outcome -eq 'invalid_field' -and $_.notes -match 'Handoff contains an invalid field' }).Count -eq 1) -FailureMessage $evidence
+        Assert-Result -Name "finding diagnostic stays on stderr" -Condition ($finding.Stderr -match 'PREFLIGHT_FINDING_NOTE_374') -FailureMessage $evidence
+
+        # No JSON at all: the child's diagnostic is the only account of the failure, and
+        # mentioning commit_hash must not defer a deployment handoff to merge verification.
+        $unparsed = Invoke-PreflightCase -Name 'unparsed' -SourcePhase 'deployment' -TargetPhase 'done' -Validator @'
+param([string]$HandoffFile, [string]$SchemaPath)
+[Console]::Error.WriteLine('PREFLIGHT_UNPARSED_374 commit_hash')
+exit 1
+'@
+        $evidence = "exit=$($unparsed.ExitCode)`n$($unparsed.Output)`n$($unparsed.Stderr)"
+        Assert-Result -Name "unparsed finding refuses uncaught" -Condition ($unparsed.ExitCode -eq 2 -and $unparsed.Output -notmatch 'CALLER_CAUGHT|PREFLIGHT_CONTINUED') -FailureMessage $evidence
+        Assert-Result -Name "unparsed finding message carries the child diagnostic" -Condition (@($unparsed.Events | Where-Object { $_.event -eq 'preflight_failed' -and $_.notes -match 'Preflight validation failed: PREFLIGHT_UNPARSED_374' }).Count -eq 1) -FailureMessage $evidence
+    }
+
     $results += Run-Test -Name "D31: missing optional counters defaulted without StrictMode crash" -Body {
         $frameworkDir = Join-Path $tempRoot "powershell"
         $sessionDir = Join-Path $tempRoot "session"

@@ -98,7 +98,7 @@ try {
         }
 
         # Execute each caller's normalization section without unrelated handoff I/O.
-        $generatorText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/new-handoff.ps1") -Raw
+        $generatorText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/new-handoff-core.ps1") -Raw
         $gatesText = Get-Content -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/crucible-gates-handoff.ps1") -Raw
         $start = $generatorText.IndexOf('$resolvedWtPath =')
         $end = $generatorText.IndexOf('$resolvedArtifacts = $normalizedArtifacts', $start)

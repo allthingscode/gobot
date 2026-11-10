@@ -319,7 +319,7 @@ function Resolve-StickyTarget { 'agent' }
                         # Execute the production invocation and its immediate guard,
                         # preserving their AST extents. Surrounding setup is unrelated
                         # to this caller's child-status contract.
-                        $path = switch ($name) { 'init-backlog' { 'init-project.ps1' }; 'handoff-validator' { 'new-handoff.ps1' }; 'preflight-validator' { 'lib/crucible-gates-handoff.ps1' }; default { 'lib/crucible-gates.ps1' } }
+                        $path = switch ($name) { 'init-backlog' { 'init-project.ps1' }; 'handoff-validator' { 'lib/new-handoff-core.ps1' }; 'preflight-validator' { 'lib/crucible-gates-handoff.ps1' }; default { 'lib/crucible-gates.ps1' } }
                         $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source $path), [ref]$null, [ref]$null)
                         $needle = switch ($name) {
                             'affinity' { '& $affinityScript' }
@@ -327,7 +327,7 @@ function Resolve-StickyTarget { 'agent' }
                             'dev-log' { '& "$FRAMEWORK_POWERSHELL/validate-dev-log.ps1"' }
                             'init-backlog' { '& (Join-Path $PSScriptRoot "validate-backlog.ps1")' }
                             'handoff-validator' { '& (Get-RunningPowerShellCommand) -NoProfile -File (Resolve-FilesystemPath -Path $validatorPath)' }
-                            'preflight-validator' { '& $preflightScript' }
+                            'preflight-validator' { '& (Get-RunningPowerShellCommand) -NoProfile -File (Resolve-FilesystemPath -Path $preflightScript)' }
                         }
                         $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.Text.StartsWith($needle) }, $true)
                         if ($null -eq $node) { throw "Caller invocation not found: $name" }
@@ -365,7 +365,7 @@ if ($HandoffFile) { '{"ok":true}' }
                         $stub = $stub.Replace("if (`$scenario -eq 'failure') { [Console]::Error.WriteLine('CHILD_FAILURE'); exit 7 }", $childAst.EndBlock.Traps[0].Extent.Text + "`nif (`$scenario -eq 'failure') { throw 'CHILD_FAILURE' }")
                         Write-FixtureText $stubPath $stub
                     }
-                    if ($name -in @('backlog', 'handoff-validator')) {
+                    if ($name -in @('backlog', 'handoff-validator', 'preflight-validator')) {
                         $stubPath = Join-Path $root $childScript
                         Write-FixtureText $stubPath ([IO.File]::ReadAllText($stubPath).Replace('$scenario', '$env:CRUCIBLE_REFUSAL_SCENARIO'))
                     }
@@ -513,6 +513,7 @@ $scenario = 'failure'
                 }
                 'handoff' {
                     Copy-Item -LiteralPath (Join-Path $source 'new-handoff.ps1') -Destination $root
+                    Copy-Item -LiteralPath (Join-Path $source 'lib/new-handoff-core.ps1') -Destination $lib
                     Write-FixtureText (Join-Path $lib 'project-root.ps1') 'function Resolve-CrucibleProjectRoot { param($ProjectRoot) $ProjectRoot }'
                     Write-FixtureText (Join-Path $root 'crucible-lib.ps1') @'
 function Get-ConfiguredPath { param($Key) Join-Path $REPO_ROOT $Key }
@@ -629,7 +630,7 @@ $handoffExit = 7
                     # first under StrictMode, with stale status 7 supplied by the fixture.
                     $invoke = switch ($case.Name) {
                         'research-runner' {
-                            $generatorAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'new-handoff.ps1'), [ref]$null, [ref]$null)
+                            $generatorAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $source 'lib/new-handoff-core.ps1'), [ref]$null, [ref]$null)
                             Write-FixtureText (Join-Path $root '.crucible/powershell/new-handoff.ps1') ($generatorAst.ParamBlock.Extent.Text + "`n" + [IO.File]::ReadAllText((Join-Path $root 'new-handoff.ps1')))
                             Write-FixtureText (Join-Path $root '.crucible/config.yaml') "project: fixture`n"
                             New-Item -ItemType Directory -Path (Join-Path $root '.crucible/session/F-261/research') -Force | Out-Null

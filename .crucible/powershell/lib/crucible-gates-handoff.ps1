@@ -392,16 +392,23 @@ function Invoke-HandoffPreflightValidation {
         exit 2
     }
 
+    # A process boundary captures the validator's Console.Error diagnostics as well as its
+    # JSON findings. Keep its exit status as data even when the embedding caller uses Stop.
+    $PSNativeCommandUseErrorActionPreference = $false
     $global:LASTEXITCODE = 0
-    $preflightRaw = & $preflightScript -HandoffFile $handoffFile -SchemaPath (Join-Path (Split-Path -Parent $FRAMEWORK_POWERSHELL) "schemas/handoff.schema.json") 2>&1
+    $preflightRaw = & (Get-RunningPowerShellCommand) -NoProfile -File (Resolve-FilesystemPath -Path $preflightScript) -HandoffFile (Resolve-FilesystemPath -Path $handoffFile) -SchemaPath (Resolve-FilesystemPath -Path (Join-Path (Split-Path -Parent $FRAMEWORK_POWERSHELL) "schemas/handoff.schema.json")) 2>&1
     $preflightExit = $LASTEXITCODE
     if ($preflightExit -ne 0 -and $preflightExit -ne 1) {
-        [Console]::Error.WriteLine("validate-handoff.ps1 crashed or failed internally (exit $preflightExit).")
+        $crashDiagnostic = (@($preflightRaw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { [string]$_ }) -join "`n").Trim()
+        [Console]::Error.WriteLine(("validate-handoff.ps1 crashed or failed internally (exit $preflightExit). " + $crashDiagnostic).Trim())
         exit 2
     }
+    $preflightDiagnostic = (@($preflightRaw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { [string]$_ }) -join "`n").Trim()
+    # Capturing must not take a findings or success diagnostic off stderr.
+    if (-not [string]::IsNullOrWhiteSpace($preflightDiagnostic)) { [Console]::Error.WriteLine($preflightDiagnostic) }
     $preflightResult = $null
     try {
-        $preflightResult = ($preflightRaw | Out-String).Trim() | ConvertFrom-Json
+        $preflightResult = (@($preflightRaw | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) | Out-String).Trim() | ConvertFrom-Json
     } catch {
         $preflightResult = $null
     }
@@ -421,10 +428,14 @@ function Invoke-HandoffPreflightValidation {
             if ($preflightResult.PSObject.Properties["message"] -and -not [string]::IsNullOrWhiteSpace([string]$preflightResult.message)) {
                 $errorMessage = [string]$preflightResult.message
             }
+        } elseif (-not [string]::IsNullOrWhiteSpace($preflightDiagnostic)) {
+            $errorMessage = "Preflight validation failed: " + ($preflightDiagnostic -replace '\s*[\r\n]+\s*', ' ')
         }
 
+        # Only a parsed finding defers; a diagnostic that merely mentions commit_hash does not.
         $allowRuntimeCommitHashVerification = $false
-        if ($handoff.source_phase -eq "deployment" -and
+        if ($null -ne $preflightResult -and
+            $handoff.source_phase -eq "deployment" -and
             $reasonCode -eq "missing_required_field" -and
             $errorMessage -match "commit_hash") {
             $allowRuntimeCommitHashVerification = $true

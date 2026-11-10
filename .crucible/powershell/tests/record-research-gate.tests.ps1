@@ -227,7 +227,8 @@ $captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
 '@
         foreach ($name in @("new-handoff.ps1", "validate-backlog.ps1", "crucible.ps1")) {
             $tokens = $null; $errors = $null
-            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $REPO_ROOT ("powershell/" + $name)), [ref]$tokens, [ref]$errors)
+            $declaring = if ($name -eq "new-handoff.ps1") { "powershell/lib/new-handoff-core.ps1" } else { "powershell/" + $name }
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $REPO_ROOT $declaring), [ref]$tokens, [ref]$errors)
             [IO.File]::WriteAllText((Join-Path $bundle $name), ($ast.ParamBlock.Extent.Text + $capture), $utf8)
         }
         $reason = 'Approve C-350; costs $5 and it''s "cheap" `tick \\share' + [char]0x2019 + 's'

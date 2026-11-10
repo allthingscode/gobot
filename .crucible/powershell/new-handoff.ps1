@@ -1,579 +1,85 @@
-[CmdletBinding(DefaultParameterSetName = "Transition")]
-param(
-    [Parameter(Mandatory = $true)]
-    [string]$TaskId,
+# Writes a validated handoff. The parameters and body are in lib/new-handoff-core.ps1;
+# this entrypoint only binds them inside a protected call.
+#
+# Deliberately declares no param() block. PowerShell binds a script's parameters before
+# its body or trap runs, so a missing mandatory argument, an invalid -Source or a failed
+# type conversion would throw to an in-process caller, whose catch could turn the refusal
+# into a pass (I11, item 375). Here binding happens inside the call below, and any failure
+# becomes a stderr diagnostic and exit 1. The core's own refusals keep their exit codes.
+# Follows the factory.ps1 forwarder.
 
-    [Parameter(Mandatory = $true, ParameterSetName = "Transition")]
-    # Keep synchronized with $script:CRUCIBLE_PHASES in crucible-lib.ps1.
-    [ValidateSet("research", "grooming", "implementation", "verification", "deployment")]
-    [string]$Source,
-
-    [Parameter(Mandatory = $true, ParameterSetName = "Transition")]
-    # Keep synchronized with $script:CRUCIBLE_PHASES in crucible-lib.ps1.
-    [ValidateSet("research", "grooming", "implementation", "verification", "deployment", "done")]
-    [string]$Target,
-
-    [Parameter(Mandatory = $true, ParameterSetName = "Transition")]
-    [string]$Reason,
-
-    # Carries the latest active handoff forward with only base_commit moved to -BaseCommit,
-    # for a bundle update committed while the task is in flight (TODO item 139).
-    [Parameter(Mandatory = $true, ParameterSetName = "Rebaseline")]
-    [switch]$Rebaseline,
-
-    [int]$HandoffRetryCount = -1,
-    [int]$ReviewStrikeCount = -1,
-    [int]$RebaseCount = -1,
-    # Keep synchronized with $script:BUDGET_TIERS in crucible-lib.ps1.
-    [ValidateSet("low", "medium", "high", "extended")]
-    [string]$BudgetTier = "",
-    # Set by the Groomer on a grooming->implementation handoff when the Architect must
-    # produce the design (escalates the Architect to the strong model). Omit when the
-    # spec already contains a complete design (execution-only, default model).
-    [switch]$DesignRequired,
-    [int]$CumulativeHandoffCount = -1,
-    [string]$PromptVersion = "",
-    [string]$SessionCycleId = "",
-    [string]$CycleId = "",
-    [string]$SuspiciousContent = "",
-    [string]$CommitHash = "",
-    [string]$BaseCommit = "",
-    [string[]]$Artifacts = @(),
-    [string[]]$FileAffinity = @(),
-    [string[]]$ReviewerChecksPassed = @(),
-    [string[]]$HumanApproved = @(),
-    [string[]]$HumanDeferred = @(),
-    [string[]]$HumanRejected = @(),
-    [string[]]$StubSpecsCreated = @(),
-    [string]$SchemaPath = "",
-    [string]$OutputPath = "",
-
-    [Parameter(Mandatory = $false)]
-    [string]$ProjectRoot = ""
-)
-
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
-trap {
-    [Console]::Error.WriteLine($_.Exception.Message)
+$ErrorActionPreference = 'Stop'
+$coreScript = Join-Path $PSScriptRoot "lib/new-handoff-core.ps1"
+if (-not (Test-Path -LiteralPath $coreScript)) {
+    [Console]::Error.WriteLine("new-handoff.ps1 needs lib/new-handoff-core.ps1, which is missing at $coreScript. Your Crucible bundle is incomplete; see docs/updating.md.")
     exit 1
 }
-. (Join-Path $PSScriptRoot "lib/project-root.ps1")
 
-if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    # A dot-sourcing caller that already resolved the project says so through REPO_ROOT.
-    $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-    if ($null -ne $repoRootVar) {
-        $ProjectRoot = $repoRootVar.Value
+# Re-splatting $args drops the value of a switch passed as -Name:$value, from a hashtable
+# splat or a pwsh -File colon argument, and binds that value positionally. Those pairs are
+# passed by name; every other argument is forwarded unchanged, so arrays stay objects.
+# $args cannot tell an explicit -Name:value from a splatted one, so a repeated name is
+# refused rather than resolved; the binder would refuse it too unless one came from a splat.
+# Names are compared after resolving an alias or a unique prefix against the core's
+# param() block and the common parameters its CmdletBinding adds. Like the binder, a
+# prefix resolves among the declared parameters before the common ones.
+$coreAst = [System.Management.Automation.Language.Parser]::ParseFile($coreScript, [ref]$null, [ref]$null)
+$parameterAliases = @{}
+$declaredNames = [System.Collections.Generic.List[string]]::new()
+$commonNames = [System.Collections.Generic.List[string]]::new()
+if ($null -ne $coreAst.ParamBlock) {
+    foreach ($parameter in $coreAst.ParamBlock.Parameters) {
+        $declaredNames.Add($parameter.Name.VariablePath.UserPath)
+        foreach ($attribute in $parameter.Attributes | Where-Object { $_.TypeName.Name -eq 'Alias' }) {
+            foreach ($alias in $attribute.PositionalArguments) { $parameterAliases[[string]$alias.SafeGetValue()] = $parameter.Name.VariablePath.UserPath }
+        }
     }
 }
-$REPO_ROOT = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
-Push-Location $REPO_ROOT
+foreach ($common in [System.Management.Automation.Internal.CommonParameters].GetProperties()) {
+    $commonNames.Add($common.Name)
+    foreach ($alias in $common.GetCustomAttributes([Alias], $false).AliasNames) { $parameterAliases[$alias] = $common.Name }
+}
+function Resolve-CoreParameterName([string]$Name) {
+    if ($parameterAliases.ContainsKey($Name)) { return $parameterAliases[$Name] }
+    foreach ($names in @(, $declaredNames) + @(, $commonNames)) {
+        $exact = @($names | Where-Object { $_ -eq $Name })
+        if ($exact.Count -eq 1) { return $exact[0] }
+    }
+    foreach ($names in @(, $declaredNames) + @(, $commonNames)) {
+        $prefixed = @($names | Where-Object { $_ -like ([WildcardPattern]::Escape($Name) + '*') })
+        if ($prefixed.Count -eq 1) { return $prefixed[0] }
+        if ($prefixed.Count -gt 1) { return $Name }
+    }
+    return $Name
+}
+$seenNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$namedArguments = @{}
+$forwardedArguments = [System.Collections.Generic.List[psobject]]::new()
+for ($i = 0; $i -lt $args.Count; $i++) {
+    $argument = $args[$i]
+    $parameterName = if ($null -ne $argument) { $argument.PSObject.Properties['<CommandParameterName>'] } else { $null }
+    if ($null -ne $parameterName) {
+        $name = Resolve-CoreParameterName ([string]$parameterName.Value)
+        if (-not $seenNames.Add($name)) {
+            [Console]::Error.WriteLine("new-handoff.ps1: Parameter '$name' is specified more than once. Pass each parameter once, including when one value comes from a splatted hashtable.")
+            exit 1
+        }
+    }
+    if ($null -ne $parameterName -and $i + 1 -lt $args.Count -and (([string]$argument).EndsWith(':') -or $args[$i + 1] -is [bool])) {
+        $namedArguments[[string]$parameterName.Value] = $args[$i + 1]
+        $i++
+        continue
+    }
+    $forwardedArguments.Add([psobject]$argument)
+}
+$positionalArguments = $forwardedArguments.ToArray()
+
 try {
-    $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
-    . $crucibleLibPath
-
-    # D41: Validate that the resolved bundle actually owns the task
-    $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $REPO_ROOT
-    if (-not (Test-Path -LiteralPath $backlogDir)) {
-        throw "Backlog directory not found at $backlogDir; please check ProjectRoot or REPO_ROOT."
-    }
-    $backlogPath = Join-Path $backlogDir "BACKLOG.md"
-    if (-not (Test-Path -LiteralPath $backlogPath)) {
-        throw "BACKLOG.md not found at $backlogPath; please check ProjectRoot or REPO_ROOT."
-    }
-    $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
-    if (@($backlogContent -split "`r?`n" | Where-Object { Test-BacklogTaskRow -Line $_ -TaskId $TaskId }).Count -eq 0) {
-        Write-Error -ErrorAction Continue "[STOP] TaskId $TaskId not found in the bundle at ${REPO_ROOT}: BACKLOG.md has no exact row for $TaskId. A row must start with | $TaskId | or | [$TaskId](spec path) |. Add or repair the row, or pass -ProjectRoot pointing at the adopter repo."
-        exit 2
-    }
-
-# Default schema location: framework's own schemas/ directory (one level up from powershell/).
-if ([string]::IsNullOrWhiteSpace($SchemaPath)) {
-    $SchemaPath = Join-Path (Split-Path -Parent $PSScriptRoot) "schemas/handoff.schema.json"
+    $global:LASTEXITCODE = 0
+    & $coreScript @namedArguments @positionalArguments
+    if (-not $? -and $LASTEXITCODE -eq 0) { exit 1 }
+    exit $LASTEXITCODE
+} catch {
+    [Console]::Error.WriteLine("new-handoff.ps1: " + $_.Exception.Message)
+    exit 1
 }
-
-function Get-CycleIdFromTaskFile {
-    param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return ""
-    }
-    $raw = Get-Content -LiteralPath $Path -Raw
-    if ($raw -match '(?m)^Cycle ID:\s*(.+?)\s*$') {
-        return $Matches[1].Trim()
-    }
-    return ""
-}
-
-function Get-PromptVersionFromPromptFile {
-    param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return ""
-    }
-    $raw = Get-Content -LiteralPath $Path -Raw
-    if ($raw -match '<!--\s*prompt_version:\s*(.+?)\s*-->') {
-        return $Matches[1].Trim()
-    }
-    return ""
-}
-
-function Get-LatestActiveHandoffForTask {
-    param([string]$HandoffDir, [string]$Task)
-    $candidates = @(Get-ChildItem -Path $HandoffDir -Filter ($Task + "-*.json") -ErrorAction SilentlyContinue)
-    $candidates = @(Sort-HandoffFiles -Files $candidates)
-    foreach ($file in $candidates) {
-        try {
-            $obj = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
-            if (-not ($obj.PSObject.Properties["superseded"] -and $obj.superseded -eq $true)) {
-                return $obj
-            }
-        } catch {
-            continue
-        }
-    }
-    return $null
-}
-
-function Get-HandoffOutputPath {
-    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
-        return $OutputPath
-    }
-    return (Join-Path $handoffDir ($TaskId + "-" + (Get-UtcFileTimestamp) + ".json"))
-}
-
-function Write-ValidatedHandoff {
-    param($Payload, [string]$Path)
-
-    $tempPath = $Path + ".tmp"
-    try {
-        $json = $Payload | ConvertTo-Json -Depth 12
-        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $tempPath), $json, (New-Object System.Text.UTF8Encoding $false))
-
-        $validatorPath = Join-Path $PSScriptRoot "validate-handoff.ps1"
-        if (-not (Test-Path -LiteralPath $validatorPath)) {
-            throw "Validator not found: $validatorPath"
-        }
-
-        # A process boundary captures Console.Error as well as PowerShell errors.
-        # Keep native refusals as status data even when the embedding caller uses Stop.
-        $PSNativeCommandUseErrorActionPreference = $false
-        $global:LASTEXITCODE = 0
-        $validationRaw = & (Get-RunningPowerShellCommand) -NoProfile -File (Resolve-FilesystemPath -Path $validatorPath) -HandoffFile (Resolve-FilesystemPath -Path $tempPath) -SchemaPath (Resolve-FilesystemPath -Path $SchemaPath) 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $validationText = ($validationRaw -join "`n").Trim()
-            if ([string]::IsNullOrWhiteSpace($validationText)) {
-                $validationText = "unknown validation error"
-            }
-            throw "Schema validation failed: $validationText"
-        }
-        foreach ($line in $validationRaw) {
-            if ($line -is [System.Management.Automation.ErrorRecord]) { [Console]::Error.WriteLine([string]$line) }
-        }
-
-        Move-Item -LiteralPath $tempPath -Destination $Path -Force
-    } catch {
-        if (Test-Path -LiteralPath $tempPath) {
-            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
-        }
-        throw
-    }
-}
-
-$sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
-$handoffDir = Join-Path $sessionDir "handoffs"
-if (-not (Test-Path -LiteralPath $handoffDir)) {
-    New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
-}
-
-# A bundle update committed while a task is in flight lands between the task's
-# base_commit and HEAD, so the framework-integrity gate reads it as a specialist edit.
-# The human-approved fix is to move the baseline, and nothing else: writing a fresh
-# transition would mean re-authoring the specialist's handoff and spending a budget
-# handoff on a decision no specialist made. The copy keeps cumulative_handoff_count and
-# the transition key, and the budget gate counts session_end events, not files.
-if ($Rebaseline) {
-    $rebaselineAllowed = @("TaskId", "Rebaseline", "BaseCommit", "ProjectRoot", "SchemaPath", "OutputPath") + [System.Management.Automation.PSCmdlet]::CommonParameters
-    $rebaselineExtra = @($PSBoundParameters.Keys | Where-Object { $rebaselineAllowed -notcontains $_ })
-    if ($rebaselineExtra.Count -gt 0) {
-        throw ("-Rebaseline carries the latest handoff forward with only base_commit changed, so it takes no other handoff fields. Remove: -" + ($rebaselineExtra -join ", -"))
-    }
-    if ([string]::IsNullOrWhiteSpace($BaseCommit)) {
-        throw "-Rebaseline needs -BaseCommit: the commit to re-baseline $TaskId onto, normally the bundle update commit."
-    }
-
-    $rebaselineFile = $null
-    $rebaselineObj = $null
-    foreach ($file in @(Sort-HandoffFiles -Files @(Get-ChildItem -Path $handoffDir -Filter ($TaskId + "-*.json") -ErrorAction SilentlyContinue))) {
-        try {
-            $obj = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-        } catch {
-            continue
-        }
-        if (-not ($obj.PSObject.Properties["superseded"] -and $obj.superseded -eq $true)) {
-            $rebaselineFile = $file
-            $rebaselineObj = $obj
-            break
-        }
-    }
-    if ($null -eq $rebaselineObj) {
-        throw "No active handoff for $TaskId in $handoffDir, so there is nothing to re-baseline. A task with no handoff yet takes its base from the primary branch when its first handoff is written."
-    }
-
-    $newBase = (git -C (Resolve-FilesystemPath -Path $REPO_ROOT) rev-parse --verify --quiet ($BaseCommit + "^{commit}") 2>$null)
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($newBase)) {
-        throw "-BaseCommit '$BaseCommit' does not name a commit in $REPO_ROOT."
-    }
-    $newBase = ([string]$newBase).Trim()
-
-    $oldBase = if ($rebaselineObj.PSObject.Properties["base_commit"] -and -not [string]::IsNullOrWhiteSpace([string]$rebaselineObj.base_commit)) { ([string]$rebaselineObj.base_commit).Trim() } else { $null }
-    if ($null -ne $oldBase) {
-        if ($oldBase -eq $newBase) {
-            throw "$TaskId is already based on $newBase ($($rebaselineFile.Name)). Nothing to re-baseline."
-        }
-        # Forward only. Moving the base sideways or back would also drop task commits
-        # from the integrity diff, which is a different decision from accepting an update.
-        git -C (Resolve-FilesystemPath -Path $REPO_ROOT) merge-base --is-ancestor $oldBase $newBase 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            throw "-BaseCommit $newBase does not descend from the current base_commit $oldBase in $($rebaselineFile.Name). A re-baseline moves a task forward onto a bundle update committed after its base; it does not move the base sideways or back."
-        }
-    }
-
-    $supersedeFields = @("superseded", "superseded_by", "superseded_at", "superseded_reason")
-    $rebaselinePayload = [ordered]@{}
-    foreach ($prop in $rebaselineObj.PSObject.Properties) {
-        if ($supersedeFields -contains $prop.Name) { continue }
-        $rebaselinePayload[$prop.Name] = $prop.Value
-    }
-    $rebaselinePayload["base_commit"] = $newBase
-    $rebaselinePayload["rebaselined_from"] = $oldBase
-
-    $rebaselinePath = Get-HandoffOutputPath
-    if (Test-Path -LiteralPath $rebaselinePath) {
-        throw "$rebaselinePath already exists. Wait a second and re-run: handoff file names carry a one-second timestamp."
-    }
-    Write-ValidatedHandoff -Payload $rebaselinePayload -Path $rebaselinePath
-
-    $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded -Value $true -Force
-    $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded_by -Value (Split-Path -Leaf $rebaselinePath) -Force
-    $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded_at -Value (Get-UtcTimestamp) -Force
-    $rebaselineObj | Add-Member -MemberType NoteProperty -Name superseded_reason -Value "rebaseline" -Force
-    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $rebaselineFile.FullName), ($rebaselineObj | ConvertTo-Json -Depth 12), (New-Object System.Text.UTF8Encoding $false))
-
-    [ordered]@{
-        ok                       = $true
-        handoff_file             = $rebaselinePath
-        task_id                  = $TaskId
-        source                   = $rebaselineObj.source_phase
-        target                   = $rebaselineObj.target_phase
-        base_commit              = $newBase
-        rebaselined_from         = $oldBase
-        superseded               = $rebaselineFile.Name
-        cumulative_handoff_count = $rebaselineObj.cumulative_handoff_count
-    } | ConvertTo-Json
-    exit 0
-}
-
-$latest = Get-LatestActiveHandoffForTask -HandoffDir $handoffDir -Task $TaskId
-$sourceTaskPath = Join-Path $sessionDir "$TaskId/$Source/task.md"
-$sourcePromptPath = Join-Path $sessionDir "$TaskId/$Source/prompt.md"
-$taskCycleId = Get-CycleIdFromTaskFile -Path $sourceTaskPath
-$promptVersionFromPrompt = Get-PromptVersionFromPromptFile -Path $sourcePromptPath
-$specBudgetTier = Get-SpecBudgetTier -Task $TaskId -ProjectRoot $REPO_ROOT
-
-$resolvedHandoffRetry = if ($HandoffRetryCount -ge 0) {
-    $HandoffRetryCount
-} else {
-    0
-}
-
-$inheritedReviewStrike = if ($null -ne $latest -and $latest.PSObject.Properties["review_strike_count"]) {
-    [int]$latest.review_strike_count
-} else {
-    0
-}
-# A reviewer sending work back (verification -> implementation) is a review failure:
-# auto-increment the strike so the review_stalemate breaker (strike >= 3) can fire on a
-# repeated review-bounce loop. The Human-Gate REJECT path passes -ReviewStrikeCount
-# explicitly; every other caller inherits unchanged.
-$resolvedReviewStrike = if ($ReviewStrikeCount -ge 0) {
-    $ReviewStrikeCount
-} elseif ($Source -eq "verification" -and $Target -eq "implementation") {
-    $inheritedReviewStrike + 1
-} else {
-    $inheritedReviewStrike
-}
-
-$resolvedRebase = if ($RebaseCount -ge 0) {
-    $RebaseCount
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["rebase_count"]) {
-    [int]$latest.rebase_count
-} else {
-    0
-}
-
-$resolvedBudgetTier = if (-not [string]::IsNullOrWhiteSpace($BudgetTier)) {
-    $BudgetTier.ToLowerInvariant()
-} elseif (-not [string]::IsNullOrWhiteSpace($specBudgetTier)) {
-    $specBudgetTier
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["budget_tier"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.budget_tier)) {
-    [string]$latest.budget_tier
-} else {
-    "medium"
-}
-
-$resolvedCumulativeCount = if ($CumulativeHandoffCount -ge 1) {
-    $CumulativeHandoffCount
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["cumulative_handoff_count"]) {
-    ([int]$latest.cumulative_handoff_count + 1)
-} else {
-    1
-}
-
-# The source prompt names the prompt that actually ran, so it wins over a copied -PromptVersion. Item 168.
-$resolvedPromptVersion = if (-not [string]::IsNullOrWhiteSpace($promptVersionFromPrompt)) {
-    if (-not [string]::IsNullOrWhiteSpace($PromptVersion) -and $PromptVersion -ne $promptVersionFromPrompt) {
-        Write-Warning "-PromptVersion '$PromptVersion' does not match '$promptVersionFromPrompt' in $sourcePromptPath; recording '$promptVersionFromPrompt'."
-    }
-    $promptVersionFromPrompt
-} elseif (-not [string]::IsNullOrWhiteSpace($PromptVersion)) {
-    $PromptVersion
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["prompt_version"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.prompt_version)) {
-    [string]$latest.prompt_version
-} else {
-    "unknown"
-}
-
-$resolvedSessionCycle = if (-not [string]::IsNullOrWhiteSpace($SessionCycleId)) {
-    $SessionCycleId
-} elseif (-not [string]::IsNullOrWhiteSpace($taskCycleId)) {
-    $taskCycleId
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["session_cycle_id"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.session_cycle_id)) {
-    [string]$latest.session_cycle_id
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["cycle_id"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.cycle_id)) {
-    [string]$latest.cycle_id
-} elseif ($null -eq $latest -and $Source -eq "deployment") {
-    # A hand-written task bootstrap: match the cycle id -Init's auto-bootstrap writes.
-    "initial"
-} else {
-    ""
-}
-
-$resolvedCycle = if (-not [string]::IsNullOrWhiteSpace($CycleId)) {
-    $CycleId
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["cycle_id"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.cycle_id)) {
-    [string]$latest.cycle_id
-} elseif (-not [string]::IsNullOrWhiteSpace($resolvedSessionCycle)) {
-    $resolvedSessionCycle
-} else {
-    $null
-}
-
-$resolvedCommitHash = if (-not [string]::IsNullOrWhiteSpace($CommitHash)) {
-    $CommitHash
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["commit_hash"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.commit_hash)) {
-    [string]$latest.commit_hash
-} else {
-    $null
-}
-
-$resolvedBaseCommit = if (-not [string]::IsNullOrWhiteSpace($BaseCommit)) {
-    $BaseCommit
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["base_commit"] -and -not [string]::IsNullOrWhiteSpace([string]$latest.base_commit)) {
-    [string]$latest.base_commit
-} else {
-    $null
-}
-
-$isGitRepo = $false
-$checkDir = $REPO_ROOT
-while (-not [string]::IsNullOrEmpty($checkDir)) {
-    if (Test-Path -LiteralPath (Join-Path $checkDir ".git")) {
-        $isGitRepo = $true
-        break
-    }
-    $parent = Split-Path -Parent $checkDir
-    if ($parent -eq $checkDir -or [string]::IsNullOrEmpty($parent)) { break }
-    $checkDir = $parent
-}
-
-if ($isGitRepo) {
-    # Resolve passed hashes to full SHAs and refuse values naming no commit;
-    # inherited hashes were resolved when their handoff was written. Item 170.
-    foreach ($passed in @(@{ Name = "CommitHash"; Value = $CommitHash }, @{ Name = "BaseCommit"; Value = $BaseCommit })) {
-        if ([string]::IsNullOrWhiteSpace($passed.Value)) { continue }
-        $fullSha = (git -C (Resolve-FilesystemPath -Path $REPO_ROOT) rev-parse --verify --quiet ($passed.Value.Trim() + "^{commit}") 2>$null)
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($fullSha)) {
-            throw ("-" + $passed.Name + " [" + $passed.Value + "] does not name a commit in " + $REPO_ROOT + ". Pass the commit's SHA, for example from git rev-parse HEAD in the implementation worktree.")
-        }
-        if ($passed.Name -eq "CommitHash") { $resolvedCommitHash = ([string]$fullSha).Trim() } else { $resolvedBaseCommit = ([string]$fullSha).Trim() }
-    }
-
-    if ([string]::IsNullOrWhiteSpace($resolvedBaseCommit)) {
-        $taskBranch = "task/$TaskId"
-        git show-ref --verify --quiet "refs/heads/$taskBranch" 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            $primaryBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $REPO_ROOT
-
-            $primaryHead = (git rev-parse $primaryBranch 2>$null)
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($primaryHead)) {
-                $resolvedBaseCommit = $primaryHead.Trim()
-            }
-        }
-    }
-
-    # Deployment -> done must name the current task-branch tip; inherited hashes may
-    # be stale after a rebase or recovery. Without a task branch, write null for the
-    # merge-verification gate to judge as a No-Code Closure. A dangling inherited
-    # commit still exists and would defeat that closure. Item 159.
-    if ($Source -eq "deployment" -and $Target -eq "done" -and [string]::IsNullOrWhiteSpace($CommitHash)) {
-        $resolvedCommitHash = $null
-        $deployBranch = "task/$TaskId"
-        git show-ref --verify --quiet "refs/heads/$deployBranch" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            $deployTip = (git rev-parse "refs/heads/$deployBranch" 2>$null)
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($deployTip)) {
-                $resolvedCommitHash = $deployTip.Trim()
-            }
-        }
-    }
-}
-
-[string[]]$resolvedArtifacts = @(if ($null -ne $Artifacts -and $Artifacts.Count -gt 0) {
-    @($Artifacts | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["artifacts"] -and $null -ne $latest.artifacts) {
-    @($latest.artifacts)
-} else {
-    @()
-})
-
-$workspacesDir = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $REPO_ROOT
-$wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
-
-$resolvedWtPath = if (Test-Path $wtPath) { (Resolve-FilesystemPath -Path (Resolve-Path $wtPath)) } else { Resolve-FilesystemPath -Path $wtPath }
-$resolvedRepoRoot = if (Test-Path $REPO_ROOT) { (Resolve-FilesystemPath -Path (Resolve-Path $REPO_ROOT)) } else { Resolve-FilesystemPath -Path $REPO_ROOT }
-$normalizedArtifacts = @(Normalize-HandoffArtifactPaths -Artifacts $resolvedArtifacts -WorktreePath $resolvedWtPath -ProjectRoot $resolvedRepoRoot)
-$resolvedArtifacts = $normalizedArtifacts
-
-# Any -SuspiciousContent value trips human_escalation; reject "none found"
-# placeholders to avoid false escalation. Item 174.
-if ($SuspiciousContent.Trim() -match '^(?i)(none|none found|n/?a|null|no|false|nothing|-)\.?$') {
-    throw ("-SuspiciousContent '" + $SuspiciousContent + "' reads as 'nothing found', but any value is recorded as suspicious content and escalates to the human. Omit -SuspiciousContent when there is none; pass it only to describe content that is suspicious.")
-}
-
-# Reject passed artifact paths here with the exact received value: native pwsh calls
-# can preserve shell quotes as characters. Inherited artifacts were checked when
-# their handoff was written. Item 169.
-if ($null -ne $Artifacts -and $Artifacts.Count -gt 0) {
-    $quotedArtifacts = @($resolvedArtifacts | Where-Object { $_ -match "[`"']" })
-    if ($quotedArtifacts.Count -gt 0) {
-        throw ("-Artifacts entry contains a quote character, which no path can: " + (($quotedArtifacts | ForEach-Object { "[" + $_ + "]" }) -join ", ") + ". The quotes reached new-handoff.ps1 as part of the path. Pass the paths unquoted, as a PowerShell array (-Artifacts @('a.md','b.md')) or comma-joined (-Artifacts a.md,b.md).")
-    }
-    $missingArtifacts = @($resolvedArtifacts | Where-Object {
-        if ([System.IO.Path]::IsPathRooted($_)) { -not (Test-Path -LiteralPath (Resolve-PathFromRoot -Root $resolvedWtPath -Path $_)) }
-        else { -not (Test-Path -LiteralPath (Resolve-PathFromRoot -Root $resolvedWtPath -Path $_)) -and -not (Test-Path -LiteralPath (Resolve-PathFromRoot -Root $resolvedRepoRoot -Path $_)) }
-    })
-    if ($missingArtifacts.Count -gt 0) {
-        Write-Error -ErrorAction Continue ("-Artifacts entry does not exist in the implementation worktree (" + $resolvedWtPath + ") or the project root (" + $resolvedRepoRoot + "): " + (($missingArtifacts | ForEach-Object { "[" + $_ + "]" }) -join ", ") + ". Create the file or correct the path, then write the handoff again.")
-        exit 2
-    }
-}
-
-$baseAffinity = @()
-if ($null -ne $FileAffinity -and $FileAffinity.Count -gt 0) {
-    $baseAffinity = @($FileAffinity | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
-    # Nested-shell quotes can arrive as path characters. Refuse rather than strip
-    # mangled values so the caller can fix them before a handoff consumes budget.
-    $quotedAffinity = @($baseAffinity | Where-Object { $_ -match "[`"']" })
-    if ($quotedAffinity.Count -gt 0) {
-        throw ("-FileAffinity entry contains a quote character, which no path can: " + ($quotedAffinity -join ", ") + ". Pass the paths unquoted, as separate arguments or comma-joined.")
-    }
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["file_affinity"] -and $null -ne $latest.file_affinity -and @($latest.file_affinity).Count -gt 0) {
-    $baseAffinity = @($latest.file_affinity)
-}
-
-$specPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $REPO_ROOT
-$frontmatterAffinity = @()
-if ($specPath -and (Test-Path -LiteralPath $specPath)) {
-    $specContent = Get-Content -LiteralPath $specPath -Raw -Encoding UTF8
-    $frontmatterAffinity = @(Get-SpecFrontmatterAffinity -SpecContent $specContent)
-}
-
-# The spec's frontmatter is the one record of a task's scope. A Groomer that widens it
-# must say so there, or the spec and the scope gate disagree with nothing reporting it.
-if ($Source -eq "grooming" -and $Target -eq "implementation" -and $frontmatterAffinity.Count -gt 0) {
-    $widenedAffinity = @(Get-AffinityWidening -Affinity $baseAffinity -Declared $frontmatterAffinity)
-    if ($widenedAffinity.Count -gt 0) {
-        throw ("file_affinity " + ($widenedAffinity -join ", ") + " is not covered by the spec's frontmatter file_affinity (" + ($frontmatterAffinity -join ", ") + "). The frontmatter is the record of scope: add the widened paths to file_affinity in " + $specPath + ", or narrow -FileAffinity, then write the handoff again.")
-    }
-}
-
-[string[]]$resolvedFileAffinity = @(
-    @($baseAffinity + $frontmatterAffinity) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        Select-Object -Unique
-)
-
-[string[]]$resolvedStubSpecsCreated = @(if ($null -ne $StubSpecsCreated -and $StubSpecsCreated.Count -gt 0) {
-    @($StubSpecsCreated | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
-} elseif ($null -ne $latest -and $latest.PSObject.Properties["stub_specs_created"] -and $null -ne $latest.stub_specs_created) {
-    @($latest.stub_specs_created)
-} else {
-    @()
-})
-
-$payload = [ordered]@{
-    task_id                  = $TaskId
-    source_phase             = $Source
-    target_phase             = $Target
-    reason                   = (ConvertTo-AsciiSafeText -Text $Reason)
-    generated_by             = "new-handoff.ps1"
-    tool_version             = "1.0.0"
-    handoff_retry_count      = $resolvedHandoffRetry
-    review_strike_count      = $resolvedReviewStrike
-    rebase_count             = $resolvedRebase
-    budget_tier              = $resolvedBudgetTier
-    cumulative_handoff_count = $resolvedCumulativeCount
-    prompt_version           = $resolvedPromptVersion
-    session_cycle_id         = $resolvedSessionCycle
-    cycle_id                 = $resolvedCycle
-    suspicious_content       = if ([string]::IsNullOrWhiteSpace($SuspiciousContent)) { $null } else { $SuspiciousContent }
-    commit_hash              = $resolvedCommitHash
-    base_commit              = $resolvedBaseCommit
-    artifacts                = $resolvedArtifacts
-}
-
-if ($Source -eq "grooming" -or @($resolvedFileAffinity).Count -gt 0) {
-    $payload.file_affinity = $resolvedFileAffinity
-}
-if ($Target -eq "implementation") {
-    $payload.design_required = [bool]$DesignRequired
-}
-if (@($resolvedStubSpecsCreated).Count -gt 0) {
-    $payload.stub_specs_created = $resolvedStubSpecsCreated
-}
-[string[]]$resolvedReviewerChecks = @($ReviewerChecksPassed | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
-if ($resolvedReviewerChecks.Count -gt 0) {
-    $payload.reviewer_checks_passed = $resolvedReviewerChecks
-}
-if (@($HumanApproved).Count -gt 0 -or @($HumanDeferred).Count -gt 0 -or @($HumanRejected).Count -gt 0) {
-    $payload.human_decisions = [ordered]@{
-        approved = @($HumanApproved)
-        deferred = @($HumanDeferred)
-        rejected = @($HumanRejected)
-    }
-}
-
-$resolvedOutputPath = Get-HandoffOutputPath
-Write-ValidatedHandoff -Payload $payload -Path $resolvedOutputPath
-
-[ordered]@{
-    ok           = $true
-    handoff_file = $resolvedOutputPath
-    task_id      = $TaskId
-    source       = $Source
-    target       = $Target
-} | ConvertTo-Json
-} finally {
-    Pop-Location
-}
-exit 0

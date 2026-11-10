@@ -10,7 +10,7 @@ $worktree = Join-Path $project 'workspaces/implementation-F-325'
 New-Item -ItemType Directory -Path $worktree, (Join-Path $project '.crucible/backlog') -Force | Out-Null
 [IO.File]::WriteAllText((Join-Path $project '.crucible/backlog/BACKLOG.md'), '| F-325 | Ready | Missing artifact |', $utf8)
 
-$generatorText = Get-Content -LiteralPath (Join-Path $REPO_ROOT 'powershell/new-handoff.ps1') -Raw
+$generatorText = Get-Content -LiteralPath (Join-Path $REPO_ROOT 'powershell/lib/new-handoff-core.ps1') -Raw
 $start = $generatorText.IndexOf('$resolvedWtPath =')
 $end = $generatorText.IndexOf('$resolvedArtifacts = $normalizedArtifacts', $start)
 $generatorCode = [scriptblock]::Create($generatorText.Substring($start, $end - $start))

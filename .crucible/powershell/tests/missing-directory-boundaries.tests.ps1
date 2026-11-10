@@ -9,7 +9,7 @@ try {
     $worktree = Join-Path $root 'worktree'
     New-Item -ItemType Directory -Path $project, $worktree | Out-Null
     New-PSDrive -Name Item331 -PSProvider FileSystem -Root $root | Out-Null
-    $generatorText = [IO.File]::ReadAllText((Join-Path $framework 'powershell/new-handoff.ps1'))
+    $generatorText = [IO.File]::ReadAllText((Join-Path $framework 'powershell/lib/new-handoff-core.ps1'))
     $start = $generatorText.IndexOf('$resolvedWtPath =')
     $end = $generatorText.IndexOf('$resolvedArtifacts = $normalizedArtifacts', $start)
     $generator = [scriptblock]::Create($generatorText.Substring($start, $end - $start))

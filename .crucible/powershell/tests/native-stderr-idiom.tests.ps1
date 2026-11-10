@@ -42,8 +42,8 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
     },
     @{
         RelativePath = "powershell/lib/crucible-gates-handoff.ps1"
-        Pattern      = '(?i)\$preflightRaw\s*=\s*&\s*\$preflightScript.*2>&1'
-        Reason       = "PowerShell script invocation for handoff schema preflight validation capturing diagnostic stderr."
+        Pattern      = '(?i)\$preflightRaw\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*preflightScript.*2>&1'
+        Reason       = "Item 374: child PowerShell process captures validate-handoff's JSON findings and its Console.Error diagnostics for handoff preflight; ErrorRecords are separated from the JSON before parsing."
     },
     @{
         RelativePath = "powershell/lib/crucible-gates-breakers.ps1"
@@ -71,7 +71,7 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
         Reason       = "Child PowerShell process captures Console.Error refusal diagnostics for the backlog gate."
     },
     @{
-        RelativePath = "powershell/new-handoff.ps1"
+        RelativePath = "powershell/lib/new-handoff-core.ps1"
         Pattern      = '(?i)\$validationRaw\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*validatorPath.*2>&1'
         Reason       = "Child PowerShell process captures Console.Error refusal diagnostics for handoff schema validation."
     },

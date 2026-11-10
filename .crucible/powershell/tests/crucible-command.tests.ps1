@@ -164,7 +164,7 @@ $rootShown = -join @($ProjectRoot.ToCharArray() | ForEach-Object { if ([int]$_ -
     }
 
     $results += Run-Test -Name "Array values preserve separate handoff IDs" -Body {
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $REPO_ROOT "powershell/new-handoff.ps1"), [ref]$tokens, [ref]$errors)
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $REPO_ROOT "powershell/lib/new-handoff-core.ps1"), [ref]$tokens, [ref]$errors)
         [System.IO.File]::WriteAllText((Join-Path $captureDir "new-handoff.ps1"), ($ast.ParamBlock.Extent.Text + "`n`$HumanApproved -join '|'`n"), $utf8)
         $cmd = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Parameters ([ordered]@{ TaskId = "R-1"; Source = "research"; Target = "grooming"; Reason = "approve"; HumanApproved = @("C-1", "C-10") }) -CrucibleRoot $captureRoot
         $actual = @(Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($cmd)) }) -join "`n"
