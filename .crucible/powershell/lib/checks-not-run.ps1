@@ -8,6 +8,8 @@ if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Pat
 # line, under the task's lock (I5), and publishes the file by rename. Item 258.
 
 . (Join-Path $PSScriptRoot "file-lock.ps1")
+. (Join-Path $PSScriptRoot "time.ps1")
+. (Join-Path $PSScriptRoot "reason-text.ps1")
 
 $script:ChecksNotRunLegacySource = "isolated checks"
 
@@ -85,17 +87,26 @@ function Update-ChecksNotRunRecord {
         $kept = @($current | Where-Object { -not (Test-ChecksNotRunLineOwned -Line $_ -Source $Source -Check $Check) })
         if (-not [string]::IsNullOrEmpty($NewLine)) { $kept = @($kept + $NewLine) }
         if ($kept.Count -eq $current.Count -and [string]::IsNullOrEmpty($NewLine)) { return }
-        if ($kept.Count -eq 0) {
-            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
-            return
-        }
-        $temp = $path + "." + [System.Guid]::NewGuid().ToString("N") + ".tmp"
-        try {
-            [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $temp), (($kept -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
-            [System.IO.File]::Move((Resolve-FilesystemPath -Path $temp), (Resolve-FilesystemPath -Path $path), $true)
-        } finally {
-            if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
-        }
+        Publish-ChecksNotRunLines -Path $path -Lines $kept
+    }
+}
+
+function Publish-ChecksNotRunLines {
+    # Internal write: callers hold the record lock. Publishes by rename; no lines removes the file.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Lines
+    )
+    if ($Lines.Count -eq 0) {
+        if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
+        return
+    }
+    $temp = $Path + "." + [System.Guid]::NewGuid().ToString("N") + ".tmp"
+    try {
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $temp), (($Lines -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::Move((Resolve-FilesystemPath -Path $temp), (Resolve-FilesystemPath -Path $Path), $true)
+    } finally {
+        if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
     }
 }
 
@@ -126,6 +137,73 @@ function Clear-ChecksNotRun {
     )
     if (-not (Test-Path -LiteralPath (Get-ChecksNotRunPath -SessionDir $SessionDir -TaskId $TaskId) -PathType Leaf)) { return }
     Update-ChecksNotRunRecord -SessionDir $SessionDir -TaskId $TaskId -Source $Source -Check (($Check -replace '[\r\n]+', ' ').Trim())
+}
+
+# Retirement, item 259. A renamed or removed check never runs again under its old name, so
+# its line would never clear, and absence from the config is not evidence that it ran. Only a
+# human decision retires a line (retire-check-not-run.ps1): under the record's lock the line
+# moves to checks-not-run-retired.txt with the UTC time, the reason and any replacement. The
+# history is written before the line leaves the record, so a failure between the two shows
+# the check in both rather than in neither. Only this function writes the history; nothing
+# clears it. Each entry is "[retired <UTC>] <record line> | reason: <reason>" plus
+# " | replaced by: <check>" when one is named.
+function Get-ChecksNotRunRetiredPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$SessionDir,
+        [Parameter(Mandatory = $true)][string]$TaskId
+    )
+    return Join-Path (Split-Path -Parent (Get-ChecksNotRunPath -SessionDir $SessionDir -TaskId $TaskId)) "checks-not-run-retired.txt"
+}
+
+function Get-ChecksNotRunRetired {
+    param(
+        [Parameter(Mandatory = $true)][string]$SessionDir,
+        [Parameter(Mandatory = $true)][string]$TaskId
+    )
+    $path = Get-ChecksNotRunPath -SessionDir $SessionDir -TaskId $TaskId
+    if (-not (Test-Path -LiteralPath (Split-Path -Parent $path) -PathType Container)) { return @() }
+    $retiredPath = Get-ChecksNotRunRetiredPath -SessionDir $SessionDir -TaskId $TaskId
+    return @(Invoke-FileLock -LockPath ($path + ".lock") -ScriptBlock {
+        Read-ChecksNotRunFile -Path $retiredPath
+    })
+}
+
+function Move-CheckNotRunToRetired {
+    # Returns the history entries written. Throws, changing nothing, when no line is owned.
+    param(
+        [Parameter(Mandatory = $true)][string]$SessionDir,
+        [Parameter(Mandatory = $true)][string]$TaskId,
+        [Parameter(Mandatory = $true)][ValidatePattern('^[a-z][a-z ]*[a-z]$')][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Check,
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [AllowEmptyString()][string]$ReplacedBy = ""
+    )
+    $flatCheck = ($Check -replace '[\r\n]+', ' ').Trim()
+    $flatReason = ($Reason -replace '[\r\n]+', ' ').Trim()
+    $flatReplacement = ($ReplacedBy -replace '[\r\n]+', ' ').Trim()
+    if ([string]::IsNullOrWhiteSpace($flatCheck)) {
+        throw "Retiring a not-run check needs a check name (source '$Source')."
+    }
+    # Judge the reason as it will be stored: "looks<newline>good" flattens to a stock phrase.
+    if (Test-GateReasonRefused -Reason $flatReason) {
+        throw ("A retirement reason is required and cannot be only a stock phrase (" + ((Get-LowSignalGateReasons) -join ", ") + "); nothing was retired.")
+    }
+    $path = Get-ChecksNotRunPath -SessionDir $SessionDir -TaskId $TaskId
+    $retiredPath = Get-ChecksNotRunRetiredPath -SessionDir $SessionDir -TaskId $TaskId
+    $missing = "No not-run line for check '" + $flatCheck + "' from source '" + $Source + "' in " + $path + "; nothing was retired."
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw $missing }
+    return @(Invoke-FileLock -LockPath ($path + ".lock") -TimeoutMessage "[CHECKS NOT RUN] Waiting for the record's lock." -ScriptBlock {
+        $current = @(Read-ChecksNotRunFile -Path $path)
+        $owned = @($current | Where-Object { Test-ChecksNotRunLineOwned -Line $_ -Source $Source -Check $flatCheck })
+        if ($owned.Count -eq 0) { throw $missing }
+        $stamp = Get-UtcTimestamp
+        $suffix = " | reason: " + $flatReason
+        if (-not [string]::IsNullOrEmpty($flatReplacement)) { $suffix += " | replaced by: " + $flatReplacement }
+        $entries = @($owned | ForEach-Object { "[retired " + $stamp + "] " + $_ + $suffix })
+        Publish-ChecksNotRunLines -Path $retiredPath -Lines @(@(Read-ChecksNotRunFile -Path $retiredPath) + $entries)
+        Publish-ChecksNotRunLines -Path $path -Lines @($current | Where-Object { -not (Test-ChecksNotRunLineOwned -Line $_ -Source $Source -Check $flatCheck) })
+        $entries
+    })
 }
 
 function Format-ChecksNotRunSection {

@@ -16,6 +16,7 @@ if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Pat
 . (Join-Path $PSScriptRoot "backlog-io.ps1")
 . (Join-Path $PSScriptRoot "worktree.ps1")
 . (Join-Path $PSScriptRoot "crucible-gates-wedge-report.ps1")
+. (Join-Path $PSScriptRoot "reason-text.ps1")
 . (Join-Path $PSScriptRoot "checks-not-run.ps1")
 
 function Invoke-HumanGateMerge {
@@ -262,25 +263,6 @@ function Get-HumanGateOutcomes {
     # Invoke-HumanGateAction names it when it refuses one. A second copy is how a
     # value comes to pass one check and match no dispatch arm.
     return @("accepted", "rejected", "redirected", "abandoned")
-}
-
-function Get-LowSignalGateReasons {
-    # Exact phrases only, compared after trim and lowercase. A stock phrase with
-    # more words ("Looks good. I see nothing concerning.") is the human's reason
-    # and is recorded. sops/deployment.md and prompts/deployment_prompt.md list
-    # these; gate-reason-rule.tests.ps1 keeps them in step. Item 144.
-    return @(
-        "n/a", "na", "none", "ok", "looks good", "looks good.",
-        "approved", "accept", "accepted", "done", "ship it", "auto"
-    )
-}
-
-function Test-GateReasonRefused {
-    param([string]$Reason)
-    if ([string]::IsNullOrWhiteSpace($Reason)) { return $true }
-    $normalized = (ConvertTo-AsciiSafeText -Text $Reason).Trim().ToLowerInvariant()
-    if ($normalized -eq "") { return $true }
-    return ((Get-LowSignalGateReasons) -contains $normalized)
 }
 
 function Assert-GateReason {
@@ -1187,6 +1169,12 @@ Copy-Item `$right `$rightCopy -Force
     if ($notRunChecks.Count -gt 0) {
         Write-Host "[CHECKS NOT RUN] These checks did not run; accepting means accepting this gap:" -ForegroundColor Yellow
         foreach ($notRunCheck in $notRunChecks) { Write-Host ("  - " + $notRunCheck) -ForegroundColor Yellow }
+    }
+    # History only: a human retired these lines (item 259). The Reviewer prompt omits them.
+    $retiredChecks = @(Get-ChecksNotRunRetired -SessionDir $SessionDir -TaskId $TaskId)
+    if ($retiredChecks.Count -gt 0) {
+        Write-Host "[CHECKS RETIRED] History: these not-run lines were retired by a human decision and no longer gate this task:" -ForegroundColor Yellow
+        foreach ($retiredCheck in $retiredChecks) { Write-Host ("  - " + $retiredCheck) -ForegroundColor Yellow }
     }
     Write-Host "`n[HUMAN GATE] Visual review options:" -ForegroundColor Yellow
     if ($TaskBranchExists) {

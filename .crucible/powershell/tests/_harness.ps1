@@ -278,17 +278,57 @@ function Write-TestFileSummary {
     $failed = @($list | Where-Object { $_ -eq $false }).Count
     $skipped = [int]$script:CrucibleSkipCount
     $passed = $list.Count - $failed - $skipped
+    # A nested file's skip is not one of this file's cases, so it is counted apart.
+    $nested = [int]$script:CrucibleNestedSkipCount
+    $nestedSuffix = if ($nested -gt 0) { ", $nested nested skipped" } else { "" }
 
     if ($failed -gt 0) {
-        Write-Host ("`nSOME TESTS FAILED ($failed failed, $passed passed, $skipped skipped)") -ForegroundColor Red
+        Write-Host ("`nSOME TESTS FAILED ($failed failed, $passed passed, $skipped skipped$nestedSuffix)") -ForegroundColor Red
         exit 1
     }
     if ($skipped -gt 0) {
-        Write-Host ("`nALL TESTS PASSED ($passed tests, $skipped skipped)") -ForegroundColor Green
+        Write-Host ("`nALL TESTS PASSED ($passed tests, $skipped skipped$nestedSuffix)") -ForegroundColor Green
     } else {
-        Write-Host ("`nALL TESTS PASSED ($passed tests)") -ForegroundColor Green
+        Write-Host ("`nALL TESTS PASSED ($passed tests$nestedSuffix)") -ForegroundColor Green
     }
     exit 0
+}
+
+# The one reader of the skip contract: a stdout line that starts "SKIPPED: ". The runner
+# counts these per file, and Invoke-NestedTestFile reads a nested file's capture with it.
+function Get-TestOutputSkipNotes {
+    param([AllowEmptyString()][string]$Output)
+
+    $notes = @()
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        return ,$notes
+    }
+    foreach ($line in ($Output -split "`r?`n")) {
+        if ($line -cmatch '^SKIPPED: (.+)$') { $notes += $Matches[1] }
+    }
+    return ,$notes
+}
+
+$script:CrucibleNestedSkipCount = 0
+
+# A test file that runs another real test file captures it, and the capture forwards only
+# a lowercased, indented display copy (item 338), so the child's anchored skip line never
+# reached the runner. This runs the child and republishes each note once, prefixed with
+# the child's name; the child's own line stays in the capture, so a skip is counted once
+# at every level. A fixture that plants skips on purpose uses Invoke-ExternalCommand and
+# publishes nothing. Item 344.
+function Invoke-NestedTestFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $shell = (Get-Process -Id $PID).Path
+    $cmd = Invoke-ExternalCommand { & $shell -NoProfile -ExecutionPolicy Bypass -File $Path }
+    $notes = Get-TestOutputSkipNotes -Output $cmd.Output
+    $name = Split-Path -Leaf $Path
+    foreach ($note in $notes) {
+        $script:CrucibleNestedSkipCount++
+        Write-Host ("SKIPPED: " + $name + ": " + $note) -ForegroundColor Yellow
+    }
+    return [PSCustomObject]@{ Output = $cmd.Output; ExitCode = $cmd.ExitCode; SkipNotes = $notes }
 }
 
 # Start-Process -WindowStyle does not exist on PowerShell's Linux edition; it throws "The parameter

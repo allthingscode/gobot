@@ -368,7 +368,7 @@ verification:
       command: go test -race ./...
 ```
 
-`validate-config.ps1` rejects unsupported or empty host conditions and empty alternative commands. Checks not run are written to `.crucible/session/{task_id}/verification/checks-not-run.txt` for the Reviewer handoff and Human Gate. The same record holds pipeline checks the gates skipped, such as the scope check for a task with no `file_affinity`; a line is removed only when its check runs again.
+`validate-config.ps1` rejects unsupported or empty host conditions and empty alternative commands. Checks not run are written to `.crucible/session/{task_id}/verification/checks-not-run.txt` for the Reviewer handoff and Human Gate. The same record holds pipeline checks the gates skipped, such as the scope check for a task with no `file_affinity`; a line is removed only when its check runs again, or when a human retires a renamed or removed check with `retire-check-not-run.ps1`, which keeps the line, the reason and any replacement in `checks-not-run-retired.txt` (see the Human Gate section of `docs/operating-manual.md`).
 
 A task with no implementation worktree, such as research, runs the configured checks with `run-isolated-checks.ps1 -Commit <rev>`. The commands run in a temporary detached worktree at that commit under `.crucible/.agent-workspaces/`, which is removed afterwards whether the checks pass or fail, so files they write never reach the main checkout. Each command's exit code is printed. The pre-push hook does not run in this mode.
 

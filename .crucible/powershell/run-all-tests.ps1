@@ -181,23 +181,11 @@ try {
         return ($Output -cmatch 'EXCEPTION OCCURRED:' -or $Output -cmatch 'SOME TESTS FAILED' -or $Output -cmatch '\bFAILED:')
     }
 
-    # Collects the third outcome Run-Test can report. A test whose precondition cannot exist on
-    # this platform is not a pass. Write-TestFileSummary is what a file's own tail uses when it
-    # Skip-Tests; this is the run summary, which CI and scripts/test-linux.ps1 read. Without it
-    # the skip would be invisible here and the Linux leg would be quietly weaker than the
-    # Windows one rather than measurably narrower. Item 102, item 104.
-    function Get-OutputSkipNotes {
-        param([AllowEmptyString()][string]$Output)
-
-        $notes = @()
-        if ([string]::IsNullOrWhiteSpace($Output)) {
-            return ,$notes
-        }
-        foreach ($line in ($Output -split "`r?`n")) {
-            if ($line -cmatch '^SKIPPED: (.+)$') { $notes += $Matches[1] }
-        }
-        return ,$notes
-    }
+    # Skips are the third outcome Run-Test can report, and a test whose precondition cannot
+    # exist on this platform is not a pass. Get-TestOutputSkipNotes (tests/_harness.ps1) reads
+    # them from each file's stdout into the run summary, which CI and scripts/test-linux.ps1
+    # read. Without it the Linux leg would be quietly weaker than the Windows one rather than
+    # measurably narrower. Items 102, 104 and 344.
 
     # Consumes every line one stream has already produced, without blocking, restarting
     # the idle clock for each. Returns the still-pending read, or $null once the stream
@@ -377,7 +365,7 @@ try {
 
             $outText = ($outLines -join "`n")
 
-            foreach ($note in (Get-OutputSkipNotes -Output $outText)) {
+            foreach ($note in (Get-TestOutputSkipNotes -Output $outText)) {
                 $skipNotes += ($file.Name + ": " + $note)
             }
 
@@ -704,7 +692,7 @@ try {
         $passCount = 0
         $skipNotes = @()
         foreach ($item in $completed) {
-            foreach ($note in (Get-OutputSkipNotes -Output $item.Output)) {
+            foreach ($note in (Get-TestOutputSkipNotes -Output $item.Output)) {
                 $skipNotes += ($item.File.Name + ": " + $note)
             }
             if ($item.ExitCode -eq 0 -and -not (Test-OutputHasFailure -Output $item.Output)) {
