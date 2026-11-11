@@ -185,7 +185,7 @@ Write-Output 'guarded dependencies loaded; zero dependency command-discovery cal
 '@
         [IO.File]::WriteAllText($probe, $probeScript, [Text.UTF8Encoding]::new($false))
         $dependencies = [ordered]@{
-            'backlog-io' = @('Get-ConfiguredPath', 'Get-PwshCommand')
+            'backlog-io' = @('Get-ConfiguredPath', 'Get-PwshCommand', 'Open-FileLockHandle')
             'crucible-command' = @('Get-ConfiguredCrucibleRoot')
             'worktree' = @('Invoke-GitChecked', 'Resolve-PathFromRoot')
             'archive-task' = @('Invoke-WithBacklogLock', 'Test-PathWithinDirectory')

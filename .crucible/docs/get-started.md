@@ -11,7 +11,7 @@ For reference documentation, see [operating-manual.md](operating-manual.md). For
 Get from clone to a running first task in under 10 minutes.
 
 ### Prerequisites
-- [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS. Windows PowerShell 5.1 is not supported.
+- [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS. On Linux and macOS use PowerShell 7.4 or later (.NET 8): Crucible's file locks need a runtime that checks a lock file still owns its path, and refuse to lock on one older than .NET 7. Windows PowerShell 5.1 is not supported.
 - Git
 - One of: Go, Node, Python, or Rust toolchain (matching the `-Language` flag below)
 
@@ -67,7 +67,7 @@ Crucible also echoes the full assembled prompt and a CI banner; copy the `agent 
 
 ## Prerequisites
 
-- [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS. Windows PowerShell 5.1 is not supported. The runtime is CI-verified on Windows and Linux; macOS is supported via `pwsh`. See [ROADMAP.md](../ROADMAP.md) for runtime direction.
+- [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) on Windows, Linux, or macOS. On Linux and macOS use PowerShell 7.4 or later (.NET 8): Crucible's file locks need a runtime that checks a lock file still owns its path, and refuse to lock on one older than .NET 7. Windows PowerShell 5.1 is not supported. The runtime is CI-verified on Windows and Linux; macOS is supported via `pwsh`. See [ROADMAP.md](../ROADMAP.md) for runtime direction.
 - Git
 - Your project's normal build/test toolchain (in this example: Node + npm)
 

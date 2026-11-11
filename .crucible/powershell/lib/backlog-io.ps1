@@ -16,6 +16,11 @@ if (-not (Test-Path -LiteralPath Function:Get-RunningPowerShellCommand)) {
     . (Join-Path $PSScriptRoot "platform.ps1")
 }
 
+# The backlog lock opens the same DeleteOnClose handle, through the same opener. Item 260.
+if (-not (Test-Path -LiteralPath Function:Open-FileLockHandle)) {
+    . (Join-Path $PSScriptRoot "file-lock.ps1")
+}
+
 if (-not (Test-Path variable:script:HeldBacklogLocks)) {
     $script:HeldBacklogLocks = @{}
 }
@@ -67,33 +72,13 @@ function Invoke-WithBacklogLock {
     # holder's handle is closed by the OS and DeleteOnClose frees the path, so no waiter
     # judges a lock stale and deletes it; that guess let two waiters both enter. Item 224.
     $startTime = [System.DateTime]::UtcNow
-    $fileStream = $null
-    while ($null -eq $fileStream) {
-        try {
-            $fileStream = New-Object System.IO.FileStream(
-                (Resolve-FilesystemPath -Path $lockPath),
-                [System.IO.FileMode]::OpenOrCreate,
-                [System.IO.FileAccess]::ReadWrite,
-                [System.IO.FileShare]::None,
-                1,
-                [System.IO.FileOptions]::DeleteOnClose
-            )
-        } catch [System.IO.IOException] {
-            # As in Invoke-FileLock, only a sharing violation is another holder. A missing
-            # directory or bad path cannot be waited out, so it refuses now, naming the lock.
-            $ioError = $_.Exception
-            while ($null -ne $ioError.InnerException) { $ioError = $ioError.InnerException }
-            $nativeCode = $ioError.HResult -band 0xFFFF
-            $isContention = ($IsWindows -and $nativeCode -in @(32, 33)) -or
-                ($IsLinux -and $nativeCode -eq 11) -or ($IsMacOS -and $nativeCode -eq 35)
-            if (-not $isContention) {
-                throw [System.IO.IOException]::new("Cannot acquire BACKLOG.md lock at " + $lockPath + ": " + $ioError.Message, $ioError)
-            }
-            if (([System.DateTime]::UtcNow - $startTime).TotalSeconds -ge $TimeoutSeconds) {
-                throw "Timed out waiting to acquire BACKLOG.md lock at $lockPath (timeout ${TimeoutSeconds}s)"
-            }
-            Start-Sleep -Milliseconds 100
+    # The opener returns no handle only for another holder; a missing directory or bad path
+    # cannot be waited out, so it refuses now, naming the lock.
+    while ($null -eq ($fileStream = Open-FileLockHandle -LockPath $lockPath -Description ("BACKLOG.md lock at " + $lockPath))) {
+        if (([System.DateTime]::UtcNow - $startTime).TotalSeconds -ge $TimeoutSeconds) {
+            throw "Timed out waiting to acquire BACKLOG.md lock at $lockPath (timeout ${TimeoutSeconds}s)"
         }
+        Start-Sleep -Milliseconds 100
     }
 
     $script:HeldBacklogLocks[$normLockPath] = 1

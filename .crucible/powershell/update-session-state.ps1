@@ -41,6 +41,7 @@ if (-not (Test-Path -LiteralPath $helpersPath)) {
 . $helpersPath
 . (Join-Path $PSScriptRoot "lib/time.ps1")
 . (Join-Path $PSScriptRoot "lib/project-root.ps1")
+. (Join-Path $PSScriptRoot "lib/file-lock.ps1")
 $ProjectRoot = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
 $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
 $StateFile = Join-Path $sessionDir "global/session_state.json"
@@ -52,153 +53,110 @@ if (-not (Test-Path $lockDir)) {
     New-Item -ItemType Directory -Force -Path $lockDir | Out-Null
 }
 
-# --- 1. Acquire Lock ---
-# Stale-lock policy ({task_id}): if a lock file is older than $StaleAgeMinutes, treat
-# it as orphaned from a crashed session, log a [WARN], auto-remove it, and retry
-# acquisition once. A genuine concurrent lock (re-created within $MaxWait after
-# stale recovery, or a fresh lock that never ages out) still triggers a timeout
-# error so two live processes never silently clobber each other's state.
-$MaxWait = 5 # seconds
-$WaitStep = 100 # ms
-$StaleAgeMinutes = 2
-$StartTime = Get-Date
-$Acquired = $false
-$StaleRecovered = $false
-
-while ((Get-Date) -lt $StartTime.AddSeconds($MaxWait)) {
-    try {
-        # New-Item fails if file exists (atomic check-and-create)
-        $null = New-Item -Path $LockFile -ItemType File -Value "$PID" -ErrorAction Stop
-        $Acquired = $true
-        break
-    } catch {
-        $lockInfo = Get-Item $LockFile -ErrorAction SilentlyContinue
-        if ($lockInfo -and (Get-Date) -gt $lockInfo.LastWriteTime.AddMinutes($StaleAgeMinutes)) {
-            if ($StaleRecovered) {
-                # A second stale lock appeared after we already cleared one this
-                # session. Treat as a genuine conflict and let the timeout fire.
-                Start-Sleep -Milliseconds $WaitStep
-                continue
-            }
-            $ageSeconds = [int]((Get-Date) - $lockInfo.LastWriteTime).TotalSeconds
-            Write-Warning "[WARN] Stale lock detected at '$LockFile' (age ${ageSeconds}s, > ${StaleAgeMinutes}m). Auto-removing and retrying acquisition."
-            Remove-Item $LockFile -Force -ErrorAction SilentlyContinue
-            $StaleRecovered = $true
-            # Skip sleep - retry immediately so we beat any concurrent acquirer.
-            continue
-        }
-        Start-Sleep -Milliseconds $WaitStep
-    }
-}
-
-if (-not $Acquired) {
-    [Console]::Error.WriteLine("Lock timeout: Could not acquire lock for $StateFile after $MaxWait seconds.")
-    exit 1
-}
-
-# --- 2. Update State ---
+# --- 1. Acquire Lock, 2. Update State ---
+# The shared exclusive-handle lock (I5): the open handle is the lock for the whole write, and
+# closing it, on exit or process death, releases it. No waiter judges a lock stale by its age
+# and deletes it; that let a waiter steal a slow live writer's lock, and either writer's cleanup
+# remove the other's. A holder still present is waited out, with a repeating message naming
+# the lock. Item 263.
 try {
-    if (-not (Test-Path $StateFile)) {
-        # The same shape ConvertFrom-Json gives an existing file. A hashtable here took the
-        # Add-Member calls below as note properties that ConvertTo-Json drops, so the first
-        # write to a fresh install was lost. Item 234.
-        $state = [PSCustomObject]@{ tasks = [PSCustomObject]@{} }
-    } else {
-        $raw = Get-Content $StateFile -Raw -Encoding UTF8
-        $state = $raw | ConvertFrom-Json
-    }
+    Invoke-FileLock -LockPath $LockFile -TimeoutMessage "[SESSION STATE] Waiting for the exclusive lock holder." -ScriptBlock {
+        if (-not (Test-Path $StateFile)) {
+            # The same shape ConvertFrom-Json gives an existing file. A hashtable here took the
+            # Add-Member calls below as note properties that ConvertTo-Json drops, so the first
+            # write to a fresh install was lost. Item 234.
+            $state = [PSCustomObject]@{ tasks = [PSCustomObject]@{} }
+        } else {
+            $raw = Get-Content $StateFile -Raw -Encoding UTF8
+            $state = $raw | ConvertFrom-Json
+        }
 
-    if (-not [string]::IsNullOrEmpty($UpdateJsonFile)) {
-        $UpdateJson = Get-Content $UpdateJsonFile -Raw -Encoding UTF8
-    }
+        if (-not [string]::IsNullOrEmpty($UpdateJsonFile)) {
+            $UpdateJson = Get-Content $UpdateJsonFile -Raw -Encoding UTF8
+        }
 
-    $updateObj = $UpdateJson | ConvertFrom-Json
+        $updateObj = $UpdateJson | ConvertFrom-Json
 
-    # Resolve target state based on TaskId
-    if (-not [string]::IsNullOrEmpty($TaskId)) {
-        if ($Specialist -eq "done") {
-            if ($state.PSObject.Properties["tasks"] -and $state.tasks.PSObject.Properties[$TaskId]) {
-                $state.tasks.psobject.Properties.Remove($TaskId)
-                Write-Host "Successfully removed task $TaskId from session state" -ForegroundColor Green
+        # Resolve target state based on TaskId
+        if (-not [string]::IsNullOrEmpty($TaskId)) {
+            if ($Specialist -eq "done") {
+                if ($state.PSObject.Properties["tasks"] -and $state.tasks.PSObject.Properties[$TaskId]) {
+                    $state.tasks.psobject.Properties.Remove($TaskId)
+                    Write-Host "Successfully removed task $TaskId from session state" -ForegroundColor Green
+                }
+            } else {
+                if (-not $state.PSObject.Properties["tasks"]) {
+                    $state | Add-Member -MemberType NoteProperty -Name "tasks" -Value ([PSCustomObject]@{})
+                }
+                if (-not $state.tasks.PSObject.Properties[$TaskId]) {
+                    $state.tasks | Add-Member -MemberType NoteProperty -Name $TaskId -Value ([PSCustomObject]@{})
+                }
+                $targetTask = $state.tasks.$TaskId
+                
+                # New formalized schema uses 'phases' sub-property
+                if (-not $targetTask.PSObject.Properties["phases"]) {
+                    $targetTask | Add-Member -MemberType NoteProperty -Name "phases" -Value ([PSCustomObject]@{})
+                }
+                $targetStateMap = $targetTask.phases
             }
         } else {
-            if (-not $state.PSObject.Properties["tasks"]) {
-                $state | Add-Member -MemberType NoteProperty -Name "tasks" -Value ([PSCustomObject]@{})
+            # Legacy fallback
+            if (-not $state.PSObject.Properties["phases"]) {
+                $state | Add-Member -MemberType NoteProperty -Name "phases" -Value ([PSCustomObject]@{})
+                $targetStateMap = $state.phases
+            } else {
+                $targetStateMap = $state.phases
             }
-            if (-not $state.tasks.PSObject.Properties[$TaskId]) {
-                $state.tasks | Add-Member -MemberType NoteProperty -Name $TaskId -Value ([PSCustomObject]@{})
-            }
-            $targetTask = $state.tasks.$TaskId
-            
-            # New formalized schema uses 'phases' sub-property
-            if (-not $targetTask.PSObject.Properties["phases"]) {
-                $targetTask | Add-Member -MemberType NoteProperty -Name "phases" -Value ([PSCustomObject]@{})
-            }
-            $targetStateMap = $targetTask.phases
         }
-    } else {
-        # Legacy fallback
-        if (-not $state.PSObject.Properties["phases"]) {
-            $state | Add-Member -MemberType NoteProperty -Name "phases" -Value ([PSCustomObject]@{})
-            $targetStateMap = $state.phases
-        } else {
-            $targetStateMap = $state.phases
-        }
-    }
 
-    if ($Specialist -ne "done") {
-        if ($Merge -and $targetStateMap.PSObject.Properties[$Specialist]) {
-            # Shallow merge properties into the specialist's section
-            foreach ($prop in $updateObj.psobject.Properties) {
-                if (-not $targetStateMap.$Specialist.PSObject.Properties[$prop.Name]) {
-                    $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name $prop.Name -Value $prop.Value
+        if ($Specialist -ne "done") {
+            if ($Merge -and $targetStateMap.PSObject.Properties[$Specialist]) {
+                # Shallow merge properties into the specialist's section
+                foreach ($prop in $updateObj.psobject.Properties) {
+                    if (-not $targetStateMap.$Specialist.PSObject.Properties[$prop.Name]) {
+                        $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name $prop.Name -Value $prop.Value
+                    } else {
+                        $targetStateMap.$Specialist.$($prop.Name) = $prop.Value
+                    }
+                }
+                if (-not $targetStateMap.$Specialist.PSObject.Properties["timestamp"]) {
+                    $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name "timestamp" -Value (Get-UtcTimestamp)
                 } else {
-                    $targetStateMap.$Specialist.$($prop.Name) = $prop.Value
+                    $targetStateMap.$Specialist.timestamp = Get-UtcTimestamp
+                }
+            } else {
+                # Overwrite or create new section
+                $targetStateMap | Add-Member -MemberType NoteProperty -Name $Specialist -Value $updateObj -Force
+                if (-not $targetStateMap.$Specialist.PSObject.Properties["timestamp"]) {
+                    $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name "timestamp" -Value (Get-UtcTimestamp)
+                } else {
+                    $targetStateMap.$Specialist.timestamp = Get-UtcTimestamp
                 }
             }
-            if (-not $targetStateMap.$Specialist.PSObject.Properties["timestamp"]) {
-                $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name "timestamp" -Value (Get-UtcTimestamp)
+        }
+
+        # Update global fields if formalized schema is detected
+        if ($state.PSObject.Properties["version"]) {
+            $nowStamp = Get-UtcTimestamp
+            if ($state.PSObject.Properties["timestamp"]) {
+                $state.timestamp = $nowStamp
             } else {
-                $targetStateMap.$Specialist.timestamp = Get-UtcTimestamp
-            }
-        } else {
-            # Overwrite or create new section
-            $targetStateMap | Add-Member -MemberType NoteProperty -Name $Specialist -Value $updateObj -Force
-            if (-not $targetStateMap.$Specialist.PSObject.Properties["timestamp"]) {
-                $targetStateMap.$Specialist | Add-Member -MemberType NoteProperty -Name "timestamp" -Value (Get-UtcTimestamp)
-            } else {
-                $targetStateMap.$Specialist.timestamp = Get-UtcTimestamp
+                $state | Add-Member -MemberType NoteProperty -Name "timestamp" -Value $nowStamp
             }
         }
+
+        # Convert to JSON (PowerShell's default Pretty Print)
+        $json = $state | ConvertTo-Json -Depth 10
+        
+        $json | Set-Content -Path $StateFile -Encoding UTF8
+        Write-Host "Successfully updated $Specialist state in $StateFile" -ForegroundColor Green
+
+        # Adopter-side state validation belongs in a gate with a documented config key,
+        # so its outcome controls progression and the contract is discoverable. Item 91.
     }
-
-    # Update global fields if formalized schema is detected
-    if ($state.PSObject.Properties["version"]) {
-        $nowStamp = Get-UtcTimestamp
-        if ($state.PSObject.Properties["timestamp"]) {
-            $state.timestamp = $nowStamp
-        } else {
-            $state | Add-Member -MemberType NoteProperty -Name "timestamp" -Value $nowStamp
-        }
-    }
-
-    # Convert to JSON (PowerShell's default Pretty Print)
-    $json = $state | ConvertTo-Json -Depth 10
-    
-    $json | Set-Content -Path $StateFile -Encoding UTF8
-    Write-Host "Successfully updated $Specialist state in $StateFile" -ForegroundColor Green
-
-    # Adopter-side state validation belongs in a gate with a documented config key,
-    # so its outcome controls progression and the contract is discoverable. Item 91.
-
 } catch {
     [Console]::Error.WriteLine("Failed to update session state: $($_.Exception.Message)")
     exit 1
-} finally {
-    # --- 3. Release Lock ---
-    if ($Acquired) {
-        Remove-Item $LockFile -ErrorAction SilentlyContinue
-    }
 }
 
 exit 0

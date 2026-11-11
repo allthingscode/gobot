@@ -135,7 +135,7 @@ $cases = @(
     foreach ($pair in @(
         @('input', 'Either -UpdateJson or -UpdateJsonFile'),
         @('helper', 'Required helper script not found'),
-        @('lock', 'Lock timeout'),
+        @('lock', 'Failed to update session state: .*session_state\.lock'),
         @('update', 'Failed to update session state')
     )) { @{ Kind = 'state'; Name = $pair[0]; Expected = $pair[1] } }
     foreach ($helper in $helpers) {
@@ -829,11 +829,14 @@ $context = @{
                     Copy-Item -LiteralPath (Join-Path $source 'update-session-state.ps1') -Destination $root
                     Write-FixtureText (Join-Path $lib 'config-helpers.ps1') @'
 function Get-ConfiguredPath { Join-Path $PSScriptRoot '../session' }
+function Resolve-FilesystemPath { param($Path) $Path }
 '@
                     Write-FixtureText (Join-Path $lib 'project-root.ps1') 'function Resolve-CrucibleProjectRoot { $PSScriptRoot }'
                     Write-FixtureText (Join-Path $lib 'time.ps1') ''
+                    Copy-Item -LiteralPath (Join-Path $source 'lib/file-lock.ps1') -Destination $lib
                     if ($case.Name -eq 'helper') { Remove-Item -LiteralPath (Join-Path $lib 'config-helpers.ps1') }
-                    if ($case.Name -eq 'lock') { Write-FixtureText (Join-Path $root 'session/global/session_state.lock') 'fixture lock' }
+                    # Item 263: a held lock is waited out, so the lock refusal is one that waiting cannot clear.
+                    if ($case.Name -eq 'lock') { New-Item -ItemType Directory -Path (Join-Path $root 'session/global/session_state.lock') -Force | Out-Null }
                     $extra = if ($case.Name -eq 'input') { '' } else { "-UpdateJson 'invalid-json'" }
                     $call = "& './update-session-state.ps1' -Specialist implementation $extra"
                 }
