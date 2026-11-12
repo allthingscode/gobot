@@ -146,10 +146,33 @@ try {
     # The whole DirectoryInfo is passed, not the name: a root whose pid has since been
     # reused by a later process is abandoned too, and only the creation time can tell that
     # apart from a second checkout's live run. Two such roots sat here for three days.
+    #
+    # Two runners can collect the same abandoned root at once. The one that reaches an
+    # entry the other already deleted gets a terminating error from Remove-Item despite
+    # SilentlyContinue, measured as Win32Exception native error 2 while the root itself
+    # still existed. That is the deletion happening elsewhere, as is any failure on a root
+    # that is gone afterwards. Any other failure is a real refusal and stops the run,
+    # naming the root. Item 347.
+    function Test-RemovalTargetVanished {
+        param([System.Exception]$Exception)
+
+        $e = $Exception
+        if ($e -is [System.IO.FileNotFoundException] -or $e -is [System.IO.DirectoryNotFoundException] -or
+            $e -is [System.Management.Automation.ItemNotFoundException]) { return $true }
+        return ($e -is [System.ComponentModel.Win32Exception] -and $e.NativeErrorCode -in @(2, 3))
+    }
+
     $tempPath = [System.IO.Path]::GetTempPath()
-    Get-ChildItem -Path $tempPath -Filter "crucible-test-run-*" -Directory -ErrorAction SilentlyContinue |
-        Where-Object { Test-TestRunRootOrphaned -Directory $_ } |
-        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    $abandonedRoots = @(Get-ChildItem -Path $tempPath -Filter "crucible-test-run-*" -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-TestRunRootOrphaned -Directory $_ })
+    foreach ($abandoned in $abandonedRoots) {
+        try {
+            Remove-Item -LiteralPath $abandoned.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {
+            if ((Test-RemovalTargetVanished -Exception $_.Exception) -or -not (Test-Path -LiteralPath $abandoned.FullName)) { continue }
+            throw ("Could not remove abandoned test run root '" + $abandoned.FullName + "': " + $_.Exception.Message)
+        }
+    }
 
     # Pre-stage the shared adopter fixture once before running worker tests. Nothing
     # records whether this call built it: the fixture lives inside the run root now, so
@@ -579,6 +602,10 @@ try {
                             } else {
                                 if ($isTimeout) {
                                     Write-Host "FAIL  $($file.Name) (TIMEOUT after $($IdleTimeoutSeconds)s)" -ForegroundColor Red
+                                    # Beside the FAIL line, as serial mode prints it. Item 340.
+                                    if ($cleanupError) {
+                                        Write-Host "Cleanup failed for $($file.Name): $cleanupError" -ForegroundColor Red
+                                    }
                                 } elseif ($hasOutputFailure) {
                                     Write-Host "FAIL  $($file.Name) ($($duration)s, Output Failure Signature)" -ForegroundColor Red
                                 } else {
