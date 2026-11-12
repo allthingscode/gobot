@@ -291,9 +291,24 @@ hashtable keys and `Start-Process -WorkingDirectory`; splatted argv to those
 commands (except git pathspecs after `--`); and PathInfo text conversions
 (`Select-Object -ExpandProperty Path`, `ForEach-Object Path`, `[string]`,
 interpolation, `ToString()`, `+`, `-f`, `-join`). An operand is qualified only when
-it is itself a `Resolve-FilesystemPath` call, or a variable every assignment of
-which in its function (or script) scope is one, with a top-level assignment through
-the owner that precedes the use. Parameters require that same preceding assignment.
+it is itself a `Resolve-FilesystemPath` call, or a variable every binding of which
+is an assignment through the owner, with a top-level such assignment that runs
+before the use. Bindings are indexed by bare name, so `$script:x`, `$global:x`,
+`$local:x`, `$private:x` and `$variable:x` all bind `$x`. The bindings checked are
+those in the enclosing function (or, with none there, at script level) plus every
+`script:`/`global:` write anywhere in the file. These bindings never qualify:
+`Set-Variable`/`sv` literal names (named or positional, single or a list), each read
+as a PowerShell wildcard pattern (escapes included, a malformed pattern matching
+every name) and also as its written and unescaped spellings; `New-Variable`/`nv` literal names; and
+literal `-OutVariable`/`-ov` or `-PipelineVariable`/`-pv` names (`+` appends
+included), except on the native executables named above when the file declares no
+function or alias of that name (by `function`, `Set-Alias`/`New-Alias` or an
+`[Alias()]` on a function; a computed alias name counts as every name). A `-Scope`
+other than `local`, `private` or `0` counts as an outer-scope write. Parameters
+require that same preceding assignment; foreach bindings do not qualify. Within a
+block "before" is source order; across a function's `begin`, `process` and `end`
+blocks it is that run order. A use in `clean` is preceded only by `clean`'s own
+earlier assignments, because `clean` also runs after a terminating error.
 A call nested inside the operand does not count. A line allowance must explain a
 native producer, a validated full-input contract or a display/provider-only use, and
 fails when stale.
@@ -309,7 +324,23 @@ argument strings and file names (`Arguments`, `ArgumentList`, `FileName`,
 `Start-Process -ArgumentList`); other git path operands (`clone`, `init`,
 `config core.hooksPath`); child parameters whose names end in no path word; and
 other PathInfo conversions (for example `Out-String`).
-
+Binding analysis is lexical and conservative, not a simulation of PowerShell's
+dynamic scopes or control flow. Known gaps, each filed: bindings whose name is
+computed or splatted (`Set-Variable -Name $n`, `-OutVariable $n`; item 386); other
+binding forms (`-ErrorVariable`, `-WarningVariable`, `-InformationVariable`,
+variable-provider cmdlets such as `Set-Item variable:x`, `(Get-Variable x).Value`,
+`[ref]` arguments, `PSVariable` APIs; item 387); writes made by a dot-sourced file
+(item 388); a `git`, `codex`, `pwsh` or `powershell` function or alias defined in
+another file or through the `alias:`/`function:` drives, which keeps the native exemption
+(items 385 and 392); run-order credit for a
+`process` block that runs zero times or a `begin` that returns early (item 389); and
+a caller's local binding read by a callee through dynamic scope (item 390). Known
+false positives, also filed: `-ov`/`-pv`-shaped arguments of other native
+executables still count as bindings (item 384), and `Set-Variable -Include`/`-Exclude`
+filters are ignored (item 383). By design, nested scriptblocks count as their
+enclosing function, an assignment in `dynamicparam` never precedes a use in another
+block, and outer-scope writes are merged even where a local binding would shadow them
+at runtime, which can only add findings. These limits require source review.
 How the list is used:
 
 - When a defect is filed, name the invariant it violates. If none fits, that is either a
