@@ -27,6 +27,30 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $env:CRUCIBLE_SKIP_PROVENANCE = 'true'
 
+# Remove-Item reports most refusals inside a recursive delete (a file another process holds
+# open, an entry it may not delete) as non-terminating errors, which SilentlyContinue
+# discards: the root stays and nothing says so. Returns why a run root survived, or $null
+# when it is gone. A terminating error still reaches the caller. Defined first so the outer
+# finally can use it on every exit path. Item 393.
+function Remove-TestRunRootDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $removalErrors = @()
+    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable removalErrors
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $reasons = @($removalErrors | ForEach-Object { $_.Exception.Message } | Select-Object -Unique)
+    if ($reasons.Count -eq 0) { return 'Remove-Item reported no error' }
+    if ($reasons.Count -gt 3) { $reasons = @($reasons[0..2]) + ('and ' + ($reasons.Count - 3) + ' more') }
+    return ($reasons -join '; ')
+}
+
+function Write-OwnTestRunRootSurvival {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Reason)
+
+    Write-Host ("Warning: this run's test run root survived cleanup: '" + $Path + "': " + $Reason +
+        ". The next run collects it once this process has exited.") -ForegroundColor Yellow
+}
+
 # Before any fixture is built, point git at an isolated global config so the suite
 # never inherits the developer's core.autocrlf. Defined in tests/_harness.ps1, which
 # every test file also dot-sources, so a solo test run is isolated identically.
@@ -153,6 +177,11 @@ try {
     # still existed. That is the deletion happening elsewhere, as is any failure on a root
     # that is gone afterwards. Any other failure is a real refusal and stops the run,
     # naming the root. Item 347.
+    #
+    # A non-terminating refusal leaves the root in place without stopping anything. That is a
+    # warning, not a failure: the residue belongs to another run, is usually transient (a
+    # scanner, an indexer, an exiting process), and the next collector retries. Each surviving
+    # root is named with its reason when it happens and again in the run summary. Item 393.
     function Test-RemovalTargetVanished {
         param([System.Exception]$Exception)
 
@@ -165,12 +194,25 @@ try {
     $tempPath = [System.IO.Path]::GetTempPath()
     $abandonedRoots = @(Get-ChildItem -Path $tempPath -Filter "crucible-test-run-*" -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-TestRunRootOrphaned -Directory $_ })
+    $survivingRunRoots = @()
     foreach ($abandoned in $abandonedRoots) {
         try {
-            Remove-Item -LiteralPath $abandoned.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            $survivalReason = Remove-TestRunRootDirectory -Path $abandoned.FullName
         } catch {
             if ((Test-RemovalTargetVanished -Exception $_.Exception) -or -not (Test-Path -LiteralPath $abandoned.FullName)) { continue }
             throw ("Could not remove abandoned test run root '" + $abandoned.FullName + "': " + $_.Exception.Message)
+        }
+        if ($null -ne $survivalReason) {
+            $survivingRunRoots += ("'" + $abandoned.FullName + "': " + $survivalReason)
+            Write-Host ("Warning: abandoned test run root survived collection: '" + $abandoned.FullName + "': " + $survivalReason) -ForegroundColor Yellow
+        }
+    }
+
+    function Write-SurvivingRunRootSummary {
+        if ($survivingRunRoots.Count -eq 0) { return }
+        Write-Host "Surviving abandoned run roots: $($survivingRunRoots.Count) (warning; the next run retries)" -ForegroundColor Yellow
+        foreach ($survivor in $survivingRunRoots) {
+            Write-Host ("  - " + $survivor) -ForegroundColor Yellow
         }
     }
 
@@ -428,6 +470,7 @@ try {
                 Write-Host ("  - " + $note) -ForegroundColor Yellow
             }
         }
+        Write-SurvivingRunRootSummary
         if ($failedTests.Count -gt 0) {
             $sortedFailed = @($failedTests | Sort-Object)
             Write-Host "Failed: $($sortedFailed.Count) ($($sortedFailed -join ', '))" -ForegroundColor Red
@@ -741,6 +784,7 @@ try {
                 Write-Host ("  - " + $note) -ForegroundColor Yellow
             }
         }
+        Write-SurvivingRunRootSummary
         if ($failedTests.Count -gt 0) {
             $sortedFailed = @($failedTests | Sort-Object)
             Write-Host "Failed: $($sortedFailed.Count) ($($sortedFailed -join ', '))" -ForegroundColor Red
@@ -758,7 +802,8 @@ try {
         # the outer run's fixtures while it is still using them.
         if ($CRUCIBLE_TEST_ROOT_CREATED -and $env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT)) {
             Write-Host "Cleaning up test run root..." -ForegroundColor Cyan
-            Remove-Item -LiteralPath $env:CRUCIBLE_TEST_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+            $ownRootReason = Remove-TestRunRootDirectory -Path $env:CRUCIBLE_TEST_ROOT
+            if ($null -ne $ownRootReason) { Write-OwnTestRunRootSurvival -Path $env:CRUCIBLE_TEST_ROOT -Reason $ownRootReason }
         }
     } finally {
         if ($null -ne $runLock) {
@@ -780,7 +825,8 @@ exit 0
         # Empty selections exit before the normal runner cleanup. Item 201.
         $ownsRoot = Get-Variable -Name CRUCIBLE_TEST_ROOT_CREATED -ValueOnly -ErrorAction SilentlyContinue
         if ($ownsRoot -and $env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT)) {
-            Remove-Item -LiteralPath $env:CRUCIBLE_TEST_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+            $ownRootReason = Remove-TestRunRootDirectory -Path $env:CRUCIBLE_TEST_ROOT
+            if ($null -ne $ownRootReason) { Write-OwnTestRunRootSurvival -Path $env:CRUCIBLE_TEST_ROOT -Reason $ownRootReason }
         }
         Write-Host 'Partial run: the full suite (no -Changed) and the Linux leg are still required before pushing.' -ForegroundColor Yellow
     }
