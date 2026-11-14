@@ -26,8 +26,8 @@ Do **not** hard-code a per-role model. Crucible computes the level from the acti
 (`target_phase`, `budget_tier`, `design_required`) and prints, next to the dispatch command after each
 `crucible.ps1 -Init -ProjectRoot "{project_root}"`, a `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort (target claude)`
 line, then `[RECOMMENDED MODEL]` and `[RECOMMENDED EFFORT]`. A Claude tier is a level, a model and an effort
-together: the built-in levels are strong = `claude-opus-5-5` at `high`, default = `claude-sonnet-5-5` at
-`medium`, light = `claude-haiku-5-5` at `high`, unless `config.yaml` sets the pair under
+together: the built-in levels are strong = `claude-opus-5-5` at `medium`, default = `claude-sonnet-5-5` at
+`high`, light = `claude-haiku-5-5` at `high`, unless `config.yaml` sets the pair under
 `models.targets.claude.<tier>`. Dispatch with the agent definition `-Init` names on its `[RECOMMENDED AGENT] crucible-<tier>` line
 (`crucible-researcher` for the research phase) as the `Agent` tool's `subagent_type`, and pass **neither `model`
 nor `effort`**. The `Agent` tool's `model` parameter accepts only a family alias (`opus`, `sonnet`, `haiku`,
@@ -74,7 +74,7 @@ Crucible-blessed launcher, which wraps `codex exec -s danger-full-access` and re
 launch status.
 
 1. Compute the Codex level. Run `crucible.ps1 -Init -ProjectRoot "{project_root}"` with `-Target codex` so the `[RECOMMENDED LEVEL]`
-   line resolves to the configured Codex level, a model and an effort (e.g. `gpt-6.1-sol` at `low`):
+   line resolves to the configured Codex level, a model and an effort (e.g. `gpt-6.1-terra` at `high`):
 
    ```bash
    pwsh -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -Target codex -ProjectRoot "{project_root}" -Quiet
@@ -106,7 +106,7 @@ launch status.
    together, and Crucible prints it as one pair:
    `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`, followed by `[RECOMMENDED MODEL]` and
    `[RECOMMENDED EFFORT]`. The built-in levels are strong = `gpt-6.1-sol` at `high`, default =
-   `gpt-6.1-sol` at `low`, light = `gpt-6-luna` at `high`, unless `config.yaml` sets the pair under
+   `gpt-6.1-terra` at `high`, light = `gpt-6-luna` at `high`, unless `config.yaml` sets the pair under
    `models.targets.codex.<tier>`. Always pass both halves, `-Model` and `-Effort`; the launcher forwards
    the effort as `-c model_reasoning_effort` and warns when `-Effort` is missing. A Claude target prints
    the same lines; it is dispatched through the generated `crucible-<tier>` agent definition instead (see
@@ -185,7 +185,7 @@ identical to a Claude specialist - see *After Each Sub-Agent Returns*.
 
 ### Researcher Dispatch
 
-Use `crucible-researcher` (not a `crucible-<tier>` agent) to enforce read-only tool access and the trust boundary at the toolset level. It disallows the file-editing tools, so the Researcher writes only through the Crucible scripts its prompt names, and it runs at the strong level. Pass no `model` or `effort`.
+Use `crucible-researcher` (not a `crucible-<tier>` agent) to enforce read-only tool access and the trust boundary at the toolset level. It disallows the file-editing tools, so the Researcher writes only through the Crucible scripts its prompt names, and it runs at its own `researcher` level (built-in `claude-opus-5-5` at `high`, set under `models.targets.claude.researcher`, independent of `strong`). Pass no `model` or `effort`.
 
 ```
 Agent({

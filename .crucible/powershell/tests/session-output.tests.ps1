@@ -180,7 +180,7 @@ try {
         $warned = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-922" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" -RecommendedAgentIssue "Agent definition crucible-default is stale for the configured level. Run: sync" 6>&1 } | ForEach-Object { "$_" })
         Assert-Result -Name "stale warning is printed" -Condition (@($warned | Where-Object { $_ -match '^\[WARN\] Agent definition crucible-default is stale' }).Count -eq 1) -FailureMessage ($warned -join " | ")
 
-        $codex = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-923" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 } | ForEach-Object { "$_" })
+        $codex = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-923" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-terra" -RecommendedTarget "codex" -RecommendedEffort "high" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 } | ForEach-Object { "$_" })
         Assert-Result -Name "a Codex target prints no agent line" -Condition (-not ($codex -match '\[RECOMMENDED AGENT\]')) -FailureMessage ($codex -join " | ")
     }
 
@@ -220,21 +220,21 @@ try {
     # Item 163: a Codex level is a model and an effort together, so it is printed as one pair.
     $results += Run-Test -Name "Write-NextStep prints a Codex level as one model and effort pair" -Body {
         $sessionDir = Join-Path $tempRoot "level-line/session"
-        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-914" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" 6>&1 } | ForEach-Object { "$_" })
+        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-914" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-terra" -RecommendedTarget "codex" -RecommendedEffort "high" -RecommendedLevel "default" 6>&1 } | ForEach-Object { "$_" })
         $level = @($lines | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
-        Assert-Result -Name "level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = gpt-6\.1-sol at low effort \(target codex\)') -FailureMessage ("got: " + ($lines -join " | "))
+        Assert-Result -Name "level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = gpt-6\.1-terra at high effort \(target codex\)') -FailureMessage ("got: " + ($lines -join " | "))
         $effort = @($lines | Where-Object { $_ -match '\[RECOMMENDED EFFORT\]' })
-        Assert-Result -Name "effort line names its model" -Condition ($effort.Count -eq 1 -and $effort[0] -match "low - .*launch-codex-specialist\.ps1 -Effort 'low', with -Model gpt-6\.1-sol \(Codex only\)") -FailureMessage ("got: " + ($effort -join " | "))
+        Assert-Result -Name "effort line names its model" -Condition ($effort.Count -eq 1 -and $effort[0] -match "high - .*launch-codex-specialist\.ps1 -Effort 'high', with -Model gpt-6\.1-terra \(Codex only\)") -FailureMessage ("got: " + ($effort -join " | "))
     }
 
     # Item 212: a Claude tier is a level too; the effort goes to the Agent tool's effort parameter.
     $results += Run-Test -Name "Write-NextStep prints a Claude level as a pair and points the effort at the Agent tool" -Body {
         $sessionDir = Join-Path $tempRoot "claude-level-line/session"
-        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-916" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" 6>&1 } | ForEach-Object { "$_" })
+        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-916" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "high" -RecommendedLevel "default" 6>&1 } | ForEach-Object { "$_" })
         $level = @($lines | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
-        Assert-Result -Name "claude level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = claude-sonnet-5-5 at medium effort \(target claude\)') -FailureMessage ("got: " + ($lines -join " | "))
+        Assert-Result -Name "claude level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = claude-sonnet-5-5 at high effort \(target claude\)') -FailureMessage ("got: " + ($lines -join " | "))
         $effort = @($lines | Where-Object { $_ -match '\[RECOMMENDED EFFORT\]' })
-        Assert-Result -Name "claude effort line names the Agent tool" -Condition ($effort.Count -eq 1 -and $effort[0] -match "medium - pass as the Agent tool's effort parameter" -and $effort[0] -notmatch 'launch-codex-specialist|Codex only') -FailureMessage ("got: " + ($effort -join " | "))
+        Assert-Result -Name "claude effort line names the Agent tool" -Condition ($effort.Count -eq 1 -and $effort[0] -match "high - pass as the Agent tool's effort parameter" -and $effort[0] -notmatch 'launch-codex-specialist|Codex only') -FailureMessage ("got: " + ($effort -join " | "))
     }
     # Item 178: -Init prints the approval mode in effect, and a dispatch after a gate always waits.
     $results += Run-Test -Name "Write-CrucibleCiStatusBanner prints the approval mode, per-phase after a gate" -Body {
@@ -619,8 +619,8 @@ New-CruciblePromptText -Context `$ctx
     $results += Run-Test -Name "Operator recommendation escalates on handoff rebase or retry counters, not budget" -Body {
         $cases = @(
             @{ Name = "clean high-budget deployment"; Budget = "high"; Rebase = 0; Retry = 0; Want = "claude-haiku-5-5"; WantLevel = "light = claude-haiku-5-5 at high" },
-            @{ Name = "rebase re-entry"; Budget = "low"; Rebase = 1; Retry = 0; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at medium" },
-            @{ Name = "retried handoff"; Budget = "low"; Rebase = 0; Retry = 1; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at medium" }
+            @{ Name = "rebase re-entry"; Budget = "low"; Rebase = 1; Retry = 0; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at high" },
+            @{ Name = "retried handoff"; Budget = "low"; Rebase = 0; Retry = 1; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at high" }
         )
         $n = 0
         foreach ($case in $cases) {

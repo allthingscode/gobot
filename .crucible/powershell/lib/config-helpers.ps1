@@ -900,10 +900,10 @@ function Get-ModelFromConfig {
 }
 
 # A level is a model and an effort taken together, and one is never set without the
-# other. Codex: strong is gpt-6.1-sol at high, default is gpt-6.1-sol at low, light is
+# other. Codex: strong is gpt-6.1-sol at high, default is gpt-6.1-terra at high, light is
 # gpt-6-luna at high. Luna is most effective at high, so the cheapest level is Luna at high
 # rather than a stronger model at a lower effort. Claude (Item 212): strong is
-# claude-opus-5-5 at high, default is claude-sonnet-5-5 at medium, light is claude-haiku-5-5
+# claude-opus-5-5 at medium, default is claude-sonnet-5-5 at high, light is claude-haiku-5-5
 # at high; the Agent tool takes the effort as its `effort` parameter. config.yaml sets a
 # level as one pair:
 #   models: > targets: > <target>: > <tier>: > model: / effort:
@@ -922,15 +922,16 @@ function Get-ModelLevel {
         $label = "Codex"
         $levels = @{
             strong  = @{ Model = "gpt-6.1-sol"; Effort = "high" }
-            default = @{ Model = "gpt-6.1-sol"; Effort = "low" }
+            default = @{ Model = "gpt-6.1-terra"; Effort = "high" }
             light   = @{ Model = "gpt-6-luna";  Effort = "high" }
         }
         $efforts = @("none", "minimal", "low", "medium", "high", "xhigh", "max")
     } else {
         $label = "Claude"
         $levels = @{
-            strong  = @{ Model = "claude-opus-5-5";   Effort = "high" }
-            default = @{ Model = "claude-sonnet-5-5"; Effort = "medium" }
+            strong  = @{ Model = "claude-opus-5-5";   Effort = "medium" }
+            researcher = @{ Model = "claude-opus-5-5"; Effort = "high" }
+            default = @{ Model = "claude-sonnet-5-5"; Effort = "high" }
             light   = @{ Model = "claude-haiku-5-5";  Effort = "high" }
         }
         $efforts = @("low", "medium", "high", "xhigh", "max")

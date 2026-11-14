@@ -80,7 +80,7 @@ function New-ClaudeAgentContent {
     return (($lines -join "`n") + "`n")
 }
 
-# One definition per Claude level plus a read-only researcher at the strong level,
+# One definition per Claude level plus a read-only researcher at its own level,
 # as @{ Name; FileName; Content }, in a fixed order. Content is ASCII with LF endings
 # and depends only on the configured levels and crucible_root, so a regenerate is byte-identical and
 # drift detection is a comparison.
@@ -105,10 +105,10 @@ function Get-ClaudeAgentDefinitions {
         $definitions.Add([pscustomobject]@{ Name = $name; FileName = ($name + ".md"); Content = $content }) | Out-Null
     }
 
-    $strong = Get-ClaudeLevel -Tier "strong" -ProjectRoot $ProjectRoot
+    $researcher = Get-ClaudeLevel -Tier "researcher" -ProjectRoot $ProjectRoot
     $researcherContent = New-ClaudeAgentContent -Name "crucible-researcher" `
-        -Description ("Crucible Researcher at the strong level (" + $strong.Model + " at " + $strong.Effort + " effort), read-only. Dispatch with this subagent_type for the research phase and pass neither model nor effort.") `
-        -Level $strong -ProjectRoot $ProjectRoot `
+        -Description ("Crucible Researcher at the researcher level (" + $researcher.Model + " at " + $researcher.Effort + " effort), read-only. Dispatch with this subagent_type for the research phase and pass neither model nor effort.") `
+        -Level $researcher -ProjectRoot $ProjectRoot `
         -FrontmatterExtra @("disallowedTools: Write, Edit, NotebookEdit, Agent") `
         -Body @(
             "You are the Crucible Researcher. Your dispatch prompt names a prompt.md file: read it and follow it.",

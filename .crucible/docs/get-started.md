@@ -54,10 +54,10 @@ Expected output excerpt:
 [NEXT SESSION COMMAND] Run the following command:
 
 agent "Groomer: F-001 - read and follow all instructions in <abs path>/.crucible/session/F-001/grooming/prompt.md"
-[RECOMMENDED LEVEL] default = claude-sonnet-5-5 at medium effort (target claude) - a level is the model and effort together; pass both.
+[RECOMMENDED LEVEL] default = claude-sonnet-5-5 at high effort (target claude) - a level is the model and effort together; pass both.
 [RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - pinned by the crucible-default agent definition; do not pass it as the Agent tool's model.
-[RECOMMENDED AGENT] crucible-default - dispatch with subagent_type crucible-default and omit model and effort; the agent definition pins claude-sonnet-5-5 at medium effort.
-[RECOMMENDED EFFORT] medium - already pinned by the crucible-default agent definition; do not pass the Agent tool's effort parameter.
+[RECOMMENDED AGENT] crucible-default - dispatch with subagent_type crucible-default and omit model and effort; the agent definition pins claude-sonnet-5-5 at high effort.
+[RECOMMENDED EFFORT] high - already pinned by the crucible-default agent definition; do not pass the Agent tool's effort parameter.
 ```
 
 Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
@@ -220,10 +220,10 @@ Expected output excerpt:
 [NEXT SESSION COMMAND] Run the following command:
 
 agent "Groomer: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/grooming/prompt.md"
-[RECOMMENDED LEVEL] default = claude-sonnet-5-5 at medium effort (target claude) - a level is the model and effort together; pass both.
+[RECOMMENDED LEVEL] default = claude-sonnet-5-5 at high effort (target claude) - a level is the model and effort together; pass both.
 [RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - pinned by the crucible-default agent definition; do not pass it as the Agent tool's model.
-[RECOMMENDED AGENT] crucible-default - dispatch with subagent_type crucible-default and omit model and effort; the agent definition pins claude-sonnet-5-5 at medium effort.
-[RECOMMENDED EFFORT] medium - already pinned by the crucible-default agent definition; do not pass the Agent tool's effort parameter.
+[RECOMMENDED AGENT] crucible-default - dispatch with subagent_type crucible-default and omit model and effort; the agent definition pins claude-sonnet-5-5 at high effort.
+[RECOMMENDED EFFORT] high - already pinned by the crucible-default agent definition; do not pass the Agent tool's effort parameter.
 ```
 
 Crucible also echoes the full assembled prompt and a CI banner; copy the `agent "..."` line when starting the Groomer.
@@ -257,10 +257,10 @@ You'll see something like:
 
 [NEXT SESSION COMMAND]
 agent "Architect: F-002 - read and follow all instructions in <abs path>/.crucible/session/F-002/implementation/prompt.md"
-[RECOMMENDED LEVEL] default = claude-sonnet-5-5 at medium effort (target claude) - a level is the model and effort together; pass both.
+[RECOMMENDED LEVEL] default = claude-sonnet-5-5 at high effort (target claude) - a level is the model and effort together; pass both.
 [RECOMMENDED MODEL] claude-sonnet-5-5 (target claude) - pinned by the crucible-default agent definition; do not pass it as the Agent tool's model.
-[RECOMMENDED AGENT] crucible-default - dispatch with subagent_type crucible-default and omit model and effort; the agent definition pins claude-sonnet-5-5 at medium effort.
-[RECOMMENDED EFFORT] medium - already pinned by the crucible-default agent definition; do not pass the Agent tool's effort parameter.
+[RECOMMENDED AGENT] crucible-default - dispatch with subagent_type crucible-default and omit model and effort; the agent definition pins claude-sonnet-5-5 at high effort.
+[RECOMMENDED EFFORT] high - already pinned by the crucible-default agent definition; do not pass the Agent tool's effort parameter.
 ```
 
 Confirm with "go" (or "go" in a new session if you prefer a fresh context).
