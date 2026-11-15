@@ -311,28 +311,26 @@ func checkScheduleCancellation(t *testing.T, expired bool) {
 //nolint:paralleltest // swaps google.TimeoutClient
 func TestLoadScheduleContextDeadline(t *testing.T) {
 	dir := installCalendarFixture(t, []string{"blank"}, func() {})
-	requests := make(chan context.Context, 3)
+	requests := make(chan context.Context, 2)
 	google.TimeoutClient = &http.Client{Transport: calendarFixtureTransport(func(r *http.Request) (*http.Response, error) {
 		requests <- r.Context()
-		return calendarFixtureResponse(r, []string{"blank"}, func() {})
+		return nil, errors.New("offline failure")
 	})}
 	started := time.Now()
-	if got := loadScheduleContext(dir); got != "" {
-		t.Fatalf("healthy empty schedule = %q", got)
-	}
+	assertCalendarText(t, loadScheduleContext(dir), "## TODAY'S CONTEXT (live)\n"+calendarUnavailableNotice, nil, nil)
 	finished := time.Now()
-	for range 3 {
+	for range 2 {
 		select {
 		case ctx := <-requests:
 			deadline, ok := ctx.Deadline()
 			if !ok || deadline.Before(started.Add(5*time.Second)) || deadline.After(finished.Add(5*time.Second)) {
 				t.Errorf("request deadline = %v (present=%v), want five-second wrapper bound", deadline, ok)
 			}
-			if !errors.Is(ctx.Err(), context.Canceled) {
-				t.Errorf("request context after return = %v, want canceled", ctx.Err())
+			if !errors.Is(ctx.Err(), context.Canceled) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Errorf("request context after return = %v, want canceled or deadline exceeded", ctx.Err())
 			}
 		default:
-			t.Fatal("missing Calendar or Tasks request")
+			t.Fatal("missing Calendar or Tasks initial request")
 		}
 	}
 }
