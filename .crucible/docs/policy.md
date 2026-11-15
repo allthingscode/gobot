@@ -346,7 +346,8 @@ argument strings and file names (`Arguments`, `ArgumentList`, `FileName`,
 `config core.hooksPath`); child parameters whose names end in no path word; and
 other PathInfo conversions (for example `Out-String`).
 Binding analysis is lexical and conservative, not a simulation of PowerShell's
-dynamic scopes or control flow. Known gaps, each filed: bindings whose name is
+dynamic scopes or control flow. Known limits (item 395; canonical list at the top of the
+framework repo's own `powershell/tests/format-owners.tests.ps1`): bindings whose name is
 computed or splatted (`Set-Variable -Name $n`, `-OutVariable $n`; item 386); other
 binding forms (`-ErrorVariable`, `-WarningVariable`, `-InformationVariable`,
 variable-provider cmdlets such as `Set-Item variable:x`, `(Get-Variable x).Value`,
@@ -356,7 +357,7 @@ another file or through the `alias:`/`function:` drives, which keeps the native 
 (items 385 and 392); run-order credit for a
 `process` block that runs zero times or a `begin` that returns early (item 389); and
 a caller's local binding read by a callee through dynamic scope (item 390). Known
-false positives, also filed: `-ov`/`-pv`-shaped arguments of other native
+false positives, also listed there: `-ov`/`-pv`-shaped arguments of other native
 executables still count as bindings (item 384), and `Set-Variable -Include`/`-Exclude`
 filters are ignored (item 383). By design, nested scriptblocks count as their
 enclosing function, an assignment in `dynamicparam` never precedes a use in another
