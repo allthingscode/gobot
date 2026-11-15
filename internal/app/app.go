@@ -51,7 +51,8 @@ func RunAgent(ctx context.Context, cfg *config.Config) error {
 		defer hub.Close()
 	}
 
-	SetupLogging(cfg, hub)
+	logWriter := SetupLogging(cfg, hub)
+	defer func() { _ = logWriter.Close() }()
 	LogBootMemory(slog.Default())
 	runPreFlightDiagnostics(cfg)
 

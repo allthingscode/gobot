@@ -17,9 +17,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 $errors = @()
 
 . (Join-Path (Join-Path $PSScriptRoot "lib") "backlog-io.ps1")
+. (Join-Path (Join-Path $PSScriptRoot "lib") "crucible-command.ps1")
 
 function Write-Quiet {
     param(
@@ -67,7 +73,7 @@ if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
     } catch {
         # Reported the way every other failure here is reported, so a caller reading the
         # output sees one convention rather than a bare unhandled exception on stderr.
-        Write-Host "BACKLOG VALIDATION ERROR: $_"
+        [Console]::Error.WriteLine("BACKLOG VALIDATION ERROR: $_")
         exit 2
     }
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $ProjectRoot
@@ -77,30 +83,14 @@ if ([string]::IsNullOrWhiteSpace($BacklogPath)) {
 }
 
 if (Test-Path $backlogDir) {
-    $backlogDir = (Resolve-Path $backlogDir).Path
+    $backlogDir = (Resolve-FilesystemPath -Path (Resolve-Path $backlogDir))
 }
 if (Test-Path $BacklogPath) {
-    $BacklogPath = (Resolve-Path $BacklogPath).Path
+    $BacklogPath = (Resolve-FilesystemPath -Path (Resolve-Path $BacklogPath))
 }
 
 # Resolve the project root for file_affinity checks (D46)
-$resolvedProjectRoot = ""
-if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $resolvedProjectRoot = $ProjectRoot
-} else {
-    $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-    if ($null -ne $repoRootVar) {
-        $resolvedProjectRoot = $repoRootVar.Value
-    } else {
-        $resolvedProjectRoot = (Get-Location).Path
-    }
-}
-if ($resolvedProjectRoot -and (Test-Path -LiteralPath $resolvedProjectRoot)) {
-    $resolvedProjectRoot = (Resolve-Path -LiteralPath $resolvedProjectRoot).Path
-}
-if ([string]::IsNullOrWhiteSpace($resolvedProjectRoot)) {
-    $resolvedProjectRoot = (Get-Location).Path
-}
+$resolvedProjectRoot = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
 
 try {
     Write-Quiet "=== BACKLOG VALIDATION START ==="
@@ -196,22 +186,25 @@ try {
                     try {
                         $frontmatter = Get-Content -Path $file.FullName -Head 30
                         if ($frontmatter) {
-                            $frontmatterStr = [string]$frontmatter
-                            $priority = "P2" # default
-                            if ($frontmatterStr -match 'priority:\s*"?([P][0123])"?') {
-                                $priority = $matches[1]
+                            $identity = Get-SpecIdentity -SpecPath $file.FullName -DefaultPriority P2 -Validate
+                            $priority = $identity.priority
+                            if ($priority -notmatch '^P[0-3]$') {
+                                $errors += "Missing or invalid priority in frontmatter of active file: $($file.Name)"
+                                continue
                             }
-
-                            $itemId = $null
-                            if ($frontmatterStr -match 'item_id:\s*"?([^"\s\r\n]+)"?') {
-                                $itemId = $matches[1]
-                            } else {
+                            $itemId = $identity.item_id
+                            if ([string]::IsNullOrWhiteSpace($itemId)) {
                                 $errors += "Missing or invalid item_id in frontmatter of active file: $($file.Name)"
                                 continue
                             }
 
                             # Assert that filename ID matches item_id
-                            $filenameId = ($file.Name -replace '_.*$', '') -replace '\.md$', ''
+                            try {
+                                $filenameId = Get-BacklogSpecFiles -SpecPath $file.Name -DecodeId
+                            } catch {
+                                $errors += "Invalid spec filename: '$($file.Name)'. Expected <id>.md or <id>_<slug>.md."
+                                continue
+                            }
                             if ($itemId -ne $filenameId) {
                                 $errors += "Filename ID mismatch: file '$($file.Name)' prefix '$filenameId' does not match frontmatter item_id '$itemId'"
                             }
@@ -219,13 +212,7 @@ try {
                             # Validate budget_tier (Finding 1). Match per-line and anchor at line
                             # start so a documentation comment (e.g. '# budget_tier: low|medium|...')
                             # is never mistaken for the declaration.
-                            $budgetTier = $null
-                            foreach ($fmLine in $frontmatter) {
-                                if ($fmLine -match '^\s*budget_tier:\s*"?([^"\s\r\n]+)"?') {
-                                    $budgetTier = $matches[1]
-                                    break
-                                }
-                            }
+                            $budgetTier = Get-SpecBudgetTier -SpecPath $file.FullName -Raw -Validate
                             if ($null -ne $budgetTier -and $budgetTier -ne "") {
                                 $allowedBudgetTiers = @("low", "medium", "high", "extended")
                                 if ($allowedBudgetTiers -notcontains $budgetTier.ToLowerInvariant()) {
@@ -237,13 +224,7 @@ try {
 
                             # Validate type: item kind (feature, bug, chore, research).
                             # Same per-line anchoring as budget_tier to skip comment lines.
-                            $specType = $null
-                            foreach ($fmLine in $frontmatter) {
-                                if ($fmLine -match '^\s*type:\s*"?([^"\s\r\n]+)"?') {
-                                    $specType = $matches[1]
-                                    break
-                                }
-                            }
+                            $specType = $identity.type
                             if ($null -ne $specType -and $specType -ne "") {
                                 $allowedTypes = @("feature", "bug", "chore", "research")
                                 if ($allowedTypes -notcontains $specType.ToLowerInvariant()) {
@@ -376,8 +357,6 @@ try {
         if (Test-Path $dir) {
             $archivedFiles = Get-ChildItem -Path $dir -Filter "*.md"
             foreach ($file in $archivedFiles) {
-                $frontmatter = Get-Content -Path $file.FullName -Head 20
-                $frontmatterStr = [string]$frontmatter
                 $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
                 $relPath = $relPath -replace '\\', '/'
 
@@ -398,11 +377,9 @@ try {
                     Write-Host "[WARN] Archived spec has no BACKLOG.md row: $relPath. Readers that resolve a task by its table row will treat it as nonexistent." -ForegroundColor Yellow
                 }
 
-                # Matched per line: $frontmatterStr joins the lines with spaces, so an
-                # unquoted status read on through every later line and never matched.
-                $statusLine = @($frontmatter | Where-Object { $_ -match '^\s*status:' } | Select-Object -First 1)
-                if ($statusLine.Count -gt 0 -and $statusLine[0] -match '^\s*status:\s*"?([^"]+)"?\s*$') {
-                    $status = $matches[1].Trim()
+                # Share the path reader with finalization and archival.
+                $status = Get-BacklogSpecStatus -SpecPath $file.FullName
+                if (-not [string]::IsNullOrWhiteSpace($status)) {
                     if ($status -eq "Production" -or $status -eq "Resolved" -or $status -eq "Abandoned") {
                         continue
                     }
@@ -479,9 +456,7 @@ try {
                     $targetPath = Join-Path $backlogDir ($link -replace '/', [System.IO.Path]::DirectorySeparatorChar)
                     if (-not (Test-Path -LiteralPath $targetPath)) { continue } # already reported by Check B
 
-                    $fmStr = [string](Get-Content -LiteralPath $targetPath -Head 15)
-                    $specStatus = $null
-                    if ($fmStr -match 'status:\s*"?([^"\s\r\n]+)"?') { $specStatus = $matches[1] }
+                    $specStatus = Get-BacklogSpecStatus -SpecPath $targetPath
                     if ($specStatus -ine 'Stub') {
                         $errors += "Stub-row convention: BACKLOG.md row $link has Status='Stub' but spec frontmatter status is '$specStatus' (expected 'Stub')"
                     }
@@ -495,8 +470,7 @@ try {
         $dir = $dirInfo.Path
         if (-not (Test-Path $dir)) { continue }
         foreach ($file in @(Get-ChildItem -Path $dir -Filter "*.md")) {
-            $fmStr = [string](Get-Content -LiteralPath $file.FullName -Head 15)
-            if ($fmStr -notmatch 'status:\s*"?Stub"?') { continue }
+            if ((Get-BacklogSpecStatus -SpecPath $file.FullName) -ine "Stub") { continue }
             $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
             $relPath = $relPath -replace '\\', '/'
             if (-not $stubLinksFromBacklog.ContainsKey($relPath)) {
@@ -659,14 +633,16 @@ try {
             $writeResult = Invoke-WithBacklogLock -BacklogPath $BacklogPath -ScriptBlock {
                 $current = @(Get-Content -LiteralPath $BacklogPath -Encoding UTF8) -join "`n"
                 if ($current -ne $oldText) { return "changed" }
-                [System.IO.File]::WriteAllText($BacklogPath, $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $BacklogPath), $newText + "`n", (New-Object System.Text.UTF8Encoding $false))
                 return "written"
             }
             if ($writeResult -eq "written") {
                 Write-Quiet "BACKLOG.md updated successfully."
                 $errors = @($errors | Where-Object { $_ -notlike '*count mismatch*' -and $_ -notlike '*items mismatch*' })
             } else {
-                $errors += "BACKLOG.md changed while it was being validated, so the Priority Summary was not rewritten. Rerun validate-backlog.ps1 -FixSummary."
+                # The rerun names the file this run read, so it validates the same backlog. Item 247.
+                $fixRerun = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Transport PowerShell -Parameters ([ordered]@{ BacklogPath = $BacklogPath; FixSummary = $true }) -CrucibleRoot (Split-Path -Parent $PSScriptRoot)
+                $errors += ("BACKLOG.md changed while it was being validated, so the Priority Summary was not rewritten. Rerun: " + $fixRerun)
             }
         } else {
             Write-Quiet "BACKLOG.md Priority Summary already current; no changes written."
@@ -683,6 +659,6 @@ try {
         exit 0
     }
 } catch {
-    Write-Host "BACKLOG VALIDATION ERROR: $_"
+    [Console]::Error.WriteLine("BACKLOG VALIDATION ERROR: $_")
     exit 2
 }

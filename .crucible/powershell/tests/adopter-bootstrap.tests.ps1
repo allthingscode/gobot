@@ -109,7 +109,7 @@ Add a health endpoint.
         # each filename in BACKLOG.md. That linter is Test-FrameworkDevOnlyFile
         # (item 83) and an adopter pre-commit does not invoke it. Run it when
         # the file is present so a framework-repo run still lints this fixture.
-        $backlogDir = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RESOLVE_PATH -Key backlog -ProjectRoot $projectRoot
+        $backlogDir = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $RESOLVE_PATH -Key backlog -ProjectRoot $projectRoot }
         Assert-Result -Name "resolve backlog path exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected resolve-config-path exit 0, got " + $LASTEXITCODE)
         if (Test-Path -LiteralPath $CRUCIBLE_LINT) {
             Push-Location $projectRoot
@@ -189,7 +189,7 @@ Add a health endpoint.
         # 9. Verify hooksPath is set and hooks work for adopter (testing TODO #31)
         Push-Location $projectRoot
         try {
-            $hooksPathConfig = (git config core.hooksPath).Trim()
+            $hooksPathConfig = (Invoke-ExternalCommand -AsLines { git config core.hooksPath }).Trim()
             Assert-Result -Name "core.hooksPath config is set" -Condition ($hooksPathConfig -eq ".crucible/scripts/hooks") -FailureMessage "expected core.hooksPath config to be '.crucible/scripts/hooks'"
 
             # Verify that a commit runs the hooks and passes

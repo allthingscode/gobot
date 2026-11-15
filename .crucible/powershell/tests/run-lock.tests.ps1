@@ -132,9 +132,7 @@ function New-RunnerScratch {
     # item 89 hit. Helpers are the _*.ps1 files, none of which match the runner's *test*.ps1
     # discovery glob, so copying all of them cannot smuggle in a test file.
     Copy-Item -Path (Join-Path (Split-Path -Parent $HARNESS_SCRIPT) "_*.ps1") -Destination $testsDir -Force
-    foreach ($lib in @("run-lock.ps1", "normalized-hash.ps1")) {
-        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/$lib") -Destination (Join-Path $libDir $lib) -Force
-    }
+    Copy-TestRunnerLibraries -Destination $libDir
     # The scratch runner reaps run roots for real, and that is safe: collection is by
     # dead owner, so the outer suite's root - owned by a live process - is never a
     # candidate. The stub only stands in for the fixture build, which needs the whole
@@ -365,7 +363,7 @@ try {
             # into a fact. It also fixes the worse failure mode: with the redirect not taking,
             # this case passes as soon as any other run happens to collect the fixture from the
             # shared TEMP first, which is the vacuous pass the comment above was written against.
-            $childTemp = (& (Get-PwshCommand) -NoProfile -Command '[System.IO.Path]::GetTempPath()' | Select-Object -First 1)
+            $childTemp = (Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -Command '[System.IO.Path]::GetTempPath()' } | Select-Object -First 1)
             $childTempFull = [System.IO.Path]::GetFullPath(([string]$childTemp).Trim()).TrimEnd('/', '\')
             $privateTempFull = [System.IO.Path]::GetFullPath($privateTemp).TrimEnd('/', '\')
             Assert-Result -Name "the child's temp directory is the private one" -Condition ($childTempFull -eq $privateTempFull) -FailureMessage (

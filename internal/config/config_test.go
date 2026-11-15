@@ -82,18 +82,17 @@ func TestStorageRoot_Default(t *testing.T) {
 		t.Errorf("Priority 2 (Env) failed: got %q, want %q", got, "env_root")
 	}
 
-	// 3. Portable Default (fallback when USERPROFILE is missing/unstable)
+	// 3. Portable default under the fixture home.
 	t.Setenv("GOBOT_STORAGE", "")
-	origHome := os.Getenv("USERPROFILE")
-	_ = os.Unsetenv("USERPROFILE")
-	_ = os.Unsetenv("HOME")
-	defer func() { _ = os.Setenv("USERPROFILE", origHome) }()
+	t.Setenv("GOBOT_HOME", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	cfg3 := &Config{}
 	got := cfg3.StorageRoot()
-	// When no HOME/USERPROFILE, it should return "gobot_storage" or a joined path.
-	if got == "" {
-		t.Error("Priority 3 (Default) returned empty string")
+	if want := filepath.Join(home, "gobot_data"); got != want {
+		t.Errorf("portable default = %q, want %q", got, want)
 	}
 }
 

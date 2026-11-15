@@ -15,18 +15,38 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 . (Join-Path $PSScriptRoot "lib/platform.ps1")
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/checks-not-run.ps1")
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $ProjectRoot = (Get-Location).Path
+    $ProjectRoot = Resolve-ConfigProjectRoot
 } else {
     if (-not (Test-Path -LiteralPath $ProjectRoot)) {
         Write-Error ("-ProjectRoot path does not exist: {0}" -f $ProjectRoot)
     }
-    $ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $ProjectRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 }
 
+# Item 254: the checks, and every other setting this run reads, come from one read of the
+# committed config.yaml, verified against the project's HEAD. Nothing reopens the file, so
+# a running check cannot change a setting read after it. The "Config source refused" line
+# is the stable identity the verification gate parses: a refusal is a prerequisite, not a
+# failed check. Item 245 owns the checks reader.
+try {
+    $configState = Get-ConfigCommitState -ProjectRoot $ProjectRoot
+} catch {
+    # Any failure to verify is still a refused config source, never a check failure.
+    $configPathForError = Join-Path $ProjectRoot ".crucible/config.yaml"
+    $configState = [pscustomobject]@{ Status = "unverifiable"; Message = ($configPathForError + " could not be verified against HEAD (" + $_.Exception.Message + "). Remedy: Check that the file is readable and git works in this repository.") }
+}
+if ($configState.Status -ne "committed") {
+    [Console]::Error.WriteLine("Refusing to run the configured checks: " + $configState.Message)
+    Write-Host ("Config source refused ({0}): {1}" -f $configState.Status, $configState.Message)
+    exit 2
+}
+$configContent = $configState.Content
+
 # Item 188: lookup and detached checks share the configured workspaces root.
-$worktreeRoot = Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot
+$worktreeRoot = Resolve-FilesystemPath -Path (Get-ConfiguredPath -Key "workspaces" -ProjectRoot $ProjectRoot -Content $configContent)
 $commitWorktree = $null
 function Remove-CommitWorktree {
     if ($null -eq $commitWorktree) { return }
@@ -38,7 +58,19 @@ function Remove-CommitWorktree {
 }
 # A trap covers the whole script, including lines before this one, so it tests the variable
 # rather than calling the function before it exists.
-trap { if ($null -ne $commitWorktree) { Remove-CommitWorktree }; break }
+trap {
+    $refusal = $_.Exception.Message
+    # Cleanup must not let a second error escape to an embedding caller either.
+    try {
+        if ($null -ne (Get-Variable commitWorktree -ErrorAction Ignore) -and $null -ne $commitWorktree) {
+            Remove-CommitWorktree
+        }
+    } catch {
+        [Console]::Error.WriteLine("Temporary worktree cleanup failed: " + $_.Exception.Message)
+    }
+    [Console]::Error.WriteLine("Isolated checks refused: " + $refusal)
+    exit 1
+}
 if (-not [string]::IsNullOrWhiteSpace($Commit)) {
     # Research tasks have no implementation worktree or task branch. -Commit runs
     # configured checks in a detached throwaway worktree so their artifacts never
@@ -54,14 +86,14 @@ if (-not [string]::IsNullOrWhiteSpace($Commit)) {
     if ($addRes.ExitCode -ne 0) {
         Write-Error ("Could not create a worktree at {0} for {1}: {2}" -f $commitWorktree, $commitSha, $addRes.Raw)
     }
-    $worktree = (Resolve-Path -LiteralPath $commitWorktree).Path
+    $worktree = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $commitWorktree))
     Write-Host ("Running the configured checks for {0} at {1} in a temporary worktree: {2}" -f $TaskId, $commitSha, $worktree)
 } else {
     $worktree = Join-Path $worktreeRoot ("implementation-" + $TaskId)
     if (-not (Test-Path -LiteralPath $worktree)) {
         Write-Error ("Worktree missing: {0}. A task with no implementation worktree (research, for example) passes -Commit <rev> instead." -f $worktree)
     }
-    $worktree = (Resolve-Path -LiteralPath $worktree).Path
+    $worktree = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $worktree))
 
     $branchRes = Invoke-Git -Directory $worktree rev-parse --abbrev-ref HEAD
     $branch = $branchRes.Raw.Trim()
@@ -71,166 +103,20 @@ if (-not [string]::IsNullOrWhiteSpace($Commit)) {
     }
 }
 
-
-$configPath = Join-Path $ProjectRoot ".crucible/config.yaml"
-if (-not (Test-Path -LiteralPath $configPath)) {
-    Write-Error ("Configuration file not found: {0}" -f $configPath)
-}
-
-# Parse config.yaml for verification commands manually to avoid external module dependencies
-$lines = Get-Content -LiteralPath $configPath -Encoding UTF8
-$commands = @()
-$inVerification = $false
-$inMode = $false
-$inConfigCheck = $false
-$currentName = ""
-$configCheckName = ""
-$configCheckCommand = ""
-$currentHostGate = ""
-$currentAlternativeRunner = ""
-$currentCommand = $null
-
 # Map "test" mode to "quick" if the framework calls it with "test" for backward compatibility
 $targetMode = if ($Mode -eq "test") { "quick" } else { $Mode }
 
-function Read-InlineScalar {
-    param([string]$Value)
-    if ($Value.Length -ge 2 -and ($Value[0] -eq '"' -or $Value[0] -eq "'") -and $Value[0] -eq $Value[$Value.Length - 1]) {
-        $inner = $Value.Substring(1, $Value.Length - 2)
-        # `"a.exe" "b"` starts and ends with a quote but is not one quoted scalar.
-        if (-not $inner.Contains([string]$Value[0])) { return $inner }
-    }
-    return $Value
+# Item 245: the checks block has one reader, shared with validate-config.ps1 and crucible-doctor.ps1.
+$identityErrors = @(Get-VerificationCheckIdentityErrors -Content $configContent)
+if ($identityErrors.Count -gt 0) {
+    [Console]::Error.WriteLine(($identityErrors -join "`n"))
+    exit 2
 }
+$commands = @(Get-VerificationChecks -Content $configContent -Mode $targetMode)
 
-# Read a YAML block scalar (| literal or > folded) whose header line is at index
-# $HeaderIndex. Adopters commonly write a multi-statement verification command as a
-# folded scalar (`command: >-`) for readability; the inline regex only captured the
-# `>-` indicator, so Invoke-Expression later choked on a bare `>`. Returns the joined
-# body plus NextIndex (first line NOT consumed). Folded joins content lines with
-# spaces (blank line -> newline); literal joins with newlines. Chomping indicators
-# are accepted; the trailing newline is irrelevant to Invoke-Expression.
-function Read-BlockScalar {
-    param(
-        [string[]]$Lines,
-        [int]$HeaderIndex,
-        [string]$Indicator,
-        [int]$KeyIndent
-    )
-    $folded = $Indicator.StartsWith(">")
-    $bodyLines = New-Object System.Collections.Generic.List[string]
-    $blockIndent = -1
-    $i = $HeaderIndex + 1
-    while ($i -lt $Lines.Count) {
-        $line = $Lines[$i]
-        if ($line -match "^\s*$") {
-            $bodyLines.Add("")
-            $i++
-            continue
-        }
-        $indent = ($line -replace "^(\s*).*$", '$1').Length
-        if ($indent -le $KeyIndent) { break }
-        if ($blockIndent -lt 0) { $blockIndent = $indent }
-        if ($line.Length -ge $blockIndent) {
-            $bodyLines.Add($line.Substring($blockIndent))
-        } else {
-            $bodyLines.Add($line.TrimStart())
-        }
-        $i++
-    }
-    while ($bodyLines.Count -gt 0 -and $bodyLines[$bodyLines.Count - 1] -eq "") {
-        $bodyLines.RemoveAt($bodyLines.Count - 1)
-    }
-    if ($folded) {
-        $value = ""
-        foreach ($b in $bodyLines) {
-            if ($b -eq "") { $value += "`n" }
-            elseif ($value -eq "" -or $value.EndsWith("`n")) { $value += $b }
-            else { $value += " " + $b }
-        }
-    } else {
-        $value = ($bodyLines -join "`n")
-    }
-    return @{ Value = $value; NextIndex = $i }
-}
-
-for ($idx = 0; $idx -lt $lines.Count; $idx++) {
-    $line = $lines[$idx]
-    if ($line -match "^verification:\s*$") {
-        $inVerification = $true
-        continue
-    }
-    if ($inVerification -and $line -match "^[a-zA-Z]") {
-        $inVerification = $false
-    }
-    if (-not $inVerification) { continue }
-
-    if ($line -match "^\s{2}${targetMode}:\s*$") {
-        $inMode = $true
-        $inConfigCheck = $false
-        continue
-    }
-    if ($line -match "^\s{2}config_check:\s*$") {
-        $inConfigCheck = $true
-        $inMode = $false
-        continue
-    }
-    if (($inMode -or $inConfigCheck) -and $line -match "^\s{2}[a-zA-Z]") {
-        $inMode = $false
-        $inConfigCheck = $false
-    }
-    if ($inMode) {
-        if ($line -match "^\s{4}-\s*name:\s*(.+?)\s*$") {
-            if ($null -ne $currentCommand) {
-                $commands += @{ Name = $currentName; Command = $currentCommand; HostGate = $currentHostGate; AlternativeRunner = $currentAlternativeRunner }
-            }
-            $currentName = Read-InlineScalar -Value $Matches[1]
-            $currentHostGate = ""
-            $currentAlternativeRunner = ""
-            $currentCommand = $null
-        }
-        if ($line -match "^\s{6}host_gate:\s*(.*?)\s*$") { $currentHostGate = Read-InlineScalar -Value $Matches[1] }
-        if ($line -match "^\s{6}alternative_runner:\s*(.*?)\s*$") { $currentAlternativeRunner = Read-InlineScalar -Value $Matches[1] }
-        if ($line -match "^(\s{6})command:\s*(.+?)\s*$") {
-            $keyIndent = $Matches[1].Length
-            $rawVal = $Matches[2].Trim()
-            if ($rawVal -match "^[|>][+-]?\d*$") {
-                $bs = Read-BlockScalar -Lines $lines -HeaderIndex $idx -Indicator $rawVal -KeyIndent $keyIndent
-                $currentCommand = $bs.Value
-                $idx = $bs.NextIndex - 1
-            } else {
-                $currentCommand = Read-InlineScalar -Value $rawVal
-            }
-        }
-    }
-    if ($inConfigCheck) {
-        if ($line -match "^\s{4}name:\s*(.+?)\s*$") {
-            $configCheckName = Read-InlineScalar -Value $Matches[1]
-        }
-        if ($line -match "^(\s{4})command:\s*(.+?)\s*$") {
-            $keyIndent = $Matches[1].Length
-            $rawVal = $Matches[2].Trim()
-            if ($rawVal -match "^[|>][+-]?\d*$") {
-                $bs = Read-BlockScalar -Lines $lines -HeaderIndex $idx -Indicator $rawVal -KeyIndent $keyIndent
-                $configCheckCommand = $bs.Value
-                $idx = $bs.NextIndex - 1
-            } else {
-                $configCheckCommand = Read-InlineScalar -Value $rawVal
-            }
-        }
-    }
-}
-
-if ($null -ne $currentCommand) {
-    $commands += @{ Name = $currentName; Command = $currentCommand; HostGate = $currentHostGate; AlternativeRunner = $currentAlternativeRunner }
-}
-
-if ($targetMode -eq "full" -and $configCheckName -and $configCheckCommand) {
-    $commands += @{
-        Name = $configCheckName
-        Command = $configCheckCommand
-    }
-}
+# A not-run line clears only when its own check executes, so a quick run or an early failure
+# keeps a skip that a full run or another step recorded. Item 258.
+$sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot -Content $configContent
 
 
 function Invoke-Check {
@@ -240,9 +126,14 @@ function Invoke-Check {
     )
     Write-Host ("==> {0}" -f $Name)
     # Execute the string as a command line
+    $global:LASTEXITCODE = 0
     Invoke-Expression $CommandString
-    Write-Host ("    exit code: {0}" -f $LASTEXITCODE)
-    if ($LASTEXITCODE -ne 0) {
+    $checkExit = $LASTEXITCODE
+    # A nonzero command exit is still an executed check. A launch/parse error throws
+    # above, retaining its previous skip instead of claiming that it ran.
+    Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $Name
+    Write-Host ("    exit code: {0}" -f $checkExit)
+    if ($checkExit -ne 0) {
         # Emit a stable stdout marker before throwing. The orchestrator parses this line
         # to name the failing check; child-process error rendering differs across
         # hosts, so relying on
@@ -288,7 +179,7 @@ function Get-HostGateReason {
 # costs a review strike. Scan only the files this task changed, so the gate stays fast
 # and never flags pre-existing debt. Determine the branch fork point to diff against.
 # Keep the encoding baseline aligned with the scope check. Item 225.
-$defaultBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $worktree
+$defaultBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $worktree -Content $configContent
 $mergeBaseRes = Invoke-Git -Directory $worktree merge-base HEAD $defaultBranch
 if ($mergeBaseRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($mergeBaseRes.Raw)) {
     throw "Could not determine encoding baseline against '$defaultBranch'."
@@ -320,10 +211,15 @@ $mojibakeScript = Join-Path $PSScriptRoot "gates/check-mojibake.ps1"
 if (-not (Test-Path -LiteralPath $mojibakeScript)) {
     $mojibakeScript = Join-Path $PSScriptRoot "tests/check-mojibake.ps1"
 }
-if ($scanFiles.Count -gt 0 -and (Test-Path -LiteralPath $mojibakeScript)) {
-    $host_exe = (Get-Process -Id $PID).Path
+if ($scanFiles.Count -gt 0 -and -not (Test-Path -LiteralPath $mojibakeScript)) {
+    Write-Host "NOT RUN: Encoding guard (BOM/mojibake) - check-mojibake.ps1 not found" -ForegroundColor Yellow
+    Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Encoding guard (BOM/mojibake)" -Reason ("check-mojibake.ps1 not found at " + $mojibakeScript)
+} elseif ($scanFiles.Count -gt 0) {
+    $host_exe = Get-RunningPowerShellCommand
     & $host_exe -NoProfile -ExecutionPolicy Bypass -File $mojibakeScript @scanFiles
-    if ($LASTEXITCODE -ne 0) {
+    $mojibakeExit = $LASTEXITCODE
+    Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Encoding guard (BOM/mojibake)"
+    if ($mojibakeExit -ne 0) {
         Write-Host "Check failed: Encoding guard (BOM/mojibake)"
         throw "Check failed: Encoding guard (BOM/mojibake)"
     }
@@ -412,9 +308,10 @@ function Get-GitHookToolPath {
 # before the Human Gate so acceptance includes its checks. Item 172.
 function Invoke-ProjectPrePushHook {
     . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/checks-not-run.ps1")
     $checkName = "Project pre-push hook"
     try {
-        $hooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot
+        $hooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot -Content $configContent
     } catch {
         Write-Host ("hooks.project_dir is unusable, so the project's pre-push hook cannot run: " + $_.Exception.Message)
         Write-Host ("Check failed: {0}" -f $checkName)
@@ -440,7 +337,7 @@ function Invoke-ProjectPrePushHook {
     $psi = [System.Diagnostics.ProcessStartInfo]::new($interpreter)
     $psi.ArgumentList.Add($hook)
     foreach ($a in $hookArgs) { $psi.ArgumentList.Add($a) }
-    $psi.WorkingDirectory = $worktree
+    $psi.WorkingDirectory = Resolve-FilesystemPath -Path $worktree
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true
     $psi.Environment["CRUCIBLE_PRE_PUSH_PREFLIGHT"] = "1"
@@ -453,6 +350,7 @@ function Invoke-ProjectPrePushHook {
     $proc.WaitForExit()
     $hookExit = $proc.ExitCode
     $proc.Dispose()
+    Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $checkName
     if ($hookExit -ne 0) {
         Write-Host ("The project's pre-push hook exits {0} on task/{1}, so the push after the Human Gate would be refused." -f $hookExit, $TaskId)
         Write-Host ("Check failed: {0}" -f $checkName)
@@ -460,15 +358,18 @@ function Invoke-ProjectPrePushHook {
     }
 }
 
+# An empty mode cannot verify anything: record the unavailable check and refuse.
+$modeCheck = "verification." + $targetMode + " checks"
 if ($commands.Count -eq 0) {
-    Write-Host "No commands found for verification mode '${targetMode}'. Skipping checks." -ForegroundColor Yellow
+    Write-Host "NOT RUN: No commands found for verification mode '${targetMode}'." -ForegroundColor Yellow
+    Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $modeCheck -Reason ("config.yaml configures no verification." + $targetMode + " checks, so none ran")
+    throw "config.yaml configures no verification.$targetMode checks; configure checks before running this mode."
+} else {
+    Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $modeCheck
 }
 
 Push-Location $worktree
 try {
-    $sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $ProjectRoot
-    $notRunFile = Join-Path $sessionRoot "$TaskId/verification/checks-not-run.txt"
-    if (Test-Path -LiteralPath $notRunFile) { Remove-Item -LiteralPath $notRunFile -Force }
     foreach ($cmd in $commands) {
         $reason = Get-HostGateReason -Condition $cmd.HostGate
         if ($null -ne $reason -and -not [string]::IsNullOrWhiteSpace($cmd.AlternativeRunner)) {
@@ -476,9 +377,7 @@ try {
             Invoke-Check -Name $cmd.Name -CommandString $cmd.AlternativeRunner
         } elseif ($null -ne $reason) {
             Write-Host ("NOT RUN: {0} - {1}" -f $cmd.Name, $reason) -ForegroundColor Yellow
-            $notRunDir = Split-Path -Parent $notRunFile
-            New-Item -ItemType Directory -Path $notRunDir -Force | Out-Null
-            [System.IO.File]::AppendAllText($notRunFile, ("{0}: {1}`n" -f $cmd.Name, $reason), [System.Text.UTF8Encoding]::new($false))
+            Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $cmd.Name -Reason $reason
         } else {
             Invoke-Check -Name $cmd.Name -CommandString $cmd.Command
         }
@@ -490,8 +389,26 @@ try {
 if ($null -ne $commitWorktree) {
     if ($targetMode -eq "full") {
         Write-Host "The project pre-push hook checks a branch push, so it does not run for -Commit."
+        try {
+            $commitHooksDir = Get-ConfiguredProjectHooksDir -ProjectRoot $ProjectRoot -Content $configContent
+        } catch {
+            $commitHooksDir = ""
+            Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Project pre-push hook" -Reason ("hooks.project_dir is unusable: " + $_.Exception.Message)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($commitHooksDir)) {
+            $commitHook = Join-Path (Join-Path $worktree ([System.IO.Path]::GetRelativePath($ProjectRoot, $commitHooksDir))) "pre-push"
+            if (Test-Path -LiteralPath $commitHook -PathType Leaf) {
+                Write-CheckNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check "Project pre-push hook" -Reason "-Commit runs the checks in a detached worktree and the hook checks a branch push"
+            }
+        }
     }
     Remove-CommitWorktree
 } elseif ($targetMode -eq "full") {
     Invoke-ProjectPrePushHook
+}
+
+$recordedNotRun = @(Get-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId)
+if ($recordedNotRun.Count -gt 0) {
+    Write-Host ("Checks not run for {0}, recorded in {1}. They are not passes:" -f $TaskId, (Get-ChecksNotRunPath -SessionDir $sessionRoot -TaskId $TaskId)) -ForegroundColor Yellow
+    foreach ($line in $recordedNotRun) { Write-Host ("  - " + $line) -ForegroundColor Yellow }
 }

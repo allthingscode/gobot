@@ -99,10 +99,12 @@ The concrete model each tier maps to lives in `config.yaml` under `models:` (see
 
 | Target | `strong` | `default` | `light` |
 |---|---|---|---|
-| `claude` (and `agent`) | claude-opus-5-5 at high | claude-sonnet-5-5 at medium | claude-haiku-5-5 at high |
-| `codex` | gpt-6.1-sol at high | gpt-6.1-sol at low | gpt-6-luna at high |
+| `claude` (and `agent`) | claude-opus-5-5 at medium | claude-sonnet-5-5 at high | claude-haiku-5-5 at high |
+| `codex` | gpt-6.1-sol at high | gpt-6.1-terra at high | gpt-6-luna at high |
 | `antigravity` | Gemini 3.1 Pro (High) | Gemini 3.8 Flash (High) | Gemini 3.8 Flash (Medium) |
 | `grok` | inherit | inherit | inherit |
+
+The Claude `crucible-researcher` agent has its own `researcher` level, claude-opus-5-5 at high, so lowering `strong` does not lower research.
 
 For Codex and Claude a tier is a **level**: a model and a reasoning effort taken together, resolved as one pair by `Get-ModelLevel` (`Get-CodexLevel`, `Get-ClaudeLevel`) and printed as `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`. A level is changed as a pair under `models.targets.<target>.<tier>` (`model:` and `effort:`), never one half alone. A Claude orchestrator dispatches the generated `crucible-<tier>` agent definition, which pins the model ID and effort (Item 213). Other targets have no effort setting, so their tiers are a model alone.
 
@@ -226,7 +228,149 @@ In addition to circuit breakers, `crucible.ps1` enforces runtime validation gate
 - **Backlog Integrity**: On a `grooming` or `deployment` handoff, `crucible.ps1` runs `validate-backlog.ps1` against the project's backlog. A non-zero exit blocks the handoff (exit 2) with "YOU must fix BACKLOG.md before proceeding."
 - **Dev Log Integrity**: On a `deployment` handoff whose target is not `implementation`, and which is not the task's bootstrap handoff, a file must exist at `.crucible/dev-logs/UNPUBLISHED_LOGS.md` and pass `validate-dev-log.ps1`. A missing file or a failed PII/secret scan blocks the handoff (exit 2).
 - **Workspace Cleanliness**: Same trigger as Dev Log Integrity. Any untracked or uncommitted path outside `.crucible/`, `.agent-workspaces/`, `.gemini/`, `.antigravitycli/`, `.vscode/`, and `vendor/` blocks the handoff (exit 2).
-- **Commit-message encoding** (`commit-msg`, adopters included): `check-mojibake.ps1 -MessageFile` on the message being written. A UTF-8 BOM becomes the first character of the subject and is unfixable once pushed. The check needs no staged tree and runs ahead of both the adopter short-circuit and the merge short-circuit.
+- **Commit-message encoding** (`commit-msg`, adopters included): `check-mojibake.ps1 -MessageFile <message-file>` on the message being written. A UTF-8 BOM becomes the first character of the subject and is unfixable once pushed. The check needs no staged tree and runs ahead of both the adopter short-circuit and the merge short-circuit.
 - **Assertion-Deletion Gate** (framework repo only; the gate is not part of a bundle and an adopter's hooks do not run it): `check-assertion-deletion.ps1` diffs test files (`*.tests.ps1`) for dropped `Assert-Result` calls, and runs at two points. At `commit-msg` it reads the index and refuses the commit unless the message being written carries a non-empty `Assertions-Removed: <reason>` trailer; merge commits skip this leg, because a merge's first-parent diff restates the merged branch. At `pre-push` it walks every commit in the push range and charges a commit for a name dropped against every parent of that commit, so a merge is charged for a removal that appears on neither parent and not for work already on a parent. The commit-msg leg is where the trailer is a one-line edit for ordinary commits; the pre-push leg is the backstop for removals that reached the range without one.
 
 The Baseline Cleanliness Probe at task start is advisory and does not block. There is no Task Dependency Gate.
+
+## 8. Pipeline Invariants
+
+The state machine in section 5 says which transitions are legal. This section says what
+must be true of the repository, the backlog and the session state across every transition,
+whichever path reaches it. Each invariant is enforced at one place, named in the table, and a
+change that would make it conditional on the path taken is a defect, not a design choice.
+
+A fix that restores one of these is not finished until the invariant is checked where the
+state changes, not where the bug was seen. A new gate or a new path through an existing
+gate is reviewed against this list before it merges.
+
+| # | Invariant | Enforced where | Record |
+|---|---|---|---|
+| I1 | What is tested is what merges. The independent checks refuse a task worktree with uncommitted changes, so the merge ships exactly the tree the checks ran on. | verification -> deployment checks, breaker `uncommitted_task_worktree` | item 221 |
+| I2 | Nothing deletes uncommitted task work. Cleanup leaves a dirty or locked worktree in place and names its files. `--force` is never the normal path. | `Test-GitDiscardSafe` in `lib/git.ps1`, before discard or before starting an abortable operation; `powershell/tests/git-discard-guard.tests.ps1` (the framework repo's own guard test) enforces calls and reasoned allowances that fail when stale | items 179, 221, 253 |
+| I3 | A task is marked terminal only after the action that makes it terminal has succeeded. Finalization and archival run after a successful merge and before any push; a merge that reworks, blocks or fails leaves the row and spec unchanged. | human gate accept | item 222 |
+| I4 | Every handoff that reaches a gate was selected and bound to the task once, through the one reader. Recovery, relocation or repair of a handoff file happens before that reader, never after. | handoff preflight, `Restore-MisplacedHandoff` | items 185, 223 |
+| I5 | One writer per shared file. A lock is held as an exclusive handle for the whole write and released by closing it; no waiter deletes another holder's lock. | `Open-FileLockHandle` in `lib/file-lock.ps1`, the one opener of the DeleteOnClose lock handle, used by the backlog, event-log, checks-not-run and session-state locks; it refuses Linux and macOS runtimes below .NET 7, which lack the check that the lock still owns its path | items 224, 260, 263 |
+| I6 | Branch, path and directory names come from configuration, never from a built-in list of likely values, and a check that cannot read its input fails closed. | `scripts/crucible_lint.go` (the framework repo's lint, run by its pre-commit hook and CI): `lintConfiguredInputs` over runtime PowerShell, with reasoned allowances that fail when stale | item 244 |
+| I7 | A decision is persisted before the action it authorizes runs, so every path that performs the action sees the same recorded decision. | `Write-HumanGateDecision`, called before dispatch by both Human Gate inputs, writes the record whole or not at all and hands its path to the dispatch; `Invoke-HumanGateMerge` removes exactly that record when a merge does not complete, and refuses when it is absent | items 226, 242, 251, 265, 266, 267 |
+| I8 | An identifier matches exactly or not at all. A lookup by task ID matches the ID cell, not a substring of the row, and a missing row is refused rather than approximated. | `Test-BacklogTaskRow` in `lib/backlog-io.ps1`, the one row matcher that finalization, archival, restore, rejection, status lookup and the premature-status gate call; findings lookup uses `Get-ResearchFindingsArtifact` through the existing `Get-BacklogSpecFiles` filename reader; second readers fail I13's guard | items 227, 245, 250, 257 |
+| I9 | A required header or marker counts only in the position the contract names. An example or quotation elsewhere in the document cannot satisfy it. | review header check | item 228 |
+| I10 | The first write to a missing state file persists exactly as a write to an existing one would. The missing-file branch builds the same object shape deserialization gives. | session state writer | item 234 |
+| I11 | A gate refusal is unconditional. No caller, catch block or configuration can convert a refusal into a pass. | every gate `exit` | item 36 |
+| I12 | A check that did not run is reported as NOT RUN, never as passed, and is listed at the gate that would otherwise accept without it. | `Write-CheckNotRun` in `lib/checks-not-run.ps1`, the one reporting point that the isolated checks, the scope gate (empty `file_affinity`, missing affinity script, unreadable research scope) and the integrity gate (no task baseline) write through; a writer replaces only its own check's line, under the task's lock, and a line clears only when that check runs or a human retires it with `retire-check-not-run.ps1` (`Move-CheckNotRunToRetired`, which moves it to the task's retired history with a reason and refuses a missing line or a stock-phrase reason). `Get-ChecksNotRun` feeds the Reviewer prompt, the isolated checks' closing list and the Human Gate menu; the menu also shows the retired history | items 239, 258, 259 |
+| I13 | Each persisted format has one owning reader: BACKLOG.md rows by task ID, spec filenames, research findings artifacts, spec frontmatter fields, the handoff schema, artifact paths, the verification checks block, the project root, the configured `crucible_root`, the bundle directory resolved from it (an absolute value as is, a relative one under the project root; `Resolve-CrucibleBundleRoot`) the checks-not-run record and its retired history. A second reader calls the owner instead of parsing the format again. The same table owns general path resolution (`Resolve-PathFromRoot`, rooted values verbatim, relative values joined to the root; the bundle resolver specializes it), filesystem qualification (`Resolve-FilesystemPath`, qualifying provider-dependent inputs through the current PowerShell filesystem drive, including missing paths; audited existing FileSystem `Resolve-Path` results may expose `PathInfo.ProviderPath` through reasoned allowances), path containment (`Test-PathWithinDirectory`, full paths at a separator boundary) and contained-path relativization (`Get-PathRelativeToDirectory`, slicing the same normalized paths, preserving suffix case and trailing separators). Containment and relativization require absolute inputs; a bare prefix cannot count a sibling such as `backlog2` as inside `backlog`. | the owners table in `powershell/tests/format-owners.tests.ps1` (the framework repo's own guard test, not shipped), which fails on a format's signature outside its owner, with reasoned allowances that fail when stale | items 245, 247, 257, 301, 302, 304, 305, 328, 329 |
+| I14 | A launch reports one outcome. The Codex launcher decides its STATUS once, from the run's evidence (exit code, transcript tail, the task's pipeline log entries, the final message), and the same record reaches stdout and `codex-launch-status.txt`. A run whose outcome cannot be decided reports LAUNCH_FAILED with the reason, never no STATUS. | `Get-CodexLaunchOutcome` and `Write-CodexLaunchStatus` in `lib/codex-launch-outcome.ps1`; `powershell/tests/codex-launch-outcome.tests.ps1` fails on a STATUS line written anywhere else in the launcher | items 203, 209, 211, 238, 246 |
+| I15 | A command that runtime PowerShell prints for one of Crucible's own scripts is built, not written. It names only parameters the target's param block declares, each with its declared kind (switch or value) and, when the declaration lists accepted values (a literal `[ValidateSet(...)]` or an enum type), a value from that list, a placeholder, or a `<a|b>` choice list of accepted values; it carries the companions a parameter needs (`-ProjectRoot` with `-Init`; `-Effort` with a Codex `-Model` outside `-Preflight`); its path is the bundle the caller names, normally the project's configured `crucible_root`, or the `{crucible_root}` placeholder when the project has no config. Each line is quoted for the shell its surrounding text names. A line an agent is told to run through its Bash tool (`next_step.txt`, the session-end command in `task.md`) is POSIX-quoted and starts `pwsh -NoProfile -ExecutionPolicy Bypass -File`; agent instructions without a prescribed shell (the Codex handoff, the task.md isolated-checks/merge-simulation commands and the research gate continuation's validate and advance lines) explicitly select ShellNeutral and start `pwsh -NoProfile -ExecutionPolicy Bypass -File` with literals shared by Bash and PowerShell; an agent command that carries lists, or values no native line passes intact, is written in the direct form into a generated script, and the agent starts that script with the shell-neutral line `New-CrucibleScriptFileCommand` builds (the research gate handoff, `session/<task-id>/research/gate-handoff.ps1`); advice for readers (stop reports, gate menus, refusals, usage, dispatch and update advice) uses the direct `& '<script>' ...` form in a PowerShell 7+ prompt, with single-quoted literals and doubled single quotes, so no native argument passing is involved; `Start-Process -ArgumentList` gets its own encoding. A value no command line carries prints `# (command unavailable: <reason>)` in place of the command, a comment in both shells: a line break or NUL; an empty value or a leading `-` on the native `-File` transports (Bash, ShellNeutral and ArgumentList); an embedded double quote or whitespace with a trailing backslash on ShellNeutral, which older launching PowerShell hosts cannot pass intact; on ShellNeutral, a single quote with an expansion character, a doubled backslash or a trailing backslash in a value that does not start with a letter, digit, underscore or slash (one that does is written as adjacent quoted segments after that character, which both shells join into one argument); the stop-parsing token `--%` on the direct form; and, on a Bash or ShellNeutral line under Windows, a value Git Bash rewrites as a POSIX path (a leading `/` or `@/`, or `name=/...`). Building a command never stops the surface that prints it or changes its exit. A `-Reference` names a script and parameters in prose, with no path, and only from a reviewed list. A command a shipped Markdown document gives for one of Crucible's scripts, in fenced code, inline code or prose, names a script the bundle ships, only parameters it declares, a value for each parameter that takes one, a literal value only from the parameter's accepted list, and the same companions; a document that breaks a rule on purpose is on a reviewed list that fails when stale. A quoted path placeholder (`"{project_root}"`, `"{{crucible_root}}/..."`) in a rendered prompt or a recovery override takes the path as a literal. The advice the framework's own tests print (an `Assert-Result` failure message, a `Write-Host`, `Write-Output`, `Write-Warning` or `Write-Error` argument, or a `throw` message, as written rather than what a variable or subexpression substitutes into it) binds the same way, and a bare script after "Run" or "Re-sync with" names a script; commands a test plants or runs are not advice. | `New-CrucibleCommand` in `lib/crucible-command.ps1`, which binds against the target's param block; `powershell/tests/printed-commands.tests.ps1` (the framework repo's own guard test, not shipped) fails on a `<script>.ps1 -<Param>` string, interpolation, concatenation, `-f` format or script-carrying variable in runtime PowerShell outside the builder, binds every builder call statically, checks every caller's explicit transport against the audited shell audience, and keeps `-Reference` calls and allowances to reviewed lists that fail when stale; `powershell/tests/documented-commands.tests.ps1` (ships, and runs in an adopter bundle) binds every documented command against the bundle it is in, with `Get-CrucibleScriptParameters`, `Get-CrucibleCommandCompanionProblems` and `Get-CrucibleCommandValueProblems`; `powershell/tests/test-command-advice.tests.ps1` (framework-only) binds the tests' printed advice with the same binder (`_command-binding.ps1`); `Set-CrucibleCommandPathPlaceholder` fills quoted path placeholders | items 125, 126, 207, 208, 218, 219, 247, 272, 275, 290, 291, 320, 364, 365 |
+
+Kinds of enforcement point. The "Enforced where" column names one of two kinds, and a
+row may name both:
+
+- **Runtime owner** - one function the state change goes through: I1, I3, I4, I5, I7,
+  I8, I9, I10, I11 and I12, and the owner function in I2 (`Test-GitDiscardSafe`), I14
+  (`Get-CodexLaunchOutcome`, `Write-CodexLaunchStatus`) and I15 (`New-CrucibleCommand`).
+- **Source-shape guard** - a lint or guard test over the source: I6
+  (`lintConfiguredInputs`) and I13 (the owners table), and the caller half of I2, I14
+  and I15, where a guard test fails on a call that does not go through the owner. These
+  invariants say "no second reader" or "no call outside the owner", which is a property
+  of the source, so a static guard is the only place they can be enforced.
+
+A guard's contract is bounded. It must catch a form whose failure is silent and which can
+be decided from syntax at one site. A silent failure that cannot be decided from syntax is
+enforced at a runtime owner instead. A form whose failure is loud, or that no instance has
+shown, is a known limit: listed in a comment at the top of the guard's own file with the
+instance that showed it, if any, and the event that would reopen it. The rule and its
+reasons are in the framework repository's `CONTRIBUTING.md`, "Where a class stops".
+
+I13 filesystem qualification rule: call `Resolve-FilesystemPath` for general
+provider-dependent inputs, including missing paths, before native IO, git,
+containment or relativization. When an existing-path probe already uses
+`Resolve-Path`, reading its `PathInfo.ProviderPath` is sanctioned: that property
+exposes the FileSystem provider's native path instead of the alias-preserving
+`Path`, without adding a second qualification algorithm or resolving again.
+Keep the probe's literal or wildcard semantics (archival expands SpecPath once).
+This applies only to existing FileSystem results; missing paths and general
+qualification still belong to the shared owner.
+Pass general Resolve-Path results as PathInfo through Resolve-FilesystemPath so
+the provider identity survives until qualification. Reading ProviderPath first
+from an unverified provider can turn its name into an unrelated native filename. `Convert-Path` and provider
+resolution method calls outside that owner still require reasoned guard
+allowances. The guard also detects `.ProviderPath` property reads; each audited
+existing FileSystem result has a reasoned allowance that fails when stale, and
+new reads require review and their own allowance (item 329 cross-review).
+Item 335 adds AST checks for every instance `.Path` read (including assigned,
+array-indexed and multiline resolution results) and for operands reaching a native
+consumer: static calls, constructors, `New-Object` and casts of File, Directory,
+FileStream, StreamReader, StreamWriter, FileInfo and DirectoryInfo (also named
+through `using namespace`); instance `CopyTo`/`MoveTo`; GetFullPath/GetRelativePath;
+`Parser::ParseFile`; git's global `-C`, `--git-dir` and `--work-tree` (any quoting,
+`git.exe`, literal `Invoke-Git` argv) and `worktree add|remove|move|lock|unlock|repair`
+paths; Codex `-C`, `--cd`, `--add-dir` and output paths; a child `pwsh` or
+`powershell` (by name, `Get-PwshCommand`, or a variable host given `-File` or
+`-NoProfile`) `-File` value and parameters named `*Root`, `*Path`, `*Dir`,
+`*Directory`, `*File`, `*Folder` or `*Worktree`; `WorkingDirectory` assignments,
+hashtable keys and `Start-Process -WorkingDirectory`; splatted argv to those
+commands (except git pathspecs after `--`); and PathInfo text conversions
+(`Select-Object -ExpandProperty Path`, `ForEach-Object Path`, `[string]`,
+interpolation, `ToString()`, `+`, `-f`, `-join`). An operand is qualified only when
+it is itself a `Resolve-FilesystemPath` call, or a variable every binding of which
+is an assignment through the owner, with a top-level such assignment that runs
+before the use. Bindings are indexed by bare name, so `$script:x`, `$global:x`,
+`$local:x`, `$private:x` and `$variable:x` all bind `$x`. The bindings checked are
+those in the enclosing function (or, with none there, at script level) plus every
+`script:`/`global:` write anywhere in the file. These bindings never qualify:
+`Set-Variable`/`sv` literal names (named or positional, single or a list), each read
+as a PowerShell wildcard pattern (escapes included, a malformed pattern matching
+every name) and also as its written and unescaped spellings; `New-Variable`/`nv` literal names; and
+literal `-OutVariable`/`-ov` or `-PipelineVariable`/`-pv` names (`+` appends
+included), except on the native executables named above when the file declares no
+function or alias of that name (by `function`, `Set-Alias`/`New-Alias` or an
+`[Alias()]` on a function; a computed alias name counts as every name). A `-Scope`
+other than `local`, `private` or `0` counts as an outer-scope write. Parameters
+require that same preceding assignment; foreach bindings do not qualify. Within a
+block "before" is source order; across a function's `begin`, `process` and `end`
+blocks it is that run order. A use in `clean` is preceded only by `clean`'s own
+earlier assignments, because `clean` also runs after a terminating error.
+A call nested inside the operand does not count. A line allowance must explain a
+native producer, a validated full-input contract or a display/provider-only use, and
+fails when stale.
+
+Guard limits, covered by source audit rather than the guard (it is not an
+interprocedural taint analysis): values carried by function results, parameters,
+properties, hashtables or argv arrays built in variables (for example
+`Resolve-ImplementationWorktreePath` output or the launcher's Codex argv builder);
+commands named dynamically (`& $git`, `Invoke-Expression`, a variable host without
+`-File` or `-NoProfile`) and in-process script calls; types named dynamically
+(`New-Object $type`, `$type::Method`, `-as`) and C# compiled by Add-Type; process
+argument strings and file names (`Arguments`, `ArgumentList`, `FileName`,
+`Start-Process -ArgumentList`); other git path operands (`clone`, `init`,
+`config core.hooksPath`); child parameters whose names end in no path word; and
+other PathInfo conversions (for example `Out-String`).
+Binding analysis is lexical and conservative, not a simulation of PowerShell's
+dynamic scopes or control flow. Known limits (item 395; canonical list at the top of the
+framework repo's own `powershell/tests/format-owners.tests.ps1`): bindings whose name is
+computed or splatted (`Set-Variable -Name $n`, `-OutVariable $n`; item 386); other
+binding forms (`-ErrorVariable`, `-WarningVariable`, `-InformationVariable`,
+variable-provider cmdlets such as `Set-Item variable:x`, `(Get-Variable x).Value`,
+`[ref]` arguments, `PSVariable` APIs; item 387); writes made by a dot-sourced file
+(item 388); a `git`, `codex`, `pwsh` or `powershell` function or alias defined in
+another file or through the `alias:`/`function:` drives, which keeps the native exemption
+(items 385 and 392); run-order credit for a
+`process` block that runs zero times or a `begin` that returns early (item 389); and
+a caller's local binding read by a callee through dynamic scope (item 390). Known
+false positives, also listed there: `-ov`/`-pv`-shaped arguments of other native
+executables still count as bindings (item 384), and `Set-Variable -Include`/`-Exclude`
+filters are ignored (item 383). By design, nested scriptblocks count as their
+enclosing function, an assignment in `dynamicparam` never precedes a use in another
+block, and outer-scope writes are merged even where a local binding would shadow them
+at runtime, which can only add findings. These limits require source review.
+How the list is used:
+
+- When a defect is filed, name the invariant it violates. If none fits, that is either a
+  new invariant to add here or a defect of a different class. Either way, say which.
+- When a fix lands, the regression test exercises the invariant at its enforcement point
+  with the path the defect took. A test that pins only the symptom is not a regression for
+  the invariant.
+- When a change adds a path that reaches an enforcement point, the author lists which
+  invariants the new path is covered by and the Reviewer checks it.
+- The list grows only by filed defect or by design. It does not grow by restating
+  implementation detail.

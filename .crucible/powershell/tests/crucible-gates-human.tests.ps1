@@ -11,6 +11,16 @@ $pwshCmd = Get-PwshCommand
 
 $results = @()
 
+function Write-FinalizedBacklogFixture {
+    param([Parameter(Mandatory=$true)][string]$ProjectRoot, [Parameter(Mandatory=$true)][string]$TaskId)
+    # A finalized task: an exact Production row and its archived spec. A missing BACKLOG.md now refuses (item 287).
+    $dir = Join-Path $ProjectRoot ".crucible/backlog"
+    $archived = Join-Path $dir "features/archived"
+    New-Item -ItemType Directory -Path $archived -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $archived ($TaskId + "_fixture.md")), "---`nitem_id: `"$TaskId`"`ntype: feature`nstatus: `"Production`"`n---`n# $TaskId`n", [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Join-Path $dir "BACKLOG.md"), "| ID | Priority | Status | Title | Specialist |`n|---|---|---|---|---|`n| [$TaskId](features/archived/${TaskId}_fixture.md) | P2 | Production | Fixture | Operator |`n", [System.Text.UTF8Encoding]::new($false))
+}
+
 function Write-TestHandoff {
     param(
         [Parameter(Mandatory=$true)][string]$Path,
@@ -176,7 +186,7 @@ if (`$verb -eq "run view") {
 exit 1
 "@ -replace "`r`n", "`n") | Set-Content -LiteralPath $impl -Encoding ASCII
 
-    $hostCmd = (Get-PwshCommand)
+    $hostCmd = Get-RunningPowerShellCommand
     if (Test-PlatformIsWindows) {
         $path = Join-Path $Dir "gh.cmd"
         @(
@@ -267,7 +277,8 @@ function Invoke-CiGateCase {
     param(
         [Parameter(Mandatory=$true)]$Case,
         [Parameter(Mandatory=$true)][string]$TaskId,
-        [switch]$OmitLogFile
+        [switch]$OmitLogFile,
+        [string]$PwshDecoyDir = ""
     )
     $scriptPath = Join-Path (Split-Path -Parent $Case.LocalRepo) ("run-" + $TaskId + ".ps1")
     $libPath = $CRUCIBLE_LIB.Replace("'", "''")
@@ -285,10 +296,16 @@ function Invoke-CiGateCase {
 "@
     }
 
+    $decoySetup = if ($PwshDecoyDir) {
+        "`$env:PATH = '" + $PwshDecoyDir.Replace("'", "''") + "' + [IO.Path]::PathSeparator + `$env:PATH"
+    } else { '' }
+    Write-FinalizedBacklogFixture -ProjectRoot $Case.LocalRepo -TaskId $TaskId
     $scriptContent = @"
 `$ErrorActionPreference = "Stop"
+`$PSStyle.OutputRendering = 'PlainText'
 `$Quiet = `$true
 . '$libPath'
+$decoySetup
 $logSetup
 `$ctx = @{
     IsBootstrap = `$false
@@ -318,7 +335,7 @@ try {
 }
 "@
     $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+    $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-RunningPowerShellCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
     return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
         Output = ($outputLines -join "`n")
@@ -331,7 +348,7 @@ try {
         $caseRoot = Join-Path $tempRoot "fake-gh-flags"
         $binDir = Join-Path $caseRoot "bin"
         $ghPath = New-FakeGhForGate -Dir $binDir -Mode "green"
-        $out = & $ghPath api --hostname ghe.example.com repos/o/r/actions/workflows
+        $out = Invoke-ExternalCommand -AsLines { & $ghPath api --hostname ghe.example.com repos/o/r/actions/workflows }
         Assert-Result -Name "fake gh api exit code with preceding flag" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected exit code 0, got $LASTEXITCODE. Output:`n$out")
         Assert-Result -Name "fake gh api output matches workflows with preceding flag" -Condition ($out -match "workflows") -FailureMessage ("expected output matching 'workflows', got:`n$out")
     }
@@ -375,16 +392,18 @@ try {
         $script:backlogDir = Join-Path $localRepo ".crucible/backlog"
         $script:FRAMEWORK_POWERSHELL = Split-Path -Parent $CRUCIBLE_LIB
         New-Item -ItemType Directory -Path (Split-Path -Parent $script:LOG_FILE), (Split-Path -Parent $script:CB_HISTORY_FILE), $script:backlogDir -Force | Out-Null
+        $script:BreakerDecisionRecord = Join-Path $caseRoot "F-HUM-BREAK-20260101T000000Z.json"
+        '{"task_id":"F-HUM-BREAK","outcome":"accepted"}' | Set-Content -LiteralPath $script:BreakerDecisionRecord -Encoding UTF8
 
         $script:HumanGateMergeBreakerResult = $null
         $previous = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
             Push-Location $localRepo
-            $outputLines = @(& {
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & {
                 $script:HumanGateMergeBreakerResult = Invoke-HumanGateMerge -TaskId "F-HUM-BREAK" -PrimaryBranch "master" -ProjectRoot $localRepo -Handoff $null -MaxRebaseAttempts 0 `
-                    -LogFile $script:LOG_FILE -CircuitBreakerHistoryFile $script:CB_HISTORY_FILE
-            } 6>&1)
+                    -LogFile $script:LOG_FILE -CircuitBreakerHistoryFile $script:CB_HISTORY_FILE -DecisionRecordPath $script:BreakerDecisionRecord
+            } 6>&1 })
         } finally {
             Pop-Location
             $ErrorActionPreference = $previous
@@ -433,12 +452,12 @@ try {
         "feature work" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
         git -C $localRepo add feature.md 2>$null | Out-Null
         git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
-        $featureSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $featureSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         git -C $localRepo checkout master 2>$null | Out-Null
         git -C $localRepo merge --no-edit task/F-999 2>$null | Out-Null
 
-        $localCommits = @(git -C $localRepo log origin/master..master --oneline)
+        $localCommits = @(Invoke-ExternalCommand -AsLines { git -C $localRepo log origin/master..master --oneline })
         Assert-Result -Name "D22: local master ahead of origin before gate" -Condition ($localCommits.Count -gt 0) -FailureMessage "expected local master to be ahead of origin"
 
         # 3. Setup context structure
@@ -478,6 +497,7 @@ review:
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
 
         # Test Case 1: Accepted outcome -> should push changes to origin
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-999'
         $scriptContentAccept = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -513,12 +533,12 @@ try {
 "@
         $scriptContentAccept | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
         Assert-Result -Name "D22: human gate accepted exits successfully" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
 
-        $behindCommits = @(git -C $localRepo log origin/master..master --oneline)
+        $behindCommits = @(Invoke-ExternalCommand -AsLines { git -C $localRepo log origin/master..master --oneline })
         Assert-Result -Name "D22: git push succeeded on accept" -Condition ($behindCommits.Count -eq 0) -FailureMessage "origin/master is still behind master after acceptance"
 
         # Test Case 2: Rejected outcome -> should unwind local merge and restore task branch
@@ -529,7 +549,7 @@ try {
         git -C $localRepo branch task/F-999 $featureSha 2>$null | Out-Null
         git -C $localRepo merge --no-edit task/F-999 2>$null | Out-Null
 
-        $behindCommits2 = @(git -C $localRepo log origin/master..master --oneline)
+        $behindCommits2 = @(Invoke-ExternalCommand -AsLines { git -C $localRepo log origin/master..master --oneline })
         Assert-Result -Name "D22: local master ahead before reject" -Condition ($behindCommits2.Count -gt 0) -FailureMessage "expected master to be ahead again"
 
         git -C $localRepo branch -D task/F-999 2>$null | Out-Null
@@ -567,14 +587,19 @@ try {
     Pop-Location
 }
 "@
+        # Rejection's rework dispatch requires an exact backlog row (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        "| ID | Priority | Status | Title | Specialist |`n|---|---|---|---|---|`n| [F-999](features/archived/F-999_fixture.md) | P2 | Production | Rework | Architect |" |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
         $scriptContentReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines2 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines2 = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode2 = $LASTEXITCODE
         $output2 = $outputLines2 -join "`n"
         Assert-Result -Name "D22: human gate rejected exits successfully" -Condition ($exitCode2 -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode2 + ". Output: " + $output2)
 
-        $behindCommits3 = @(git -C $localRepo log origin/master..master --oneline)
+        $behindCommits3 = @(Invoke-ExternalCommand -AsLines { git -C $localRepo log origin/master..master --oneline })
         Assert-Result -Name "D22: local merge was unwound on reject" -Condition ($behindCommits3.Count -eq 0) -FailureMessage "master is still ahead of origin/master after reject"
 
         git -C $localRepo show-ref --quiet refs/heads/task/F-999
@@ -648,6 +673,7 @@ review:
 
         # Test Case 1: Accept with no-op push
         Reset-PendingFiles
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-100'
         $scriptAcceptNoOp = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -681,7 +707,7 @@ try {
 }
 "@
         $scriptAcceptNoOp | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
 
@@ -724,7 +750,7 @@ try {
 }
 "@
         $scriptRedirectNoOp | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
 
@@ -739,6 +765,7 @@ try {
         git -C $localRepo commit -m "second commit" 2>$null | Out-Null
 
         Reset-PendingFiles
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-100'
         $scriptRealPush = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -772,7 +799,7 @@ try {
 }
 "@
         $scriptRealPush | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
 
@@ -781,12 +808,13 @@ try {
         Assert-Result -Name "D37: real push pending file removed" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "new pending file still exists"
 
         # Verify remote origin now matches local master
-        $behindCommits = @(git -C $localRepo log origin/master..master --oneline)
+        $behindCommits = @(Invoke-ExternalCommand -AsLines { git -C $localRepo log origin/master..master --oneline })
         Assert-Result -Name "D37: push landed on origin" -Condition ($behindCommits.Count -eq 0) -FailureMessage "origin/master did not catch up"
 
         # Test Case 4: Failing push (invalid remote / remote ref)
         git -C $localRepo remote set-url origin "https://example.invalid/repo.git"
         Reset-PendingFiles
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-100'
         $scriptFailedPush = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -820,7 +848,7 @@ try {
 }
 "@
         $scriptFailedPush | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
 
@@ -840,6 +868,12 @@ try {
         git -C $localRepo commit -m "rework commit" 2>$null | Out-Null
         git -C $localRepo checkout master 2>$null | Out-Null
         git -C $localRepo merge --no-edit task/F-100 2>$null | Out-Null
+
+        # Rejection's rework dispatch requires an exact backlog row (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        "| ID | Priority | Status | Title | Specialist |`n|---|---|---|---|---|`n| [F-100](features/archived/F-100_fixture.md) | P2 | Production | Rework | Architect |" |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
 
         # Remove task branch first to test restoration
         git -C $localRepo branch -D task/F-100 2>$null | Out-Null
@@ -878,7 +912,7 @@ try {
 }
 "@
         $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
 
@@ -913,7 +947,7 @@ try {
         "unrelated" | Set-Content -LiteralPath (Join-Path $localRepo "unrelated.md") -Encoding UTF8
         git -C $localRepo add unrelated.md 2>$null | Out-Null
         git -C $localRepo commit -m "unrelated commit" 2>$null | Out-Null
-        $unrelatedHash = (git -C $localRepo rev-parse HEAD).Trim()
+        $unrelatedHash = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # Create and commit on a task branch
         git -C $localRepo checkout -b task/F-998 origin/master 2>$null | Out-Null
@@ -932,6 +966,12 @@ try {
         New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
 
         # Run unwind human gate rejected
+        # A permitted rejection needs a restorable task before any unwind (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        '| F-998 | P2 | In Progress | Rework | Architect |' |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
+
         $scriptPath = Join-Path $caseRoot "run-d22-followup.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
         $scriptReject = @"
@@ -964,10 +1004,10 @@ finally {
 }
 "@
         $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $null = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
 
         # Check that master head has been reset back to $unrelatedHash, NOT origin/master!
-        $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
+        $currentHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
         Assert-Result -Name "D22 follow-up: master reset back to unrelated commit" -Condition ($currentHead -eq $unrelatedHash) -FailureMessage "expected master HEAD to be $unrelatedHash, got $currentHead"
     }
 
@@ -994,7 +1034,7 @@ finally {
         "unrelated content" | Set-Content -LiteralPath (Join-Path $localRepo "unrelated.md") -Encoding UTF8
         git -C $localRepo add unrelated.md 2>$null | Out-Null
         git -C $localRepo commit -m "unrelated commit" 2>$null | Out-Null
-        $unrelatedHash = (git -C $localRepo rev-parse HEAD).Trim()
+        $unrelatedHash = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # Create task branch from the unrelated commit (since it is rebased/based on master)
         git -C $localRepo checkout -b task/F-997 2>$null | Out-Null
@@ -1007,8 +1047,8 @@ finally {
         git -C $localRepo merge task/F-997 2>$null | Out-Null
 
         # Verify it was indeed a fast-forward (no merge commit with 2 parents)
-        $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
-        $parents = (git -C $localRepo log --pretty=%P -n 1 $currentHead).Trim()
+        $currentHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
+        $parents = (Invoke-ExternalCommand -AsLines { git -C $localRepo log --pretty=%P -n 1 $currentHead }).Trim()
         $parentList = @(if ([string]::IsNullOrWhiteSpace($parents)) { } else { $parents -split '\s+' })
         Assert-Result -Name "D52: verify merge was fast-forward" -Condition ($parentList.Count -lt 2) -FailureMessage "expected fast-forward merge (1 parent), but got merge commit"
 
@@ -1019,6 +1059,12 @@ finally {
         New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
 
         # Run unwind human gate rejected
+        # A permitted rejection needs a restorable task before any unwind (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        '| F-997 | P2 | In Progress | Rework | Architect |' |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
+
         $scriptPath = Join-Path $caseRoot "run-d52-unwind.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
         $scriptReject = @"
@@ -1051,10 +1097,10 @@ finally {
 }
 "@
         $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $null = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
 
         # Check that master HEAD has been reset back to $unrelatedHash, preserving the unrelated commit!
-        $currentHead = (git -C $localRepo rev-parse HEAD).Trim()
+        $currentHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
         Assert-Result -Name "D52: master reset back to unrelated commit after FF merge rejection" -Condition ($currentHead -eq $unrelatedHash) -FailureMessage "expected master HEAD to be $unrelatedHash, got $currentHead"
     }
 
@@ -1071,14 +1117,14 @@ finally {
         "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
         git -C $localRepo add README.md 2>$null | Out-Null
         git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
-        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $baseSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # Create task branch
         git -C $localRepo checkout -b task/F-888 2>$null | Out-Null
         "changes" | Set-Content -LiteralPath (Join-Path $localRepo "file.txt") -Encoding UTF8
         git -C $localRepo add file.txt 2>$null | Out-Null
         git -C $localRepo commit -m "commit on task branch" 2>$null | Out-Null
-        $branchSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $branchSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # Set up human gate decision folder
         $sessionDir = Join-Path $localRepo ".crucible/session"
@@ -1118,7 +1164,7 @@ try {
 }
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $outputText = $output -join "`n"
 
         # 1. Assert pending JSON contains base_sha and branch_sha
@@ -1158,7 +1204,7 @@ try {
         git -C $localRepo add b.txt 2>$null | Out-Null
         git -C $localRepo commit -m "prior accepted task" 2>$null | Out-Null
         git -C $localRepo push origin master 2>$null | Out-Null
-        $masterBefore = (git -C $localRepo rev-parse HEAD).Trim()
+        $masterBefore = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # New flow: task branch exists with a commit but is NOT merged into master.
         git -C $localRepo checkout -b task/F-779 2>$null | Out-Null
@@ -1169,6 +1215,12 @@ try {
 
         $sessionDir = Join-Path $localRepo ".crucible/session"
         New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
+
+        # A permitted rejection needs a restorable task before any unwind (item 250).
+        $rejectBacklog = Join-Path $localRepo '.crucible/backlog'
+        New-Item -ItemType Directory -Path $rejectBacklog -Force | Out-Null
+        '| F-779 | P2 | In Progress | Rework | Architect |' |
+            Set-Content -LiteralPath (Join-Path $rejectBacklog 'BACKLOG.md') -Encoding utf8NoBOM
 
         $scriptPath = Join-Path $caseRoot "run-new-flow-reject.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
@@ -1197,9 +1249,9 @@ Push-Location '$localRepo'
 try { Invoke-HumanGate -Context `$ctx } catch {} finally { Pop-Location }
 "@
         $scriptReject | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $null = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
 
-        $masterAfter = (git -C $localRepo rev-parse HEAD).Trim()
+        $masterAfter = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
         Assert-Result -Name "new-flow reject: master unchanged" -Condition ($masterAfter -eq $masterBefore) -FailureMessage "master moved on reject of an unmerged branch: $masterBefore -> $masterAfter"
         Assert-Result -Name "new-flow reject: prior task commit preserved" -Condition (Test-Path (Join-Path $localRepo "b.txt")) -FailureMessage "previously-accepted task's file b.txt was discarded by the reject unwind"
         Assert-Result -Name "new-flow reject: task branch retained" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task/F-779 branch was not retained after reject"
@@ -1253,14 +1305,14 @@ review:
         "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
         git -C $localRepo add README.md 2>$null | Out-Null
         git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
-        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $baseSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # Create task branch
         git -C $localRepo checkout -b task/F-889 2>$null | Out-Null
         "changes" | Set-Content -LiteralPath (Join-Path $localRepo "file.txt") -Encoding UTF8
         git -C $localRepo add file.txt 2>$null | Out-Null
         git -C $localRepo commit -m "commit on task branch" 2>$null | Out-Null
-        $branchSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $branchSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # Set up human gate decision folder
         $sessionDir = Join-Path $localRepo ".crucible/session"
@@ -1300,7 +1352,7 @@ try {
 }
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $outputText = $output -join "`n"
 
         # Assert visual review commands and worktree opening command are generated
@@ -1372,7 +1424,7 @@ try {
 
             $bodyPath = Join-Path $caseRoot "review-diff-body.ps1"
             ($helperLines[0..($helperLines.Count - 2)] -join "`n") | Set-Content -LiteralPath $bodyPath -Encoding UTF8
-            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $bodyPath $leftFile $rightFile 2>&1 | Out-Null
+            Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $bodyPath $leftFile $rightFile 2>&1 } | Out-Null
 
             $copies = @(Get-ChildItem -Path $scratchHome -Recurse -File -ErrorAction SilentlyContinue)
             Assert-Result -Name "the generated helper copies both sides into the scratch directory it resolved" -Condition ($copies.Count -eq 2) -FailureMessage (
@@ -1412,17 +1464,17 @@ try {
             if ($runningOnWindows) {
                 $runScript = Join-Path $caseRoot "run-diff.bat"
                 $diffToolCommand | Set-Content -LiteralPath $runScript -Encoding ASCII
-                $runOutput = cmd.exe /c `"$runScript`" 2>&1
+                $runOutput = Invoke-ExternalCommand -AsLines { cmd.exe /c `"$runScript`" 2>&1 }
             } else {
                 $runScript = Join-Path $caseRoot "run-diff.sh"
                 $diffToolCommand | Set-Content -LiteralPath $runScript -Encoding UTF8
-                $runOutput = sh $runScript 2>&1
+                $runOutput = Invoke-ExternalCommand -AsLines { sh $runScript 2>&1 }
             }
             $runOutputText = $runOutput -join "`n"
             
             Assert-Result -Name "Emitted difftool command executed successfully" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "difftool command execution failed with exit code $LASTEXITCODE. Output:`n$runOutputText`nCommand run:`n$diffToolCommand"
-            $gitDiffOut = git -C $localRepo diff --stat "$baseSha..$branchSha" 2>&1
-            $gitLogOut = git -C $localRepo log --oneline -n 5 2>&1
+            $gitDiffOut = Invoke-ExternalCommand -AsLines { git -C $localRepo diff --stat "$baseSha..$branchSha" 2>&1 }
+            $gitLogOut = Invoke-ExternalCommand -AsLines { git -C $localRepo log --oneline -n 5 2>&1 }
             Assert-Result -Name "Stub log file was created" -Condition (Test-Path $stubLog) -FailureMessage "expected $stubLog to exist after running difftool command.`nOutput from difftool was:`n$runOutputText`nCommand run:`n$diffToolCommand`nGit Diff:`n$gitDiffOut`nGit Log:`n$gitLogOut"
             
             if (Test-Path $stubLog) {
@@ -1493,18 +1545,18 @@ review:
         "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
         git -C $localRepo add README.md 2>$null | Out-Null
         git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
-        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $baseSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         git -C $localRepo checkout -b task/F-890 2>$null | Out-Null
         "first" | Set-Content -LiteralPath (Join-Path $localRepo "one.txt") -Encoding UTF8
         git -C $localRepo add one.txt 2>$null | Out-Null
         git -C $localRepo commit -m "first commit on task branch" 2>$null | Out-Null
-        $recordedSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $recordedSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         "second" | Set-Content -LiteralPath (Join-Path $localRepo "two.txt") -Encoding UTF8
         git -C $localRepo add two.txt 2>$null | Out-Null
         git -C $localRepo commit -m "second commit on task branch" 2>$null | Out-Null
-        $tipSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $tipSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         Assert-Result -Name "recorded sha differs from the task tip" -Condition ($recordedSha -ne $tipSha) -FailureMessage "the test needs two distinct task-branch commits for the range assertions below to mean anything"
 
@@ -1563,7 +1615,7 @@ try {
 }
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $outputText = $output -join "`n"
 
         Assert-Result -Name "unfilled template prompts the human to complete the decision" -Condition ($outputText -like "*Action Required*") -FailureMessage "expected the unfilled-template arm to ask for the gate decision, got:`n$outputText"
@@ -1618,7 +1670,7 @@ review:
         "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
         git -C $localRepo add README.md 2>$null | Out-Null
         git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
-        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $baseSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # NOTE: deliberately NO task/R-900 branch is created (No-Code Closure research closure).
         $sessionDir = Join-Path $localRepo ".crucible/session"
@@ -1651,7 +1703,7 @@ review:
 Push-Location '$localRepo'
 try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $outputText = $output -join "`n"
 
         Assert-Result -Name "No-Code Closure: gate prints the No-Code Closure message" -Condition ($outputText -like "*No-Code Closure*") -FailureMessage "expected 'No-Code Closure' message, got:`n$outputText"
@@ -1693,7 +1745,7 @@ project:
         "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
         git -C $localRepo add README.md 2>$null | Out-Null
         git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
-        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $baseSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         $sessionDir = Join-Path $localRepo ".crucible/session"
         New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
@@ -1725,11 +1777,86 @@ project:
 Push-Location '$localRepo'
 try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $outputText = $output -join "`n"
 
         Assert-Result -Name "No-Code Closure: review hint names the actual findings doc" -Condition ($outputText -like "*.crucible/research/R-901_findings.md*") -FailureMessage "expected the resolved findings path, got:`n$outputText"
         Assert-Result -Name "No-Code Closure: no literal placeholder remains" -Condition ($outputText -notlike "*<findings doc>*") -FailureMessage "expected no '<findings doc>' placeholder, got:`n$outputText"
+    }
+
+    # Item 280: an absolute CrucibleRoot was joined onto the project root
+    # (C:\project\C:\bundle\research), so the review fell back to the archived spec.
+    $results += Run-Test -Name "No-Code Closure finds the exact-ID findings doc under an absolute CrucibleRoot with spaces" -Body {
+        $ErrorActionPreference = "Continue"
+        $caseRoot = Join-Path $tempRoot "gate-nocode-closure-absolute-root"
+        $localRepo = Join-Path $caseRoot "local"
+        $bundleRoot = Join-Path $caseRoot "abs bundle dir/.crucible"
+        New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+
+        git -C $localRepo init --initial-branch=master 2>$null | Out-Null
+        git -C $localRepo config user.name "Tester"
+        git -C $localRepo config user.email "test@example.com"
+
+        $configDir = Join-Path $localRepo ".crucible"
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+"@ | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+
+        $researchDir = Join-Path $bundleRoot "research"
+        New-Item -ItemType Directory -Path $researchDir -Force | Out-Null
+        "findings body" | Set-Content -LiteralPath (Join-Path $researchDir "R-902_findings.md") -Encoding UTF8
+        "prefix collision" | Set-Content -LiteralPath (Join-Path $researchDir "R-9020_findings.md") -Encoding UTF8
+
+        "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
+        git -C $localRepo add README.md 2>$null | Out-Null
+        git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
+        $baseSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
+
+        $sessionDir = Join-Path $localRepo ".crucible/session"
+        New-Item -ItemType Directory -Path (Join-Path $sessionDir "global/gate_decisions") -Force | Out-Null
+
+        $scriptPath = Join-Path $caseRoot "run-nocode-closure-absolute-root.ps1"
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $bundleLiteral = $bundleRoot.Replace("'", "''")
+        $repoLiteral = $localRepo.Replace("'", "''")
+        @"
+`$ErrorActionPreference = "Stop"
+`$Quiet = `$true
+. '$libPath'
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    LogFile = (Join-Path '$sessionDir' 'gate/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path '$sessionDir' 'global/circuit_breakers.jsonl')
+    GateOutcome = `$null
+    GateReason = `$null
+    GateRedirectTarget = `$null
+    CrucibleRoot = '$bundleLiteral'
+    RepoRoot = '$repoLiteral'
+    Quiet = `$true
+    Handoff = [PSCustomObject]@{
+        task_id = 'R-902'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        commit_hash = '$baseSha'
+        cumulative_handoff_count = 1
+    }
+}
+Push-Location '$repoLiteral'
+try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
+        $outputText = $output -join "`n"
+
+        $expectedDoc = ((Join-Path $researchDir "R-902_findings.md") -replace '\\', '/')
+        Assert-Result -Name "absolute root: review hint names the exact-ID findings doc" -Condition ($outputText.Contains("review $expectedDoc")) -FailureMessage "expected the hint to name $expectedDoc, got:`n$outputText"
+        Assert-Result -Name "absolute root: review does not fall back to the archived spec" -Condition ($outputText -notlike "*review the archived spec*") -FailureMessage "expected the findings doc, not the archived-spec fallback, got:`n$outputText"
+        Assert-Result -Name "absolute root: prefix-colliding findings doc is not named" -Condition ($outputText -notlike "*R-9020_findings.md*") -FailureMessage "expected only the exact-ID findings doc, got:`n$outputText"
     }
 
     $results += Run-Test -Name "Human gate visual review affordances fall back to text git diff when diff_tool is unconfigured" -Body {
@@ -1777,14 +1904,14 @@ project_mandates:
         "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
         git -C $localRepo add README.md 2>$null | Out-Null
         git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
-        $baseSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $baseSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # Create task branch
         git -C $localRepo checkout -b task/F-890 2>$null | Out-Null
         "changes" | Set-Content -LiteralPath (Join-Path $localRepo "file.txt") -Encoding UTF8
         git -C $localRepo add file.txt 2>$null | Out-Null
         git -C $localRepo commit -m "commit on task branch" 2>$null | Out-Null
-        $branchSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $branchSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # Set up human gate decision folder
         $sessionDir = Join-Path $localRepo ".crucible/session"
@@ -1824,7 +1951,7 @@ try {
 }
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $outputText = $output -join "`n"
 
         # Assert no visual review command is printed
@@ -1845,7 +1972,7 @@ try {
         "base" | Set-Content -LiteralPath (Join-Path $caseRoot "README.md") -Encoding UTF8
         git -C $caseRoot add README.md 2>$null | Out-Null
         git -C $caseRoot commit -m "base commit" 2>$null | Out-Null
-        $baseCommit = (git -C $caseRoot rev-parse HEAD).Trim()
+        $baseCommit = (Invoke-ExternalCommand -AsLines { git -C $caseRoot rev-parse HEAD }).Trim()
 
         # Cut the task branch from the base (no work on it yet).
         git -C $caseRoot branch task/F-700 $baseCommit 2>$null | Out-Null
@@ -1854,14 +1981,14 @@ try {
         "unrelated" | Set-Content -LiteralPath (Join-Path $caseRoot "other.md") -Encoding UTF8
         git -C $caseRoot add other.md 2>$null | Out-Null
         git -C $caseRoot commit -m "advance master" 2>$null | Out-Null
-        $masterTip = (git -C $caseRoot rev-parse HEAD).Trim()
+        $masterTip = (Invoke-ExternalCommand -AsLines { git -C $caseRoot rev-parse HEAD }).Trim()
 
         # The actual reviewed work lands on the task branch.
         git -C $caseRoot checkout task/F-700 2>$null | Out-Null
         "feature" | Set-Content -LiteralPath (Join-Path $caseRoot "feature.md") -Encoding UTF8
         git -C $caseRoot add feature.md 2>$null | Out-Null
         git -C $caseRoot commit -m "task work" 2>$null | Out-Null
-        $taskTip = (git -C $caseRoot rev-parse HEAD).Trim()
+        $taskTip = (Invoke-ExternalCommand -AsLines { git -C $caseRoot rev-parse HEAD }).Trim()
         git -C $caseRoot checkout master 2>$null | Out-Null
 
         Push-Location $caseRoot
@@ -1878,7 +2005,7 @@ try {
         Assert-Result -Name "review-range: base endpoint is the merge-base" -Condition ($range.BaseSha -eq $baseCommit) -FailureMessage "expected BaseSha=$baseCommit (merge-base), got $($range.BaseSha)"
         Assert-Result -Name "review-range: base endpoint is not the advanced primary tip" -Condition ($range.BaseSha -ne $masterTip) -FailureMessage "BaseSha used the advanced master tip $masterTip"
 
-        $rangeFiles = @(git -C $caseRoot diff --name-only "$($range.BaseSha)..$($range.BranchSha)")
+        $rangeFiles = @(Invoke-ExternalCommand -AsLines { git -C $caseRoot diff --name-only "$($range.BaseSha)..$($range.BranchSha)" })
         Assert-Result -Name "review-range: diff lists the task file" -Condition ($rangeFiles -contains "feature.md") -FailureMessage "expected feature.md in range diff, got: $($rangeFiles -join ', ')"
         Assert-Result -Name "review-range: diff excludes unrelated master-only file" -Condition ($rangeFiles -notcontains "other.md") -FailureMessage "range diff leaked unrelated master commit (other.md)"
     }
@@ -1902,14 +2029,14 @@ try {
         "initial" | Set-Content -LiteralPath (Join-Path $localRepo "README.md") -Encoding UTF8
         git -C $localRepo add README.md 2>$null | Out-Null
         git -C $localRepo commit -m "initial commit" 2>$null | Out-Null
-        $null = git -C $localRepo push -u origin master 2>&1
+        $null = Invoke-ExternalCommand -AsLines { git -C $localRepo push -u origin master 2>&1 }
 
         # Cut task branch and commit
         git -C $localRepo checkout -b task/F-777 2>$null | Out-Null
         "feature work" | Set-Content -LiteralPath (Join-Path $localRepo "feature.md") -Encoding UTF8
         git -C $localRepo add feature.md 2>$null | Out-Null
         git -C $localRepo commit -m "feature commit" 2>$null | Out-Null
-        $featureSha = (git -C $localRepo rev-parse HEAD).Trim()
+        $featureSha = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse HEAD }).Trim()
 
         # Checkout master and merge locally
         git -C $localRepo checkout master 2>$null | Out-Null
@@ -1954,6 +2081,7 @@ review:
 "@
         $configYaml | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
 
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-777'
         $scriptContent = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -1987,7 +2115,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -1999,7 +2127,7 @@ try {
         $watchAt = $output.IndexOf("After that push, watch adopter CI")
         Assert-Result -Name "auto_push=false: watch instruction follows the push command" -Condition (($pushAt -ge 0) -and ($watchAt -gt $pushAt)) -FailureMessage "expected the CI watch after git push, pushAt=$pushAt watchAt=$watchAt"
 
-        $behindCommits = @(git -C $localRepo log origin/master..master --oneline)
+        $behindCommits = @(Invoke-ExternalCommand -AsLines { git -C $localRepo log origin/master..master --oneline })
         Assert-Result -Name "auto_push=false: local master remains ahead of origin" -Condition ($behindCommits.Count -gt 0) -FailureMessage "expected origin/master to be behind master"
 
         # Test Case 2: auto_push = true (should merge and push)
@@ -2014,14 +2142,14 @@ try {
         git -C $localRepo branch task/F-777 $featureSha 2>$null | Out-Null
         git -C $localRepo merge --no-edit task/F-777 2>$null | Out-Null
 
-        $outputLinesTrue = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLinesTrue = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCodeTrue = $LASTEXITCODE
         $outputTrue = $outputLinesTrue -join "`n"
 
         Assert-Result -Name "auto_push=true: human gate accepted exits successfully" -Condition ($exitCodeTrue -eq 0) -FailureMessage "expected exit code 0, got $exitCodeTrue"
         Assert-Result -Name "auto_push=true: does not print refusal note" -Condition ($outputTrue -notmatch "Refusing to push; merge remains LOCAL only") -FailureMessage "should not have printed refusal note"
 
-        $behindCommitsTrue = @(git -C $localRepo log origin/master..master --oneline)
+        $behindCommitsTrue = @(Invoke-ExternalCommand -AsLines { git -C $localRepo log origin/master..master --oneline })
         Assert-Result -Name "auto_push=true: git push succeeded" -Condition ($behindCommitsTrue.Count -eq 0) -FailureMessage "expected origin/master to be even with master"
     }
 
@@ -2086,6 +2214,7 @@ review:
         $scriptPath = Join-Path $caseRoot "run-prune.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
         $fwPwsh = (Split-Path -Parent $CRUCIBLE_LIB).Replace("'", "''")
+        Write-FinalizedBacklogFixture -ProjectRoot $localRepo -TaskId 'F-778'
         $scriptContent = @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -2120,7 +2249,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -2184,7 +2313,7 @@ try {
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F-CIA"
         $originRepo = Join-Path $caseRoot "remote_origin"
-        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+        $preMergeSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
 
         # Simulate "gh unavailable" with a shim whose `auth status` fails, rather
         # than stripping gh's dir from PATH -- on CI/Linux gh lives in /usr/bin
@@ -2201,7 +2330,7 @@ try {
 
         Assert-Result -Name "ci unauth exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
         Assert-Result -Name "ci unauth reports failure" -Condition ($result.Output -match "\[HUMAN GATE\] CI_CHECK_FAILED") -FailureMessage $result.Output
-        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
         Assert-Result -Name "ci unauth master branch tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
         git -C $case.LocalRepo show-ref --quiet refs/heads/task/F-CIA
         Assert-Result -Name "ci unauth keeps task branch" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task branch was deleted after failed CI watch"
@@ -2218,7 +2347,7 @@ try {
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F-404"
         $originRepo = Join-Path $caseRoot "remote_origin"
-        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+        $preMergeSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
 
         $binDir = Join-Path $caseRoot "bin"
         New-FakeGhForGate -Dir $binDir -Mode "404" | Out-Null
@@ -2232,7 +2361,7 @@ try {
 
         Assert-Result -Name "ci 404 exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
         Assert-Result -Name "ci 404 reports failure" -Condition ($result.Output -match "\[HUMAN GATE\] CI_CHECK_FAILED") -FailureMessage $result.Output
-        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
         Assert-Result -Name "ci 404 master branch tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
         $logLines = @()
         if (Test-Path -LiteralPath $result.LogFile) {
@@ -2241,28 +2370,33 @@ try {
         Assert-Result -Name "ci 404 writes ci_check_failed event to log" -Condition ($logLines.Count -ge 1) -FailureMessage ("expected ci_check_failed in " + $result.LogFile + ", got: " + (Get-Content -LiteralPath $result.LogFile -ErrorAction SilentlyContinue | Out-String))
     }
 
-    $results += Run-Test -Name "F3: RED withholds the master push and deletes staging ref" -Body {
+    $results += Run-Test -Name "F3: exit-0 PATH pwsh cannot bypass RED CI and withholds the master push and deletes staging ref" -Body {
         $ErrorActionPreference = "Continue"
         $caseRoot = Join-Path $tempRoot "f3-ci-red"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-RED"
         $originRepo = Join-Path $caseRoot "remote_origin"
-        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+        $preMergeSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
 
         $binDir = Join-Path $caseRoot "bin"
         New-FakeGhForGate -Dir $binDir -Mode "red" | Out-Null
+        $decoy = if (Test-PlatformIsWindows) { Join-Path $binDir 'pwsh.cmd' } else { Join-Path $binDir 'pwsh' }
+        $body = if (Test-PlatformIsWindows) { "@echo off`nexit /b 0`n" } else { "#!/bin/sh`nexit 0`n" }
+        [IO.File]::WriteAllText($decoy, $body)
+        if (-not (Test-PlatformIsWindows)) { & chmod +x $decoy }
         $oldPath = $env:PATH
         try {
             $env:PATH = $binDir + [System.IO.Path]::PathSeparator + $oldPath
-            $result = Invoke-CiGateCase -Case $case -TaskId "F3-RED"
+            Assert-Result 'exit-0 decoy is first on PATH' (@(Get-Command pwsh -CommandType Application)[0].Source -eq $decoy) 'fixture did not shadow pwsh'
+            $result = Invoke-CiGateCase -Case $case -TaskId "F3-RED" -PwshDecoyDir $binDir
         } finally {
             $env:PATH = $oldPath
         }
 
+        $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
+        Assert-Result -Name "f3 red master branch tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
         Assert-Result -Name "f3 red exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
         Assert-Result -Name "f3 red output indicates master not published" -Condition ($result.Output -match "master was NOT published \(still local only\)") -FailureMessage $result.Output
-        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
-        Assert-Result -Name "f3 red master branch tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
         git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-RED
         Assert-Result -Name "f3 red deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on red CI"
     }
@@ -2286,8 +2420,8 @@ try {
 
         Assert-Result -Name "f3 green exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
         Assert-Result -Name "f3 green staging ref pushed" -Condition ($result.Output -match "Publishing CI staging ref origin/crucible-ci/F3-GRN") -FailureMessage $result.Output
-        $postMergeLocalSha = (git -C $case.LocalRepo rev-parse master).Trim()
-        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        $postMergeLocalSha = (Invoke-ExternalCommand -AsLines { git -C $case.LocalRepo rev-parse master }).Trim()
+        $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
         Assert-Result -Name "f3 green master branch updated on origin" -Condition ($postMergeOriginSha -eq $postMergeLocalSha) -FailureMessage ("expected origin master tip $postMergeLocalSha, got $postMergeOriginSha")
         git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-GRN
         Assert-Result -Name "f3 green deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on green CI"
@@ -2319,8 +2453,8 @@ try {
         # still-running CI. It comes from Write-GateCiRunUrl, deduplicated out of the
         # timeout and queue-stall arms; nothing named its output before.
         Assert-Result -Name "f3 timeout advisory points at the CI run" -Condition ($result.Output -match "CI run URL:") -FailureMessage $result.Output
-        $postMergeLocalSha = (git -C $case.LocalRepo rev-parse master).Trim()
-        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        $postMergeLocalSha = (Invoke-ExternalCommand -AsLines { git -C $case.LocalRepo rev-parse master }).Trim()
+        $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
         Assert-Result -Name "f3 timeout pushed master to origin" -Condition ($postMergeOriginSha -eq $postMergeLocalSha) -FailureMessage ("expected origin master tip $postMergeLocalSha, got $postMergeOriginSha")
         git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-TMO
         Assert-Result -Name "f3 timeout deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on timeout CI"
@@ -2332,7 +2466,7 @@ try {
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-SPF"
         $originRepo = Join-Path $caseRoot "remote_origin"
-        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+        $preMergeSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
 
         git -C $case.LocalRepo remote set-url --push origin "invalid/path/repo.git"
 
@@ -2348,7 +2482,7 @@ try {
 
         Assert-Result -Name "f3 staging push fail exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
         Assert-Result -Name "f3 staging push fail error message" -Condition ($result.Output -match "Failed to publish CI staging ref") -FailureMessage $result.Output
-        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
         Assert-Result -Name "f3 staging push fail master tip unchanged on real origin" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
     }
 
@@ -2358,7 +2492,7 @@ try {
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $case = New-CiGateCase -CaseRoot $caseRoot -TaskId "F3-MSJ"
         $originRepo = Join-Path $caseRoot "remote_origin"
-        $preMergeSha = (git -C $originRepo rev-parse master).Trim()
+        $preMergeSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
 
         $configPath = Join-Path $case.LocalRepo ".crucible/config.yaml"
         $configYaml = (Get-Content -LiteralPath $configPath -Raw) + "`n  ci_required_checks: coverage-windows"
@@ -2376,7 +2510,7 @@ try {
 
         Assert-Result -Name "f3 missing jobs exits 1" -Condition ($result.ExitCode -eq 1) -FailureMessage ("expected 1, got " + $result.ExitCode + ". Output:`n" + $result.Output)
         Assert-Result -Name "f3 missing jobs output indicates refusing to publish" -Condition ($result.Output -match "MISSING_REQUIRED_JOBS: Staging CI run for .* is missing required jobs") -FailureMessage $result.Output
-        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
         Assert-Result -Name "f3 missing jobs master tip on origin unchanged" -Condition ($postMergeOriginSha -eq $preMergeSha) -FailureMessage ("expected origin master tip $preMergeSha, got $postMergeOriginSha")
         git -C $originRepo show-ref --quiet refs/heads/crucible-ci/F3-MSJ
         Assert-Result -Name "f3 missing jobs deleted staging branch on origin" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "staging branch was not deleted on missing required jobs"
@@ -2410,8 +2544,8 @@ try {
 
         Assert-Result -Name "post push red exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
         Assert-Result -Name "post push red reports status" -Condition ($result.Output -match "\[CI WATCH\] STATUS=POST_PUSH_RED") -FailureMessage $result.Output
-        $postMergeLocalSha = (git -C $case.LocalRepo rev-parse master).Trim()
-        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        $postMergeLocalSha = (Invoke-ExternalCommand -AsLines { git -C $case.LocalRepo rev-parse master }).Trim()
+        $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
         Assert-Result -Name "post push red master branch updated on origin" -Condition ($postMergeOriginSha -eq $postMergeLocalSha) -FailureMessage ("expected origin master tip $postMergeLocalSha, got $postMergeOriginSha")
         $logLines = @()
         if (Test-Path -LiteralPath $result.LogFile) {
@@ -2448,8 +2582,8 @@ try {
 
         Assert-Result -Name "post push missing jobs exits 0" -Condition ($result.ExitCode -eq 0) -FailureMessage ("expected 0, got " + $result.ExitCode + ". Output:`n" + $result.Output)
         Assert-Result -Name "post push missing jobs reports status" -Condition ($result.Output -match "\[CI WATCH\] STATUS=POST_PUSH_MISSING_REQUIRED_JOBS") -FailureMessage $result.Output
-        $postMergeLocalSha = (git -C $case.LocalRepo rev-parse master).Trim()
-        $postMergeOriginSha = (git -C $originRepo rev-parse master).Trim()
+        $postMergeLocalSha = (Invoke-ExternalCommand -AsLines { git -C $case.LocalRepo rev-parse master }).Trim()
+        $postMergeOriginSha = (Invoke-ExternalCommand -AsLines { git -C $originRepo rev-parse master }).Trim()
         Assert-Result -Name "post push missing jobs master branch updated on origin" -Condition ($postMergeOriginSha -eq $postMergeLocalSha) -FailureMessage ("expected origin master tip $postMergeLocalSha, got $postMergeOriginSha")
         $logLines = @()
         if (Test-Path -LiteralPath $result.LogFile) {
@@ -2546,6 +2680,60 @@ review:
         }
     }
 
+    foreach ($key in @("ci_timeout_minutes", "ci_queued_grace_minutes")) {
+        foreach ($bad in @("twenty", "-5", "1.5", "2147483648")) {
+            $results += Run-Test -Name "Accept config refuses review.$key value $bad" -Body {
+                $root = Join-Path $tempRoot "invalid-accept-config"
+                New-Item -ItemType Directory -Path (Join-Path $root ".crucible") -Force | Out-Null
+                [IO.File]::WriteAllText((Join-Path $root ".crucible/config.yaml"), "review:`n  ${key}: $bad`n")
+                $message = ""
+                try { $null = Get-HumanGateAcceptConfig -ProjectRoot $root } catch { $message = $_.Exception.Message }
+                Assert-Result -Name "invalid review.$key value $bad is refused by name" -Condition ($message.Contains("review.$key")) -FailureMessage "Expected named refusal, got: $message"
+            }
+        }
+    }
+
+    $results += Run-Test -Name "The accept arm reads its review settings once, with the documented defaults" -Body {
+        # In process: Get-HumanGateAcceptConfig returns instead of exiting (item 14 step C4),
+        # so the values the publish phase acts on are checked here rather than inferred from
+        # a spawned gate's output.
+        $cfgRoot = Join-Path $tempRoot "accept-config"
+        $absent = Join-Path $cfgRoot "absent"
+        New-Item -ItemType Directory -Path (Join-Path $absent ".crucible") -Force | Out-Null
+        $defaults = Get-HumanGateAcceptConfig -ProjectRoot $absent
+        Assert-Result -Name "auto_push defaults off" -Condition ($defaults.AutoPush -eq $false) -FailureMessage ("got " + $defaults.AutoPush)
+        Assert-Result -Name "require_green_ci defaults off" -Condition ($defaults.RequireGreenCi -eq $false) -FailureMessage ("got " + $defaults.RequireGreenCi)
+        Assert-Result -Name "ci_timeout_minutes defaults to 20" -Condition ($defaults.CiTimeoutMinutes -eq 20) -FailureMessage ("got " + $defaults.CiTimeoutMinutes)
+        Assert-Result -Name "ci_queued_grace_minutes defaults to 15" -Condition ($defaults.CiQueuedGraceMinutes -eq 15) -FailureMessage ("got " + $defaults.CiQueuedGraceMinutes)
+        Assert-Result -Name "ci_required_checks defaults to none" -Condition ([string]::IsNullOrEmpty($defaults.CiRequiredChecks)) -FailureMessage ("got " + $defaults.CiRequiredChecks)
+        Assert-Result -Name "ci_post_push_watch defaults off" -Condition ($defaults.CiPostPushWatch -eq $false) -FailureMessage ("got " + $defaults.CiPostPushWatch)
+
+        $set = Join-Path $cfgRoot "set"
+        New-Item -ItemType Directory -Path (Join-Path $set ".crucible") -Force | Out-Null
+        $cfg = @"
+crucible_root: ".crucible"
+project:
+  name: "Test"
+  description: "Test"
+  default_branch: "master"
+review:
+  auto_push: true
+  require_green_ci: true
+  ci_timeout_minutes: 7
+  ci_queued_grace_minutes: 0
+  ci_required_checks: "build"
+  ci_post_push_watch: true
+"@
+        $cfg | Set-Content -LiteralPath (Join-Path $set ".crucible/config.yaml") -Encoding UTF8
+        $values = Get-HumanGateAcceptConfig -ProjectRoot $set
+        Assert-Result -Name "auto_push true is read" -Condition ($values.AutoPush -eq $true) -FailureMessage ("got " + $values.AutoPush)
+        Assert-Result -Name "require_green_ci true is read" -Condition ($values.RequireGreenCi -eq $true) -FailureMessage ("got " + $values.RequireGreenCi)
+        Assert-Result -Name "ci_timeout_minutes 7 is read" -Condition ($values.CiTimeoutMinutes -eq 7) -FailureMessage ("got " + $values.CiTimeoutMinutes)
+        Assert-Result -Name "ci_queued_grace_minutes 0 is read, not defaulted" -Condition ($values.CiQueuedGraceMinutes -eq 0) -FailureMessage ("got " + $values.CiQueuedGraceMinutes)
+        Assert-Result -Name "ci_required_checks is read" -Condition ($values.CiRequiredChecks -eq "build") -FailureMessage ("got " + $values.CiRequiredChecks)
+        Assert-Result -Name "ci_post_push_watch true is read" -Condition ($values.CiPostPushWatch -eq $true) -FailureMessage ("got " + $values.CiPostPushWatch)
+    }
+
     $results += Run-Test -Name "Shipped instructions never hardcode an Accept line the gate did not emit" -Body {
         # The gate computes option 1 from review.auto_push, but the human never reads that
         # string if the presenter takes its menu from an SOP instead. Four shipped surfaces
@@ -2580,26 +2768,23 @@ review:
             -FailureMessage ("Accept lines that say nothing about merging or publishing:`n" + ($offenders -join "`n"))
     }
     $results += Run-Test -Name "An outcome matching no dispatch arm is refused, not passed over" -Body {
-        # In process, deliberately: the refusal path does not exit, which is what makes
-        # the whole outcome observable from here. Before the fix this call returned 0
-        # having written nothing, and Invoke-HumanGate read that silence as success -
-        # archiving the decision, deleting the pending template, and printing
-        # "Decision recorded" in green for an outcome no arm had acted on.
+        # Gate refusals must terminate even an embedding caller under Stop (I11).
         $root = Join-Path $tempRoot "bad-outcome"
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         $logFile = Join-Path $root "events.jsonl"
         $cbFile = Join-Path $root "circuit-breaker.jsonl"
-
-        $message = ""
-        try {
-            Invoke-HumanGateAction -TaskId "F-BAD" -Outcome "accpeted" -ProjectRoot $root `
-                -LogFile $logFile -CircuitBreakerHistoryFile $cbFile | Out-Null
-        } catch {
-            $message = [string]$_.Exception.Message
-        }
-
-        Assert-Result -Name "a misspelled outcome throws" -Condition ($message -ne "") `
-            -FailureMessage "Invoke-HumanGateAction returned normally for outcome 'accpeted'"
+        $child = Join-Path $root "caller.ps1"
+        @"
+`$ErrorActionPreference = 'Stop'
+. '$($CRUCIBLE_LIB.Replace("'", "''"))'
+try {
+    Invoke-HumanGateAction -TaskId F-BAD -Outcome accpeted -ProjectRoot '$($root.Replace("'", "''"))' -LogFile '$($logFile.Replace("'", "''"))' -CircuitBreakerHistoryFile '$($cbFile.Replace("'", "''"))'
+} catch { Write-Host 'CALLER_CAUGHT' }
+Write-Host 'CALLER_CONTINUED'
+"@ | Set-Content -LiteralPath $child -Encoding utf8
+        $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $child 2>&1 }
+        $message = $res.Output
+        Assert-Result -Name "a misspelled outcome exits unconditionally" -Condition ($res.ExitCode -ne 0 -and $message -notmatch 'CALLER_CAUGHT|CALLER_CONTINUED') -FailureMessage $message
         Assert-Result -Name "the message quotes what was received" -Condition ($message -match "accpeted") `
             -FailureMessage ("expected the rejected outcome to be named, got: " + $message)
         foreach ($valid in (Get-HumanGateOutcomes)) {
@@ -2685,12 +2870,27 @@ try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
         ) | Set-Content -LiteralPath (Join-Path $verificationDir "checks-not-run.txt") -Encoding UTF8
 
         $pendingPath = Join-Path $ctx.SessionDir "$($ctx.TaskId)/pending.json"
-        $output = (& { Write-GatePendingSurface -Context $ctx -RepoRoot $caseRoot -SessionDir $ctx.SessionDir -TaskId $ctx.TaskId -PendingFilePath $pendingPath -TaskBranchExists $false -NoCodeReviewHint "No code changes" -AcceptDesc "accept the work" } 6>&1 | Out-String)
+        $output = (Invoke-ExternalCommand -AsLines { & { Write-GatePendingSurface -Context $ctx -RepoRoot $caseRoot -SessionDir $ctx.SessionDir -TaskId $ctx.TaskId -PendingFilePath $pendingPath -TaskBranchExists $false -NoCodeReviewHint "No code changes" -AcceptDesc "accept the work" } 6>&1 } | Out-String)
         $blockIndex = $output.IndexOf("[CHECKS NOT RUN]")
         $headerIndex = $output.IndexOf("[HUMAN GATE] Visual review options:")
         Assert-Result -Name "not-run block precedes visual review heading" -Condition ($blockIndex -ge 0 -and $headerIndex -gt $blockIndex) -FailureMessage $output
         Assert-Result -Name "first checks-not-run entry is printed" -Condition ($output -match '  - windows check: requires OS windows; host is linux') -FailureMessage $output
         Assert-Result -Name "second checks-not-run entry is printed" -Condition ($output -match '  - gpu check: requires command ''gpu-tool'' on PATH') -FailureMessage $output
+    }
+
+    # Review of 5d1b869 (item 247): the decision command threw on a root with a dollar sign,
+    # so the pending menu was never written and the human had nothing to fill in.
+    $results += Run-Test -Name "The Human Gate menu is written when the project root has a dollar sign" -Body {
+        $caseRoot = Join-Path $tempRoot "gate menu cash`$root"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-ITEM247"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible") -Force | Out-Null
+        @('project:', '  name: "Human Gate test"', 'review:') | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
+        New-Item -ItemType Directory -Path (Join-Path $ctx.SessionDir $ctx.TaskId) -Force | Out-Null
+        $pendingPath = Join-Path $ctx.SessionDir "$($ctx.TaskId)/pending.json"
+        $output = (Invoke-ExternalCommand -AsLines { & { Write-GatePendingSurface -Context $ctx -RepoRoot $caseRoot -SessionDir $ctx.SessionDir -TaskId $ctx.TaskId -PendingFilePath $pendingPath -TaskBranchExists $false -NoCodeReviewHint "No code changes" -AcceptDesc "accept the work" } 6>&1 } | Out-String)
+        Assert-Result -Name "pending menu written" -Condition (Test-Path -LiteralPath $pendingPath) -FailureMessage $output
+        $menu = if (Test-Path -LiteralPath $pendingPath) { Get-Content -LiteralPath $pendingPath -Raw } else { "" }
+        Assert-Result -Name "menu decision command names the root as a literal" -Condition ($menu.Contains("-ProjectRoot '" + $caseRoot + "'") -and $menu.Contains("-GateOutcome <choice>")) -FailureMessage $menu
     }
 
     $results += Run-Test -Name "Every outcome the CLI accepts reaches a dispatch arm" -Body {

@@ -1,3 +1,7 @@
+if (-not (Test-Path -LiteralPath Function:Test-PathWithinDirectory)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
+
 function Normalize-HandoffArtifactPaths {
     # Keep generator and gate path handling identical (TODO item 198).
     param(
@@ -6,34 +10,40 @@ function Normalize-HandoffArtifactPaths {
         [Parameter(Mandatory=$true)][string]$ProjectRoot
     )
 
-    $resolvedWtPath = if (Test-Path $WorktreePath) { (Resolve-Path $WorktreePath).Path } else { $WorktreePath }
-    $resolvedRepoRoot = if (Test-Path $ProjectRoot) { (Resolve-Path $ProjectRoot).Path } else { $ProjectRoot }
+    $resolvedWtPath = if (Test-Path $WorktreePath) { (Resolve-FilesystemPath -Path (Resolve-Path $WorktreePath)) } else { Resolve-FilesystemPath -Path $WorktreePath }
+    $resolvedRepoRoot = if (Test-Path $ProjectRoot) { (Resolve-FilesystemPath -Path (Resolve-Path $ProjectRoot)) } else { Resolve-FilesystemPath -Path $ProjectRoot }
 
     $normalizedArtifacts = @()
     foreach ($art in $Artifacts) {
         if ([string]::IsNullOrWhiteSpace($art)) { continue }
         $fullArtPath = $art
+        $relativeArtifact = $false
         if (-not [System.IO.Path]::IsPathRooted($art)) {
-            $wtCheck = Join-Path $resolvedWtPath $art
+            $relativeArtifact = $true
+            $wtCheck = Resolve-PathFromRoot -Root $resolvedWtPath -Path $art
             if (Test-Path $wtCheck) {
-                $fullArtPath = (Resolve-Path $wtCheck).Path
+                $fullArtPath = (Resolve-FilesystemPath -Path (Resolve-Path $wtCheck))
             } else {
-                $repoCheck = Join-Path $resolvedRepoRoot $art
+                $repoCheck = Resolve-PathFromRoot -Root $resolvedRepoRoot -Path $art
                 if (Test-Path $repoCheck) {
-                    $fullArtPath = (Resolve-Path $repoCheck).Path
+                    $fullArtPath = (Resolve-FilesystemPath -Path (Resolve-Path $repoCheck))
                 }
             }
         } else {
             if (Test-Path $art) {
-                $fullArtPath = (Resolve-Path $art).Path
+                $fullArtPath = (Resolve-FilesystemPath -Path (Resolve-Path $art))
+            } else {
+                $fullArtPath = Resolve-FilesystemPath -Path $art
             }
         }
         $relPath = $art
         if ([System.IO.Path]::IsPathRooted($fullArtPath)) {
-            if ($fullArtPath.StartsWith($resolvedWtPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $relPath = $fullArtPath.Substring($resolvedWtPath.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
-            } elseif ($fullArtPath.StartsWith($resolvedRepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $relPath = $fullArtPath.Substring($resolvedRepoRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
+            if (Test-PathWithinDirectory -Path $fullArtPath -Directory $resolvedWtPath) {
+                $relPath = Get-PathRelativeToDirectory -Path $fullArtPath -Directory $resolvedWtPath
+                $relativeArtifact = $true
+            } elseif (Test-PathWithinDirectory -Path $fullArtPath -Directory $resolvedRepoRoot) {
+                $relPath = Get-PathRelativeToDirectory -Path $fullArtPath -Directory $resolvedRepoRoot
+                $relativeArtifact = $true
             }
         } else {
             $wtRelPrefix = Get-RootRelativePath -Root $resolvedRepoRoot -Path $resolvedWtPath
@@ -43,10 +53,13 @@ function Normalize-HandoffArtifactPaths {
             }
         }
         $relPath = $relPath.Replace("\", "/").Trim()
-        while ($relPath.StartsWith("./")) {
-            $relPath = $relPath.Substring(2)
+        # Prefix cleanup belongs to relative paths; an outside POSIX root is significant.
+        if ($relativeArtifact) {
+            while ($relPath.StartsWith("./")) {
+                $relPath = $relPath.Substring(2)
+            }
+            $relPath = $relPath.TrimStart("/")
         }
-        $relPath = $relPath.TrimStart("/")
         if (-not [string]::IsNullOrWhiteSpace($relPath)) {
             $normalizedArtifacts += $relPath
         }

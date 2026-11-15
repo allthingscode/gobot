@@ -1,4 +1,7 @@
 . (Join-Path $PSScriptRoot "platform.ps1")
+if (-not (Test-Path -LiteralPath Function:Test-PathWithinDirectory)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
 
 # init-project.ps1 installs .crucible/.gitattributes, but nearest-.gitattributes-wins
 # means it governs only the bundle subtree. The adopter's own tree is left to whatever
@@ -32,6 +35,8 @@ function Test-LineEndingConformance {
         return $result
     }
 
+    $ProjectRoot = Resolve-FilesystemPath -Path $ProjectRoot
+    $BundleRoot = Resolve-FilesystemPath -Path $BundleRoot
     $topResult = Invoke-Git @("rev-parse", "--show-toplevel") -Directory $ProjectRoot
     $topLevel = ($topResult.Raw | Out-String).Trim()
     if ($topResult.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($topLevel)) {
@@ -52,10 +57,10 @@ function Test-LineEndingConformance {
     # A finding there is a broken bundle, a different defect, and would only add noise.
     $bundlePrefix = ""
     if (Test-Path -LiteralPath $BundleRoot -PathType Container) {
-        $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).Path.Replace("\", "/").TrimEnd("/")
-        $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).Path.Replace("\", "/").TrimEnd("/")
-        if ($bundleFull.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $bundlePrefix = $bundleFull.Substring($rootFull.Length).TrimStart("/") + "/"
+        $rootFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot)).Replace("\", "/").TrimEnd("/")
+        $bundleFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BundleRoot)).Replace("\", "/").TrimEnd("/")
+        if (Test-PathWithinDirectory -Path $bundleFull -Directory $rootFull) {
+            $bundlePrefix = (Get-PathRelativeToDirectory -Path $bundleFull -Directory $rootFull -Separator "/") + "/"
         }
     }
 

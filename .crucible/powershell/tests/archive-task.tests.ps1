@@ -92,7 +92,7 @@ function Invoke-ArchiveTask {
         if ($null -ne $ShippedCode) {
             $cmdArgs += @("-ShippedCode", ([bool]$ShippedCode).ToString().ToLowerInvariant())
         }
-        $outputLines = @(& (Get-PwshCommand) @cmdArgs 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) @cmdArgs 2>&1 })
         return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
@@ -102,6 +102,53 @@ function Invoke-ArchiveTask {
 $tempRoot = New-TestFixtureRoot -NameHint "archive-task-test"
 
 try {
+    $results += Run-Test -Name "Review255 invalid archive priority falls back to the summary bucket" -Body {
+        $root = Join-Path $tempRoot "review255-priority"
+        New-MinimalBacklogTree -Root $root
+        $rel = "features/active/F-255_Test.md"
+        New-SpecFile -Root $root -RelPath $rel -ItemId "F-255" -Type "feature" -Priority "invalid" -Title "Test" -Status "Production"
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "F-255" -Priority "P2" -RelPath $rel -Title "Test"
+        Invoke-BacklogTaskArchive -BacklogPath $backlog -SpecPath (Join-Path $root $rel) | Out-Null
+        $actual = Get-Content -LiteralPath $backlog -Raw
+        Assert-Result "invalid priority removed from summary" ($actual -match '\| \*\*P2\*\* \| 0 \| - \|') $actual
+    }
+
+    $results += Run-Test -Name "Item255 archive row fallback refuses non-spec filenames" -Body {
+        $lines = @("| ID | Status | Title |", "|---|---|---|", "| F-255 | Ready | Test |")
+        $refused = $false
+        try {
+            Get-BacklogArchiveRow -Lines $lines -BacklogPath (Join-Path $tempRoot "BACKLOG.md") -ActiveRelPath "features/active/F-255_notes.txt" -ItemId "" | Out-Null
+        } catch { $refused = $_ -match "Not a backlog spec filename" }
+        Assert-Result "non-spec fallback refused" $refused "archive fallback decoded a non-markdown file as a task"
+    }
+
+    $results += Run-Test -Name "Item255 archival preserves a complete nonterminal status" -Body {
+        $root = Join-Path $tempRoot "item255-status"
+        New-MinimalBacklogTree -Root $root
+        $rel = "features/active/F-255_Status.md"
+        New-SpecFile -Root $root -RelPath $rel -ItemId "F-255" -Type "feature" -Priority "P2" -Title "Test" -Status "Production pending"
+        $path = Join-Path $root $rel
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "F-255" -Priority "P2" -RelPath $rel -Title "Test"
+        $refused = $false
+        try { Invoke-BacklogTaskArchive -BacklogPath $backlog -SpecPath $path | Out-Null }
+        catch { $refused = $_ -match "Cannot derive a terminal status" }
+        Assert-Result "whole status requires shipping evidence" ($refused -and (Test-Path -LiteralPath $path)) "archival truncated the status to Production"
+    }
+
+    $results += Run-Test -Name "Item255 archival uses the first identity and priority declarations" -Body {
+        $root = Join-Path $tempRoot "item255-identity"
+        New-MinimalBacklogTree -Root $root
+        $rel = "features/active/F-255_Test.md"
+        New-SpecFile -Root $root -RelPath $rel -ItemId "F-255" -Type "feature" -Priority "P2" -Title "Test" -Status "Production"
+        $path = Join-Path $root $rel
+        $text = (Get-Content -LiteralPath $path -Raw).Replace('target_phase:', "priority: P0`nitem_id: F-999`ntarget_phase:")
+        Set-Content -LiteralPath $path -Value $text -Encoding UTF8
+        $backlog = New-SingleItemBacklog -Root $root -ItemId "F-255" -Priority "P2" -RelPath $rel -Title "Test"
+        Invoke-BacklogTaskArchive -BacklogPath $backlog -SpecPath $path | Out-Null
+        $actual = Get-Content -LiteralPath $backlog -Raw
+        Assert-Result "first ID removed from summary" ($actual -match '\| \*\*P2\*\* \| 0 \| - \|') $actual
+    }
+
     # Item 227: exercise both ID fallbacks without an exact spec-path link.
     foreach ($linked in @($false, $true)) {
         foreach ($present in @($true, $false)) {
@@ -490,7 +537,7 @@ try {
         
         # Validate backlog passes validation using validate-backlog.ps1 check
         $validateScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
-        $validateOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
+        $validateOutput = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1 })
         Assert-Result -Name "validate-backlog exit 0 post-archive" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validation success, output: " + ($validateOutput -join "`n"))
     }
 
@@ -532,7 +579,7 @@ try {
 
         # Validate backlog passes validation using validate-backlog.ps1 check
         $validateScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
-        $validateOutput = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1)
+        $validateOutput = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -BacklogPath $backlog -ProjectRoot $root 2>&1 })
         Assert-Result -Name "validate-backlog exit 0 post-archive sole" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validation success, output: " + ($validateOutput -join "`n"))
     }
 
@@ -567,6 +614,33 @@ paths:
 
         $res2 = Get-BacklogItemPathForTaskProjectRoot -Task "C-999" -ProjectRoot $root
         Assert-Result -Name "resolver prioritizes active spec over archived" -Condition ($res2 -eq $activeSpec) -FailureMessage ("expected active spec path, got: " + $res2)
+    }
+
+    # Item 302: "under the backlog directory" was a bare prefix match, so a sibling whose
+    # name starts with the backlog directory's name counted as inside it. A sibling named
+    # backlogfeatures leaves features/active/<spec> after the prefix, which the active-path
+    # check accepted, and the foreign spec was archived into the backlog.
+    foreach ($sibling in @("backlog2", "backlogfeatures")) {
+        $results += Run-Test -Name "A spec under the sibling directory $sibling is refused as outside the backlog" -Body {
+            $root = Join-Path $tempRoot ("sibling-" + $sibling)
+            $backlogDir = Join-Path $root "backlog"
+            New-MinimalBacklogTree -Root $backlogDir
+            $activeRel = "features/active/F-302_Sibling.md"
+            $backlog = New-SingleItemBacklog -Root $backlogDir -ItemId "F-302" -Priority "P2" -RelPath $activeRel -Title "Sibling"
+            $siblingRel = if ($sibling -eq "backlogfeatures") { "active/F-302_Sibling.md" } else { $activeRel }
+            $siblingRoot = Join-Path $root $sibling
+            New-SpecFile -Root $siblingRoot -RelPath $siblingRel -ItemId "F-302" -Type "Feature" -Priority "P2" -Title "Sibling"
+            $siblingSpec = Join-Path $siblingRoot $siblingRel
+            $specBefore = [System.IO.File]::ReadAllText($siblingSpec)
+            $backlogBefore = [System.IO.File]::ReadAllText($backlog)
+
+            $r = Invoke-ArchiveTask -BacklogPath $backlog -SpecPath $siblingSpec -ShippedCode $true
+            Assert-Result -Name "$sibling spec refused" -Condition ($r.ExitCode -ne 0) -FailureMessage ("a spec outside the backlog directory was archived. Output: " + $r.Output)
+            Assert-Result -Name "$sibling refusal names containment" -Condition ($r.Output -match 'not under backlog directory') -FailureMessage ("the refusal is not the containment check. Output: " + $r.Output)
+            Assert-Result -Name "$sibling spec untouched" -Condition ((Test-Path -LiteralPath $siblingSpec) -and [System.IO.File]::ReadAllText($siblingSpec) -ceq $specBefore) -FailureMessage "the sibling spec was moved or rewritten"
+            Assert-Result -Name "$sibling backlog untouched" -Condition ([System.IO.File]::ReadAllText($backlog) -ceq $backlogBefore) -FailureMessage "BACKLOG.md was rewritten for a spec outside the backlog"
+            Assert-Result -Name "$sibling nothing archived" -Condition (-not (Test-Path -LiteralPath (Join-Path $backlogDir "features/archived/F-302_Sibling.md"))) -FailureMessage "the sibling spec was archived into the backlog"
+        }
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

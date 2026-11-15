@@ -5,6 +5,16 @@
 # _worktree-fixture.ps1 load it too without loading this file. See its header.
 . (Join-Path $PSScriptRoot "_ownership.ps1")
 
+# Runner fixtures need transitive dependencies as well as the runner's direct imports.
+# Copy the library tree as a unit so a new dot-source needs no fixture file-list edit.
+function Copy-TestRunnerLibraries {
+    param([Parameter(Mandatory = $true)][string]$Destination)
+
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '../lib') -Force |
+        Copy-Item -Destination $Destination -Recurse -Force
+}
+
 function Get-ProcessDeathDescription {
     param(
         [Parameter(Mandatory=$true)]
@@ -125,6 +135,109 @@ function Skip-Test {
     throw ($CRUCIBLE_SKIP_SENTINEL + $Reason)
 }
 
+# Claim in the process that uses the alias. A parent's PSDrive table cannot
+# predict a child's system drives, and a separate availability check races.
+# Script scope keeps the mapping alive after this helper returns. Callers own
+# cleanup; null means exhaustion and must be reported with Skip-Test (I12).
+function New-TestPSDriveLetter {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $pin = Get-Variable -Name TestPSDriveLetterPin -Scope Script -ErrorAction Ignore
+    $candidates = if ($null -ne $pin) { @($pin.Value) } else { 'D'..'Z' }
+    foreach ($candidate in $candidates) {
+        # Do not shadow a drive inherited from an outer script or global scope.
+        # New-PSDrive detects PSDrive collisions, but can alias an unmapped volume.
+        # Check the native filesystem after claiming to catch a newly arrived volume.
+        if (Get-PSDrive -Name $candidate -ErrorAction SilentlyContinue) { continue }
+        try {
+            $drive = New-PSDrive -Name $candidate -PSProvider FileSystem -Root $Root -Scope Script -ErrorAction Stop
+            if ([IO.Directory]::Exists("${candidate}:\")) {
+                Remove-PSDrive -Name $candidate -Scope Script -ErrorAction Stop
+                continue
+            }
+            return $drive.Name
+        } catch {
+            if ($_.FullyQualifiedErrorId -ne 'DriveAlreadyExists,Microsoft.PowerShell.Commands.NewPSDriveCommand') { throw }
+        }
+    }
+    return $null
+}
+
+# An exhaustion fixture asserts that a later claim finds no letter. A letter
+# skipped here belongs to a volume or mapping that another process can release
+# at any moment (item 359), so later claims in this process try only the letters
+# held here. The pin survives re-dot-sourcing because nothing above sets it.
+function Lock-TestPSDriveExhaustion {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $held = [Collections.Generic.List[string]]::new()
+    while ($letter = New-TestPSDriveLetter -Root $Root) { $held.Add($letter) }
+    $script:TestPSDriveLetterPin = $held.ToArray()
+}
+
+# A subst mapping is visible to the whole logon session, so a letter can be
+# taken between any availability check and the claim (item 353). Claim first,
+# then classify a failure: a letter that is now defined is a collision and the
+# next letter is tried; any other failure propagates. Null means exhaustion.
+function New-TestSubstDrive {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string[]]$Candidate = @('D'..'Z')
+    )
+
+    foreach ($letter in $Candidate) {
+        if (Test-TestDriveLetterDefined -Letter $letter) { continue }
+        $drive = $letter + ':'
+        $res = Invoke-ExternalCommand { & subst $drive $Path }
+        if ($res.ExitCode -eq 0) { return $drive }
+        if (-not (Test-TestDriveLetterDefined -Letter $letter)) {
+            throw ("subst $drive failed (exit $($res.ExitCode)): " + $res.Output.Trim())
+        }
+    }
+    return $null
+}
+
+function Test-TestDriveLetterDefined {
+    param([Parameter(Mandatory = $true)][string]$Letter)
+
+    return [Environment]::GetLogicalDrives() -contains ($Letter + ':\')
+}
+
+function Remove-TestSubstDrive {
+    param([Parameter(Mandatory = $true)][string]$Drive)
+
+    $res = Invoke-ExternalCommand { & subst $Drive /D }
+    if ($res.ExitCode -ne 0) { throw ("subst $Drive /D failed (exit $($res.ExitCode)): " + $res.Output.Trim()) }
+}
+
+# Runs Body with the mapped drive root and always removes the mapping. A failed
+# removal is reported because a leaked mapping outlives this process.
+function Use-TestSubstDrive {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][scriptblock]$Body
+    )
+
+    $drive = $null
+    try {
+        $drive = New-TestSubstDrive -Path $Path
+        if (-not $drive) { Skip-Test 'No free D..Z drive letter is available for subst.' }
+        & $Body ($drive + '\')
+    } finally {
+        if ($drive) { Remove-TestSubstDrive -Drive $drive }
+    }
+}
+
+# Children cannot throw into their parent's Run-Test. Carry exhaustion across
+# stdout, then let the parent report the named case through the normal sentinel.
+function Skip-TestForPSDriveExhaustion {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output)
+
+    if ($Output -match '(?m)^TEST-DRIVE-UNAVAILABLE\s*$') {
+        Skip-Test 'No free D..Z PowerShell drive letter is available.'
+    }
+}
+
 function Run-Test {
     param(
         [Parameter(Position=0, Mandatory=$true)][string]$Name,
@@ -165,17 +278,57 @@ function Write-TestFileSummary {
     $failed = @($list | Where-Object { $_ -eq $false }).Count
     $skipped = [int]$script:CrucibleSkipCount
     $passed = $list.Count - $failed - $skipped
+    # A nested file's skip is not one of this file's cases, so it is counted apart.
+    $nested = [int]$script:CrucibleNestedSkipCount
+    $nestedSuffix = if ($nested -gt 0) { ", $nested nested skipped" } else { "" }
 
     if ($failed -gt 0) {
-        Write-Host ("`nSOME TESTS FAILED ($failed failed, $passed passed, $skipped skipped)") -ForegroundColor Red
+        Write-Host ("`nSOME TESTS FAILED ($failed failed, $passed passed, $skipped skipped$nestedSuffix)") -ForegroundColor Red
         exit 1
     }
     if ($skipped -gt 0) {
-        Write-Host ("`nALL TESTS PASSED ($passed tests, $skipped skipped)") -ForegroundColor Green
+        Write-Host ("`nALL TESTS PASSED ($passed tests, $skipped skipped$nestedSuffix)") -ForegroundColor Green
     } else {
-        Write-Host ("`nALL TESTS PASSED ($passed tests)") -ForegroundColor Green
+        Write-Host ("`nALL TESTS PASSED ($passed tests$nestedSuffix)") -ForegroundColor Green
     }
     exit 0
+}
+
+# The one reader of the skip contract: a stdout line that starts "SKIPPED: ". The runner
+# counts these per file, and Invoke-NestedTestFile reads a nested file's capture with it.
+function Get-TestOutputSkipNotes {
+    param([AllowEmptyString()][string]$Output)
+
+    $notes = @()
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        return ,$notes
+    }
+    foreach ($line in ($Output -split "`r?`n")) {
+        if ($line -cmatch '^SKIPPED: (.+)$') { $notes += $Matches[1] }
+    }
+    return ,$notes
+}
+
+$script:CrucibleNestedSkipCount = 0
+
+# A test file that runs another real test file captures it, and the capture forwards only
+# a lowercased, indented display copy (item 338), so the child's anchored skip line never
+# reached the runner. This runs the child and republishes each note once, prefixed with
+# the child's name; the child's own line stays in the capture, so a skip is counted once
+# at every level. A fixture that plants skips on purpose uses Invoke-ExternalCommand and
+# publishes nothing. Item 344.
+function Invoke-NestedTestFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $shell = (Get-Process -Id $PID).Path
+    $cmd = Invoke-ExternalCommand { & $shell -NoProfile -ExecutionPolicy Bypass -File $Path }
+    $notes = Get-TestOutputSkipNotes -Output $cmd.Output
+    $name = Split-Path -Leaf $Path
+    foreach ($note in $notes) {
+        $script:CrucibleNestedSkipCount++
+        Write-Host ("SKIPPED: " + $name + ": " + $note) -ForegroundColor Yellow
+    }
+    return [PSCustomObject]@{ Output = $cmd.Output; ExitCode = $cmd.ExitCode; SkipNotes = $notes }
 }
 
 # Start-Process -WindowStyle does not exist on PowerShell's Linux edition; it throws "The parameter
@@ -192,7 +345,7 @@ function Write-TestFileSummary {
 function Start-HiddenHostProcess {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    if ($null -eq (Get-Command Test-PlatformIsWindows -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath Function:Test-PlatformIsWindows)) {
         throw "Start-HiddenHostProcess: dot-source lib/platform.ps1 before calling this."
     }
 
@@ -207,16 +360,56 @@ function Start-HiddenHostProcess {
 
 function Invoke-ExternalCommand {
     param(
-        [Parameter(Mandatory=$true)][scriptblock]$Command
+        [Parameter(Mandatory=$true)][scriptblock]$Command,
+        # Preserve native pipeline objects and LASTEXITCODE for existing line captures.
+        [switch]$AsLines
     )
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & $Command 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prev
+    $output = [Collections.Generic.List[object]]::new()
+    $lastForwardedProgress = $null
+    $receive = {
+        # Treat any case-insensitive progress-prefix match as display data.
+        # Forward without retaining it, including real child payload collisions.
+        if ([string]$_ -match '^\s*fixture progress: ') {
+            $forwardedProgress = ([string]$_).ToLowerInvariant()
+            Write-Host $forwardedProgress
+            $lastForwardedProgress = $forwardedProgress
+            return
+        }
+        # Forward child lines without a timer. Lowercase the display
+        # copy so a deliberately failing fixture cannot trip its parent's verdict.
+        # Objects not matched as progress, including failure/skip contracts, stay captured.
+        if (-not [string]::IsNullOrWhiteSpace([string]$_)) {
+            $display = "    fixture progress: " + ([string]$_).ToLowerInvariant()
+            # A nested line capture emits its display immediately before its
+            # payload. Retain the payload and avoid displaying that copy twice.
+            if ($display -cne $lastForwardedProgress) { Write-Host $display }
+        }
+        $lastForwardedProgress = $null
+        if ($AsLines) { $_ } else { $output.Add($_) }
     }
+    try {
+        # Line callers historically captured stdout only. Leave stderr on its
+        # stream unless the caller explicitly merges it inside Command. In-process
+        # errors must retain the caller's preference, including Stop.
+        if ($AsLines) { & $Command | ForEach-Object $receive }
+        else { & $Command 2>&1 | ForEach-Object $receive }
+        # Native commands update the global variable. Do not create a caller-local
+        # shadow. Before any native invocation, preserve the absent value as null.
+        $nativeExit = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        $exitCode = if ($null -ne $nativeExit) { $nativeExit.Value } else { $null }
+    } catch {
+        $partialOutput = @($output.ToArray())
+        # Preserve inner capture data after adding this owner's earlier output.
+        if ($_.Exception.Data.Contains('CrucibleCapturedOutput')) {
+            $partialOutput += @($_.Exception.Data['CrucibleCapturedOutput'])
+        }
+        $_.Exception.Data['CrucibleCapturedOutput'] = $partialOutput
+        throw
+    }
+    # Completion is a real boundary even when a successful child is silent.
+    $status = if ($null -eq $exitCode) { 'no native exit' } else { "exit $exitCode" }
+    Write-Host ("    fixture progress: command completed ($status)")
+    if ($AsLines) { return }
     return [PSCustomObject]@{ Output = ($output -join "`n"); ExitCode = $exitCode }
 }
 
@@ -427,3 +620,24 @@ function Initialize-GitTestIsolation {
 $CRUCIBLE_TEST_ROOT_CREATED = -not ($env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT))
 
 $null = Initialize-GitTestIsolation
+
+# The bash an agent's Bash tool runs: Git Bash beside git on Windows (System32 bash is WSL),
+# bash on PATH elsewhere.
+function Get-TestBash {
+    if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+        $git = Get-Command git -ErrorAction SilentlyContinue
+        if ($null -ne $git) {
+            $dir = Split-Path -Parent $git.Source
+            for ($up = 0; $up -lt 3 -and -not [string]::IsNullOrEmpty($dir); $up++) {
+                foreach ($candidate in @((Join-Path $dir "bin/bash.exe"), (Join-Path $dir "usr/bin/bash.exe"))) {
+                    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+                }
+                $dir = Split-Path -Parent $dir
+            }
+        }
+        throw "Git Bash was not found beside git; the Bash transport cannot be checked."
+    }
+    $found = Get-Command bash -ErrorAction SilentlyContinue
+    if ($null -eq $found) { throw "bash was not found on PATH; the Bash transport cannot be checked." }
+    return $found.Source
+}

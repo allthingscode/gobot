@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$FrameworkSource,
-    [Parameter(Mandatory=$false)][string]$AdopterRoot = (Get-Location).Path,
+    [Parameter(Mandatory=$false)][string]$AdopterRoot = "",
     [Parameter(Mandatory=$false)][switch]$DryRun,
     [Parameter(Mandatory=$false)][ValidateSet("interactive", "auto-safe", "report-only")][string]$Mode = "interactive",
     [Parameter(Mandatory=$false)][switch]$Prune,
@@ -8,7 +8,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
+$AdopterRoot = Resolve-ConfigProjectRoot -ProjectRoot $AdopterRoot
 
 # Retention for the per-run report written to session/update-bundle/. A normal update writes
 # two logs - the dry run and the apply - so twenty is roughly the last ten updates, which is
@@ -44,8 +51,10 @@ function Read-ConfigScalar {
         [Parameter(Mandatory=$true)][string]$Key
     )
     $content = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
-    if ($content -match ('(?m)^' + [regex]::Escape($Key) + ':\s*["'']?([^"''\r\n]+)["'']?\s*$')) {
-        return $Matches[1].Trim()
+    $entries = @(Get-ConfigEntries -Content $content)
+    $node = Find-ConfigNode -Entries $entries -Path @($Key) -Source $ConfigPath
+    if ($null -ne $node) {
+        return ConvertFrom-ConfigScalar $entries[$node.Index].Value
     }
     return ""
 }
@@ -56,14 +65,14 @@ function Write-ConfigScalar {
         [Parameter(Mandatory=$true)][string]$Key,
         [Parameter(Mandatory=$true)][string]$Value
     )
-    $escaped = '"' + $Value.Replace("\", "\\").Replace('"', '\"') + '"'
+    $escaped = ConvertTo-ConfigScalar $Value
     $content = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
     if ($content -match ('(?m)^' + [regex]::Escape($Key) + ':')) {
         $content = $content -replace ('(?m)^' + [regex]::Escape($Key) + ': .+$'), ($Key + ': ' + $escaped)
     } else {
         $content = $content.TrimEnd() + "`n" + $Key + ': ' + $escaped + "`n"
     }
-    [System.IO.File]::WriteAllText($ConfigPath, $content, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $ConfigPath), $content, [System.Text.UTF8Encoding]::new($false))
 }
 
 . (Join-Path (Split-Path -Parent $PSCommandPath) "lib/normalized-hash.ps1")
@@ -163,13 +172,13 @@ function Remove-EmptiedBundleDirectory {
     # tracks files and not directories. Walk up from each pruned file's parent,
     # stopping at the first level that still holds something and never at or above
     # the bundle root.
-    $rootFull = [System.IO.Path]::GetFullPath($BundleRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $rootFull = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $BundleRoot)).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
     $removed = 0
     $ordered = @($Candidates | Select-Object -Unique | Sort-Object -Property Length -Descending)
     foreach ($candidate in $ordered) {
         $current = $candidate
         while (-not [string]::IsNullOrEmpty($current)) {
-            $currentFull = [System.IO.Path]::GetFullPath($current).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+            $currentFull = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $current)).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
             # Containment also covers the root itself: rootFull never starts with
             # rootFull + separator, so the walk stops there without a second check.
             if (-not $currentFull.StartsWith($rootFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) { break }
@@ -203,30 +212,30 @@ function Copy-FrameworkFileToAdopter {
         $adopterContent = Get-Content -LiteralPath $destination -Raw -Encoding UTF8
         $frameworkContent = Get-Content -LiteralPath $source -Raw -Encoding UTF8
         $mergedContent = Merge-CustomRegions -AdopterContent $adopterContent -FrameworkContent $frameworkContent
-        [System.IO.File]::WriteAllText($destination, $mergedContent, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $destination), $mergedContent, [System.Text.UTF8Encoding]::new($false))
     } else {
         Copy-Item -LiteralPath $source -Destination $destination -Force
     }
 }
 
 function Invoke-UpdateBundle {
-    $frameworkRoot = (Resolve-Path -LiteralPath $FrameworkSource).Path
-    $adopterRootResolved = (Resolve-Path -LiteralPath $AdopterRoot).Path
+    $frameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $FrameworkSource))
+    $adopterRootResolved = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $AdopterRoot))
     $adopterCrucibleRoot = Join-Path $adopterRootResolved ".crucible"
     $configPath = Join-Path $adopterCrucibleRoot "config.yaml"
 
-    $null = git -C $frameworkRoot rev-parse --show-toplevel 2>$null
+    $null = git -C (Resolve-FilesystemPath -Path $frameworkRoot) rev-parse --show-toplevel 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "FrameworkSource must be a git repository: $frameworkRoot"
     }
-    $frameworkStatus = @(git -C $frameworkRoot status --porcelain 2>$null)
+    $frameworkStatus = @(git -C (Resolve-FilesystemPath -Path $frameworkRoot) status --porcelain 2>$null)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect framework source git status: $frameworkRoot"
     }
     if ($frameworkStatus.Count -gt 0) {
         throw "FrameworkSource must be clean before updating adopters: $frameworkRoot"
     }
-    $frameworkHead = ((git -C $frameworkRoot rev-parse HEAD) | Out-String).Trim()
+    $frameworkHead = ((git -C (Resolve-FilesystemPath -Path $frameworkRoot) rev-parse HEAD) | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or -not ($frameworkHead -match '^[0-9a-f]{40}$')) {
         throw "Could not resolve framework HEAD in $frameworkRoot"
     }
@@ -244,9 +253,9 @@ function Invoke-UpdateBundle {
     # other helpers must match the installed script. Retain the local copy only when
     # the source has no manifest lib and therefore no competing list. Item 149.
     $headManifestSpec = $frameworkHead + ":powershell/lib/install-manifest.ps1"
-    $null = git -C $frameworkRoot cat-file -e $headManifestSpec 2>$null
+    $null = git -C (Resolve-FilesystemPath -Path $frameworkRoot) cat-file -e $headManifestSpec 2>$null
     if ($LASTEXITCODE -eq 0) {
-        $headManifestLib = @(git -C $frameworkRoot show $headManifestSpec 2>$null) -join "`n"
+        $headManifestLib = @(git -C (Resolve-FilesystemPath -Path $frameworkRoot) show $headManifestSpec 2>$null) -join "`n"
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($headManifestLib)) {
             throw "Could not read powershell/lib/install-manifest.ps1 at $frameworkHead in $frameworkRoot"
         }
@@ -266,7 +275,7 @@ function Invoke-UpdateBundle {
 
     $baselineCommit = Read-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit"
     if (-not ($baselineCommit -match '^[0-9a-f]{40}$')) {
-        throw "Missing crucible_install_commit in .crucible/config.yaml. Run init-project.ps1 -StampVersionOnly once from a Crucible source checkout."
+        throw ("Missing crucible_install_commit in .crucible/config.yaml. Run once from the Crucible source checkout: " + (New-CrucibleCommand -Script "powershell/init-project.ps1" -Transport PowerShell -Parameters ([ordered]@{ ProjectRoot = $AdopterRoot; StampVersionOnly = $true }) -CrucibleRoot $frameworkRoot))
     }
 
     $provManifest = Read-ProvenanceManifest -BundleRoot $adopterCrucibleRoot
@@ -278,6 +287,8 @@ function Invoke-UpdateBundle {
     $baselineFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $frameworkRoot -AtCommit $baselineCommit)
     $headFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $frameworkRoot -AtCommit $frameworkHead)
     $sourcePaths = @($baselineFiles + $headFiles | Sort-Object -Unique)
+    $baselineHashes = Get-GitFileNormalizedHashes -Repo $frameworkRoot -Commit $baselineCommit -Paths $sourcePaths
+    $headHashes = Get-GitFileNormalizedHashes -Repo $frameworkRoot -Commit $frameworkHead -Paths $sourcePaths
     $results = New-ClassificationResult
     $instantiatedScaffold = @()
     $recreatedScaffold = @()
@@ -292,12 +303,14 @@ function Invoke-UpdateBundle {
         }
     }
 
+    $adopterPaths = @($sourcePaths | ForEach-Object { Get-AdopterPathsForSource -SourcePath $_ -Manifest $manifest } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $ignoredPaths = Get-CrucibleGitIgnoredPaths -BundleRoot $adopterCrucibleRoot -RelativePaths $adopterPaths
     foreach ($sourcePath in $sourcePaths) {
         foreach ($adopterPath in @(Get-AdopterPathsForSource -SourcePath $sourcePath -Manifest $manifest)) {
             if ([string]::IsNullOrWhiteSpace($adopterPath)) { continue }
             if (Test-AdopterOwnedPath -RelativePath $adopterPath -Manifest $manifest) { continue }
             if (-not (Test-ScaffoldSnapshotPath -RelativePath $adopterPath -Manifest $manifest)) {
-                if (Test-CrucibleGitIgnored -BundleRoot $adopterCrucibleRoot -RelativePath $adopterPath) { continue }
+                if ($ignoredPaths.Contains($adopterPath)) { continue }
             }
 
             $adopterFile = Join-Path $adopterCrucibleRoot $adopterPath
@@ -314,13 +327,13 @@ function Invoke-UpdateBundle {
                 }
             }
             if ($null -eq $hManifest) {
-                $hManifest = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $baselineCommit -Path $sourcePath
+                $hManifest = $baselineHashes[$sourcePath].Hash
             }
             if ($null -eq $hManifestBase) {
-                $hManifestBase = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $baselineCommit -Path $sourcePath -WithoutCustomRegions
+                $hManifestBase = $baselineHashes[$sourcePath].BaseHash
             }
 
-            $hHead = Get-GitFileNormalizedHash -Repo $frameworkRoot -Commit $frameworkHead -Path $sourcePath
+            $hHead = $headHashes[$sourcePath].Hash
 
             # Resolve git lookups and manifest predicates here; the classification
             # lattice stays pure so tests can cover every branch without installing
@@ -407,7 +420,7 @@ function Invoke-UpdateBundle {
         $reportLines += ("{0}: {1}" -f $category, $results[$category].Count)
         $reportLines += @($results[$category].ToArray() | ForEach-Object { "  " + $_.AdopterPath })
     }
-    [System.IO.File]::WriteAllText($logPath, (($reportLines -join "`r`n") + "`r`n"), [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $logPath), (($reportLines -join "`r`n") + "`r`n"), [System.Text.UTF8Encoding]::new($false))
 
     # Names are UTC yyyyMMdd-HHmmss, so sorting by name is sorting by age, and the log just
     # written is always newest. Counting it in the retention keeps the directory at exactly
@@ -543,7 +556,11 @@ function Invoke-UpdateBundle {
         $hookInstaller = Join-Path $adopterCrucibleRoot "powershell/install-hooks.ps1"
         if ((Test-Path -LiteralPath (Join-Path $adopterRootResolved ".git")) -and
             (Test-Path -LiteralPath $hookInstaller -PathType Leaf)) {
+            $global:LASTEXITCODE = 0
             $null = & $hookInstaller
+            if ($LASTEXITCODE -ne 0) {
+                throw "Installed hook activation failed (exit $LASTEXITCODE)."
+            }
         }
     }
 
@@ -558,7 +575,9 @@ function Invoke-UpdateBundle {
             try {
                 . (Join-Path $adopterCrucibleRoot "powershell/lib/claude-agents.ps1")
                 $agentsChanged = @(Get-ClaudeAgentDrift -ProjectRoot $adopterRootResolved).Count -gt 0
+                $global:LASTEXITCODE = 0
                 $null = & $agentSync -ProjectRoot $adopterRootResolved
+                if ($LASTEXITCODE -ne 0) { throw "Agent definition generation exited $LASTEXITCODE." }
             } catch {
                 Write-Warning ("Could not regenerate .claude/agents/crucible-*.md: " + $_.Exception.Message)
             }
@@ -585,7 +604,7 @@ function Invoke-UpdateBundle {
             if ($agentsChanged) { Write-Host "  git add .claude/agents" }
             Write-Host ("  git commit -m `"chore(crucible): update adopter bundle " + $old7 + " -> " + $new7 + "`"")
             Write-Host "The framework-integrity circuit breaker treats uncommitted .crucible/ changes as a"
-            Write-Host "specialist modifying framework-owned files and will hard-stop crucible.ps1 -Init with exit 2."
+            Write-Host ("specialist modifying framework-owned files and will hard-stop " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true }) -Reference) + " with exit 2.")
         }
     }
 
@@ -636,8 +655,9 @@ function Invoke-UpdateBundle {
 
 try {
     $exitCode = Invoke-UpdateBundle
-    exit $exitCode
+    if ($exitCode -ne 0) { exit $exitCode }
+    exit 0
 } catch {
-    Write-Host $_.Exception.Message -ForegroundColor Red
+    [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 }

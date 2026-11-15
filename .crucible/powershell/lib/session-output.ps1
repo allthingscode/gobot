@@ -1,3 +1,6 @@
+. (Join-Path $PSScriptRoot "checks-not-run.ps1")
+. (Join-Path $PSScriptRoot "crucible-command.ps1")
+
 function Write-NextStep {
     param(
         [Parameter(Mandatory=$true)][string]$SessionDir,
@@ -59,7 +62,7 @@ function Write-NextStep {
                 # Item 212: the Agent tool takes `effort` beside `model`; the level is the pair.
                 Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass as the Agent tool's effort parameter, together with model " + $RecommendedModel + " (the Agent tool takes its family alias; see docs/orchestrators/claude.md).") -ForegroundColor Cyan
             } else {
-                Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to launch-codex-specialist.ps1 -Effort, with -Model " + $RecommendedModel + " (Codex only).") -ForegroundColor Cyan
+                Write-Host ("[RECOMMENDED EFFORT] " + $RecommendedEffort + " - pass to " + (New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Parameters ([ordered]@{ Effort = $RecommendedEffort }) -Reference) + ", with -Model " + $RecommendedModel + " (Codex only).") -ForegroundColor Cyan
             }
         }
         if (-not [string]::IsNullOrEmpty($RecommendedAgent) -and $levelTarget -eq "claude") {
@@ -82,25 +85,25 @@ function Write-NextStep {
     }
 }
 
-if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-PwshCommand)) {
     . (Join-Path $PSScriptRoot "platform.ps1")
 }
 
-if (-not (Get-Command Assert-CrucibleContextKeys -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Assert-CrucibleContextKeys)) {
     . (Join-Path $PSScriptRoot "crucible-context.ps1")
 }
 
 # Declare Invoke-GitChecked's dependency explicitly; dot-sourcing flattens scope
 # but does not guarantee a sibling's load order. Item 14.
-if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Invoke-GitChecked)) {
     . (Join-Path $PSScriptRoot "git.ps1")
 }
 
-if (-not (Get-Command Get-ClaudeAgentDrift -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-ClaudeAgentDrift)) {
     . (Join-Path $PSScriptRoot "claude-agents.ps1")
 }
 
-if (-not (Get-Command Test-NoCodeClosure -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Test-NoCodeClosure)) {
     . (Join-Path $PSScriptRoot "no-code-closure.ps1")
 }
 
@@ -148,6 +151,12 @@ function Resolve-ImplementationWorkdir {
 function New-CruciblePromptText {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "LatestHandoff", "PromptLib", "SessionDir", "TaskId", "Ceiling", "LogFile", "CircuitBreakerHistoryFile", "WorkspacesDir", "CrucibleRoot", "RepoRoot"
     )
@@ -163,7 +172,7 @@ function New-CruciblePromptText {
     $workspacesDir = $Context.WorkspacesDir
     $crucibleRoot = $Context.CrucibleRoot
     $repoRoot = $Context.RepoRoot
-    $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $repoRoot $crucibleRoot }
+    $resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $repoRoot -CrucibleRoot $crucibleRoot
     $Recover = [bool]$Context.Recover
 
     # --- 5. Template Assembly ---
@@ -193,7 +202,10 @@ function New-CruciblePromptText {
             $promptVersion = $matches[1]
         }
 
-        # Simple placeholder replacement
+        # Simple placeholder replacement. A quoted path placeholder is a command argument and
+        # takes the path as a literal, so a root with a dollar sign does not expand. Item 275.
+        $promptText = Set-CrucibleCommandPathPlaceholder -Text $promptText -Placeholder "{{crucible_root}}" -Value $resolvedCrucibleRoot -Name "CrucibleRoot"
+        $promptText = Set-CrucibleCommandPathPlaceholder -Text $promptText -Placeholder "{project_root}" -Value $repoRoot -Name "ProjectRoot"
         $promptText = $promptText.Replace("{{crucible_root}}", $resolvedCrucibleRoot)
         $promptText = $promptText.Replace("powershell.exe", (Get-PwshCommand))
         $promptText = $promptText.Replace("{task_id}", $handoff.task_id)
@@ -210,27 +222,13 @@ function New-CruciblePromptText {
         # Conditional rebase section injection. The branch is the configured primary branch,
         # not a hardcoded master, so a main-only repository gets commands that run. Item 189.
         $rebaseOnto = if ($rebaseCount -gt 0) { Get-ConfiguredPrimaryBranch -ProjectRoot $repoRoot } else { "" }
+        $promptText = $promptText.Replace("{primary_branch}", $rebaseOnto)
         $architectRebaseContent = "`n## Rebase Workflow`n`n" +
-            "If you are receiving this task for rebase (status: `"Ready for Rebase`"):`n`n" +
-            "1. **Check out ${rebaseOnto}**: ``git checkout $rebaseOnto`` `n" +
-            "2. **Update ${rebaseOnto}**: ``git pull origin $rebaseOnto`` `n" +
-            "3. **Rebase Task Branch**: ``git rebase $rebaseOnto task/$($handoff.task_id)`` `n" +
-            "4. **Resolve Conflicts**:`n" +
-            "   - Manually resolve any conflicts in the files listed in ``conflict_report.json``.`n" +
-            "   - Use ``git add`` to mark resolved files.`n" +
-            "   - Continue rebase: ``git rebase --continue``.`n" +
-            "5. **Validation**: Run full test suite to ensure the rebase didn't break anything.`n" +
-            "6. **Handoff**:`n" +
-            "   - ``rebase_count`` carries forward on its own. Do not edit handoff JSON.`n" +
-            "   - Status: `"Ready for Review`".`n" +
-            "   - Reason: `"Rebase onto $rebaseOnto complete. Conflicts resolved.`"`n" +
-            "   - Hand off to **Reviewer**."
-            
+            "Primary branch: " + $rebaseOnto + ". Rebase count: " + $rebaseCount + ".`n" +
+            "[Rebase SOP](<" + $resolvedCrucibleRoot + "/sops/implementation.md#rebase-workflow>).`n"
         $reviewerRebaseContent = "`n## Post-Rebase Verification`n`n" +
-            "If the handoff indicates this is a post-rebase review:`n`n" +
-            "1. **Verify Clean Merge**: Confirm that the Architect resolved all conflicts from conflict_report.json.`n" +
-            "2. **Full Regression Check**: Since a rebase involves changing the base of the branch, pay extra attention to any semantic conflicts that git might have missed.`n" +
-            "3. **Check rebase_count**: If rebase_count is 3 or more, and conflicts persist, flag for human escalation."
+            "Primary branch: " + $rebaseOnto + ". Rebase count: " + $rebaseCount + ".`n" +
+            "[Post-rebase SOP](<" + $resolvedCrucibleRoot + "/sops/verification.md#post-rebase-verification>).`n"
 
         if ($rebaseCount -gt 0) {
             if ($handoff.target_phase -eq "implementation") {
@@ -269,18 +267,15 @@ function New-CruciblePromptText {
 
         if (Test-NoCodeReviewFix -Handoff $handoff -RepoRoot $repoRoot) {
             $promptText += "`n`n## No-Code Review-Fix`n`n" +
-                "This is a research item with no task branch, so there is no worktree and no code to change. " +
-                "The fix is to the backlog spec and session files named above, which are gitignored: edit them in place under " +
-                $repoRoot + ". Do not create a branch or worktree, and do not commit or force-add these files; " +
-                "a task branch would also defeat the No-Code Closure at deployment.`n"
+                "This research item has no task branch or worktree. Its backlog spec and session files are under " + $repoRoot + ".`n" +
+                "[No-code review-fix SOP](<" + $resolvedCrucibleRoot + "/sops/implementation.md#no-code-review-fix>).`n"
         }
 
         if (Test-NoCodeReReview -Handoff $handoff -RepoRoot $repoRoot) {
             $promptText += "`n`n## No-Code Re-Review`n`n" +
-                "This handoff comes from implementation, but it is a no-code review-fix on a research item with no task branch: " +
-                "there is no worktree, no diff and no code to check. Use the Stub-Only Close-Out workflow, not Pattern A/B. " +
-                "Do not run run-isolated-checks.ps1 and do not create a branch or worktree; the backlog validator is the automated check. " +
-                "Also confirm every fix in " + ($sessionRootForPrompt + "/" + $TaskId) + "/implementation/task.md was made.`n"
+                "This research review-fix has no task branch, worktree, code or diff. " +
+                "Fix specification: " + ($sessionRootForPrompt + "/" + $TaskId) + "/implementation/task.md.`n" +
+                "[Stub-Only Close-Out SOP](<" + $resolvedCrucibleRoot + "/sops/verification.md#stub-only-close-out-grooming---verification-shortcut>).`n"
         }
 
         # Handoff context injection
@@ -334,7 +329,7 @@ function New-CruciblePromptText {
             "- **Budget**: " + $handoffCount + "/" + $ceiling + " handoffs used (" + $budgetRemaining + " remaining)"
         if ([int]$strikeCount -eq 2) {
             $contextBlock += "`n`n> **WARNING (Strike 2/3):** One more review failure will BLOCK this task. " +
-                "Architect: reduce scope, don't attempt a full re-implementation."
+                "[Review-fix SOP](<" + $resolvedCrucibleRoot + "/sops/implementation.md#session-start>)."
         }
         $promptText = $promptText.Replace("{context_block}", $contextBlock)
     }
@@ -347,8 +342,7 @@ function New-CruciblePromptText {
         }
         $recoveryMsg = "## RECOVERY MODE`n" +
                        "You are in RECOVERY MODE. Your last recorded progress was: $recoveryMarker.`n" +
-                       "Please re-read the session context and continue from this point.`n" +
-                       "Do not repeat work that has already been verified as complete.`n`n"
+                       "[Recovery SOP](<" + $resolvedCrucibleRoot + "/sops/specialist-workspace.md#recovery>).`n`n"
         $promptText = $recoveryMsg + $promptText
     }
 
@@ -379,6 +373,13 @@ function New-CruciblePromptText {
             exit 1
         }
 
+    # The Reviewer handoff's copy of every check that did not run, added after the placeholder
+    # guard because a recorded reason is data, not template. I12, item 258.
+    $notRunSection = Format-ChecksNotRunSection -SessionDir $sessionDir -TaskId $handoff.task_id
+    if (-not [string]::IsNullOrEmpty($notRunSection)) {
+        $promptText = $promptText + "`n`n" + $notRunSection
+    }
+
     $Context.TypeDir = $typeDir
     $Context.RelativeHandoffPath = $relativeHandoffPath
     $Context.TemplateFile = $templateFile
@@ -390,6 +391,12 @@ function New-CruciblePromptText {
 
 function Write-CruciblePromptOutput {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "SessionDir", "TaskId", "PromptText", "PromptVersion", "Ceiling"
@@ -441,6 +448,12 @@ function Write-CruciblePromptOutput {
 function Initialize-CrucibleTargetSession {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
 
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "SessionDir", "BacklogDir", "RepoRoot", "CrucibleRoot", "FrameworkPowerShell", "TaskId",
         "Init", "TypeDir", "BudgetCeilings", "Ceiling", "RelativeHandoffPath", "WorkspacesDir"
@@ -451,7 +464,7 @@ function Initialize-CrucibleTargetSession {
     $backlogDir = $Context.BacklogDir
     $REPO_ROOT = $Context.RepoRoot
     $crucibleRoot = $Context.CrucibleRoot
-    $resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { Join-Path $REPO_ROOT $crucibleRoot }
+    $resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $crucibleRoot
     $FRAMEWORK_POWERSHELL = $Context.FrameworkPowerShell
     $TaskId = $Context.TaskId
     $Init = [bool]$Context.Init
@@ -532,17 +545,11 @@ function Initialize-CrucibleTargetSession {
 
             # Validate budget_tier against backlog spec to prevent agent budget escalation (Fix 10)
             if ($backlogItemPath -ne "unknown" -and (Test-Path $backlogItemPath)) {
-                $specFrontmatter = Get-Content $backlogItemPath -Head 20 -Encoding UTF8
-                foreach ($fml in $specFrontmatter) {
-                    if ($fml -match 'budget_tier:\s*"(\w+)"') {
-                        $specBudgetTier = $matches[1].ToLower()
-                        if ($specBudgetTier -ne $handoff.budget_tier.ToLower()) {
-                            Write-Host "[WARN] budget_tier mismatch: handoff says '$($handoff.budget_tier)' but spec says '$specBudgetTier'. Using spec value to prevent budget escalation." -ForegroundColor Yellow
-                            $handoff | Add-Member -MemberType NoteProperty -Name budget_tier -Value $specBudgetTier -Force
-                            if ($budgetCeilings.ContainsKey($specBudgetTier)) { $ceiling = $budgetCeilings[$specBudgetTier] }
-                        }
-                        break
-                    }
+                $specBudgetTier = Get-SpecBudgetTier -SpecPath $backlogItemPath
+                if (-not [string]::IsNullOrWhiteSpace($specBudgetTier) -and $specBudgetTier -ne $handoff.budget_tier.ToLower()) {
+                    Write-Host "[WARN] budget_tier mismatch: handoff says '$($handoff.budget_tier)' but spec says '$specBudgetTier'. Using spec value to prevent budget escalation." -ForegroundColor Yellow
+                    $handoff | Add-Member -MemberType NoteProperty -Name budget_tier -Value $specBudgetTier -Force
+                    if ($budgetCeilings.ContainsKey($specBudgetTier)) { $ceiling = $budgetCeilings[$specBudgetTier] }
                 }
             }
 
@@ -550,12 +557,14 @@ function Initialize-CrucibleTargetSession {
             Check-Dependencies -BacklogItemPath $backlogItemPath -TargetSpecialist $handoff.target_phase -TaskId $handoff.task_id
 
             $pwshCmd = Get-PwshCommand
+            $isolatedChecksCommand = New-CrucibleCommand -Script "powershell/run-isolated-checks.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ TaskId = $handoff.task_id; Mode = "full"; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $resolvedCrucibleRoot
+            $mergeSimulationCommand = New-CrucibleCommand -Script "powershell/check-merge-conflicts.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ TaskId = $handoff.task_id; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $resolvedCrucibleRoot
 
             $taskLists = @{
                 grooming = "- [ ] Read BACKLOG.md and identify target item (or confirm {task_id})`n- [ ] Read existing spec file or create from template`n- [ ] Validate/paraphrase any Researcher findings (never copy-paste)`n- [ ] Write detailed implementation spec with acceptance criteria (mark [-] when not routing to implementation)`n- [ ] Set ``depends_on`` frontmatter if applicable`n- [ ] Update BACKLOG.md status + run validate-backlog.ps1`n- [ ] Record progress via ### CHECKPOINT`n- [ ] Write handoff.json to the routed phase (implementation, research, done, or verification for a Stub-Only Close-Out)"
                 implementation = "- [ ] [Session Start](<{sop_path}#session-start>)`n- [ ] [Phase 2: Code](<{sop_path}#phase-2-code>) - worktree: {worktree}`n- [ ] [Phase 3: Self-Review](<{sop_path}#phase-3-self-review>)`n- [ ] [Phase 4: Handoff to Verification](<{sop_path}#phase-4-handoff-to-verification>)`n- [ ] [Quality Bar](<{sop_path}#quality-bar>)`n`n## Optional Steps`n- [ ] [Phase 1: Design](<{sop_path}#phase-1-design-required-for-50-lines-or-unclear-spec>)"
-                verification = "- [ ] Enter worktree {worktree} (never checkout task branch in main repo)`n- [ ] Scope check: verify all modified files are within file_affinity`n- [ ] Run isolated checks: $pwshCmd -ExecutionPolicy Bypass -File powershell/run-isolated-checks.ps1 -TaskId {task_id} -Mode full`n- [ ] Read spec and review changes against acceptance criteria`n- [ ] Write review_report.md with YAML header (review_decision: APPROVED)`n- [ ] If CHANGES_REQUESTED: write {session_dir}/implementation/task.md with fix spec`n- [ ] Record progress via ### CHECKPOINT`n- [ ] Write handoff.json targeting deployment phase (approved) or implementation phase (changes)"
-                deployment = "- [ ] Verify task dependencies satisfied (crucible.ps1 dependency gate)`n- [ ] Verify latest verification handoff targets deployment and review_report.md has review_decision: APPROVED and acceptance_criteria_met: true`n- [ ] Run merge simulation: check-merge-conflicts.ps1 -TaskId {task_id}`n- [ ] If merge conflict: hand off to Architect for rebase`n- [ ] Draft dev log entry and append to UNPUBLISHED_LOGS.md`n- [ ] Run validate-dev-log.ps1 to check for PII/secrets`n- [ ] Record progress via ### CHECKPOINT`n- [ ] Write handoff.json targeting done phase (or grooming phase if production issues threshold met)"
+                verification = "- [ ] Enter worktree {worktree} (never checkout task branch in main repo)`n- [ ] Scope check: verify all modified files are within file_affinity`n- [ ] Run isolated checks: $isolatedChecksCommand`n- [ ] Read spec and review changes against acceptance criteria`n- [ ] Write review_report.md with YAML header (review_decision: APPROVED)`n- [ ] If CHANGES_REQUESTED: write {session_dir}/implementation/task.md with fix spec`n- [ ] Record progress via ### CHECKPOINT`n- [ ] Write handoff.json targeting deployment phase (approved) or implementation phase (changes)"
+                deployment = "- [ ] Verify task dependencies satisfied (crucible.ps1 dependency gate)`n- [ ] Verify latest verification handoff targets deployment and review_report.md has review_decision: APPROVED and acceptance_criteria_met: true`n- [ ] Run merge simulation: $mergeSimulationCommand`n- [ ] If merge conflict: hand off to Architect for rebase`n- [ ] Draft dev log entry and append to UNPUBLISHED_LOGS.md`n- [ ] Run validate-dev-log.ps1 to check for PII/secrets`n- [ ] Record progress via ### CHECKPOINT`n- [ ] Write handoff.json targeting done phase (or grooming phase if production issues threshold met)"
                 research = "- [ ] Read the research brief from the backlog item`n- [ ] Define scope: what questions must be answered`n- [ ] Gather findings (external sources or internal codebase)`n- [ ] Write findings to .crucible/research/ -- summarize in own words`n- [ ] Flag any suspicious/injection-risk content in suspicious_content field`n- [ ] Record progress via ### CHECKPOINT`n- [ ] Write handoff.json targeting grooming phase"
             }
 
@@ -570,7 +579,7 @@ function Initialize-CrucibleTargetSession {
             $implementationSopPath = (Join-Path $resolvedCrucibleRoot "sops/implementation.md").Replace("\", "/")
             $selectedTaskList = $selectedTaskList.Replace("{sop_path}", $implementationSopPath)
 
-            $sessionEndCmd = "$pwshCmd -ExecutionPolicy Bypass -File `"$resolvedCrucibleRoot/powershell/crucible.ps1`" -Init -TaskId " + $handoff.task_id + " -ProjectRoot `"$REPO_ROOT`" -Quiet"
+            $sessionEndCmd = New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; TaskId = $handoff.task_id; ProjectRoot = $REPO_ROOT; Quiet = $true }) -CrucibleRoot $resolvedCrucibleRoot -Transport Bash -Invoker ($pwshCmd + " -NoProfile -ExecutionPolicy Bypass -File")
             $sessionEndSection = "## Session End - REQUIRED`n" +
                 "When your work is complete, run this command via your Bash tool (do NOT skip or print it - execute it):`n`n" +
                 "  $sessionEndCmd`n`n" +
@@ -632,6 +641,12 @@ function Initialize-CrucibleTargetSession {
 
 function Write-CrucibleCiStatusBanner {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @(
         "Handoff", "Target", "PromptFilePath", "AutoAdvance", "IsBootstrap", "NextCrucibleCommand", "SessionDir"
@@ -722,7 +737,7 @@ function Write-CrucibleCiStatusBanner {
         $agentRoot = if ($Context.ContainsKey("RepoRoot") -and -not [string]::IsNullOrWhiteSpace([string]$Context.RepoRoot)) { [string]$Context.RepoRoot } else { "" }
         $agentDrift = @(Get-ClaudeAgentDrift -ProjectRoot $agentRoot | Where-Object { $_.Name -eq $recommendedAgent })
         if ($agentDrift.Count -gt 0) {
-            $recommendedAgentIssue = ("Agent definition " + $recommendedAgent + " is " + $agentDrift[0].Status + " for the configured level. Run: pwsh -File " + $script:CLAUDE_AGENT_REGENERATE)
+            $recommendedAgentIssue = ("Agent definition " + $recommendedAgent + " is " + $agentDrift[0].Status + " for the configured level. Run from the project root: " + (Get-ClaudeAgentRegenerateCommand -ProjectRoot $agentRoot -Relative))
         }
     }
 
@@ -735,6 +750,12 @@ function Write-CrucibleCiStatusBanner {
 
 function Start-CrucibleTargetSessionLog {
     param([Parameter(Mandatory=$true)][hashtable]$Context)
+
+    # I11: helper failures cannot be swallowed outside this pipeline boundary.
+    trap {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 
     Assert-CrucibleContextKeys -Context $Context -RequiredKeys @() -NonNullKeys @("Handoff", "Recover", "LogFile", "CircuitBreakerHistoryFile")
 

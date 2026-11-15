@@ -23,12 +23,7 @@ invoke_subagent(
       "Prompt": (
         f"{Role}: {TASK_ID} - read and follow all instructions in "
         f".crucible/session/{TASK_ID}/{phase}/prompt.md\n\n"
-        "Follow your SOP checkpoint mandate: append `### CHECKPOINT [brief summary]` "
-        "to task.md after each major phase. Do not write the final handoff until all "
-        "required task checklist items are complete.\n\n"
-        "After writing handoff JSON, run crucible.ps1 -Init -TaskId {TASK_ID} -ProjectRoot \"{project_root}\" -Quiet "
-        "and report the Crucible output verbatim. Stop after reporting. "
-        "Do not spawn successor agents."
+        "Follow the linked phase SOP."
       )
     }
   ]
@@ -48,15 +43,7 @@ invoke_subagent(
       "TypeName": "self",
       "Role": "Groomer",
       "Prompt": (
-        "Groomer: Next Item\n\n"
-        "Read AGENTS.md, <crucible_root>/docs/operating-manual.md, <crucible_root>/personas/groomer.md, "
-        "and .crucible/sops/grooming.md. Select the next eligible backlog item, write or "
-        "update its spec, write the grooming -> implementation handoff, then run:\n\n"
-        "  pwsh -ExecutionPolicy Bypass -File \"{{crucible_root}}/powershell/crucible.ps1\" "
-        "-Init -TaskId <selected_task_id> -ProjectRoot \"{project_root}\" -Quiet\n\n"
-        "Follow your SOP checkpoint mandate. Do not write the handoff until required "
-        "checklist items are complete. Stop after Crucible output. Report the selected "
-        "task ID and Crucible output verbatim."
+        "Groomer: Next Item. Target: gemini. Read and follow .crucible/sops/grooming.md#bootstrap-no-task-id."
       )
     }
   ]
@@ -67,25 +54,18 @@ invoke_subagent(
 
 ## After Each Sub-Agent Returns
 
-Follow `.crucible/sops/orchestrator.md` **Step 5** (verify specialist output and track budget), then **Step 6** (verify Crucible output and next phase artifacts). A gate signal at `.crucible/session/{TASK_ID}/gate_pending.txt` goes straight to the Gate Protocol before anything else, and any failed check goes to the Failure Protocol rather than advancing the pipeline.
+Follow [Step 5](../../sops/orchestrator.md#step-5---verify-specialist-output-and-track-budget), then [Step 6](../../sops/orchestrator.md#step-6---verify-crucible-output-and-next-phase-artifacts) to verify Crucible output and next phase artifacts.
 
-Step 5 includes the **budget ladder** that warns, then escalates and waits, then presents the ceiling as a Circuit Breaker Gate. Read its thresholds from the SOP; they are not repeated here, so they cannot go stale here. This section used to restate Step 5 as a four-item list and had already dropped the budget check entirely. Point at the SOP; do not re-inline it.
-
----
 
 ## Human Confirmation
 
-Before every specialist dispatch, present the status report format defined in `.crucible/sops/orchestrator.md` Step 3 - including the budget tracking line. The human is the Pilot in Command; every dispatch is their decision, not a formality.
+Follow the [approval procedure](../../sops/orchestrator.md#step-3---report-to-human-and-request-confirmation).
 
-Wait for an explicit "go" or redirect. Do not dispatch without confirmation, unless `crucible.ps1 -Init` printed `[APPROVAL MODE] to-gate`; then follow "Approval mode" in `.crucible/sops/orchestrator.md` Step 3.
-
----
 
 ## Gate and Failure Protocols
 
-All gate presentation formats (Research Gate, Human Gate, Circuit Breaker Gate) and the failure decision tree are defined in `.crucible/sops/orchestrator.md`. Follow them exactly.
+Follow the [Gate Protocol](../../sops/orchestrator.md#gate-protocol), [Failure Protocol](../../sops/orchestrator.md#failure-protocol), and [Session End](../../sops/orchestrator.md#session-end).
 
----
 
 ## Benefits
 - **No Context Rot**: Each specialist starts with 0 tokens of history, preventing hallucination creep in long sessions.
@@ -104,12 +84,7 @@ invoke_agent(
   prompt=(
     f"{Role}: {TASK_ID} - read and follow all instructions in "
     f".crucible/session/{TASK_ID}/{phase}/prompt.md\n\n"
-    "Follow your SOP checkpoint mandate: append `### CHECKPOINT [brief summary]` "
-    "to task.md after each major phase. Do not write the final handoff until all "
-    "required task checklist items are complete.\n\n"
-    "After writing handoff JSON, run crucible.ps1 -Init -TaskId {TASK_ID} -ProjectRoot \"{project_root}\" -Quiet "
-    "and report the Crucible output verbatim. Stop after reporting. "
-    "Do not spawn successor agents."
+    "Follow the linked phase SOP."
   )
 )
 ```

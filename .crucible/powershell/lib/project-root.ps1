@@ -1,3 +1,5 @@
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # Which project is this script operating on?
 #
 # The answer is derived from the script's own location, not from the caller's working
@@ -20,27 +22,47 @@ function Test-CrucibleProjectRoot {
 
 function Resolve-CrucibleProjectRoot {
     param(
-        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$ProjectRoot,
-        [Parameter(Mandatory=$true)][string]$ScriptRoot,
+        [AllowEmptyString()][string]$ProjectRoot = "",
+        [string]$ScriptRoot = "",
+        [string]$AncestorOf = "",
+        [bool]$RequireProject = $true,
         [string]$ParameterName = "-ProjectRoot"
     )
 
+    # Blocked records start with a configured backlog, which may live outside the bundle.
+    # Preserve their ancestor-marker policy explicitly rather than deriving from a script.
+    if ($PSBoundParameters.ContainsKey("AncestorOf")) {
+        if ([string]::IsNullOrWhiteSpace($AncestorOf)) { throw "AncestorOf must name a backlog directory." }
+        $dir = Split-Path -Parent (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $AncestorOf))
+        while (-not [string]::IsNullOrWhiteSpace($dir)) {
+            if (Test-CrucibleProjectRoot -Path $dir) { return $dir }
+            $nextDir = Split-Path -Parent $dir
+            if ($nextDir -eq $dir) { break }
+            $dir = $nextDir
+        }
+        throw "No Crucible project ancestor found for '$AncestorOf'."
+    }
     if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
         if (-not (Test-Path -LiteralPath $ProjectRoot)) {
             throw ($ParameterName + " path does not exist: '" + $ProjectRoot + "'.")
         }
-        return (Resolve-Path -LiteralPath $ProjectRoot).Path
+        return (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
     }
 
+    if ([string]::IsNullOrWhiteSpace($ScriptRoot)) { throw "ScriptRoot is required when deriving a project root." }
     $derivedParent = Split-Path -Path $ScriptRoot -Parent
     if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
         $derivedParent = Split-Path -Path $derivedParent -Parent
     }
-    $derivedRoot = (Resolve-Path -LiteralPath $derivedParent).Path
+    $derivedRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $derivedParent))
+    if (-not $RequireProject) { return $derivedRoot }
     if (Test-CrucibleProjectRoot -Path $derivedRoot) { return $derivedRoot }
 
-    $cwd = (Get-Location).Path
-    if (Test-CrucibleProjectRoot -Path $cwd) { return $cwd }
+    $location = Get-Location
+    $cwd = $location.Path
+    if ($location.Provider.Name -eq 'FileSystem' -and (Test-CrucibleProjectRoot -Path $cwd)) {
+        return $location.ProviderPath
+    }
 
     throw ("Pass " + $ParameterName + " naming the project to operate on. It was omitted, the directory derived from this script ('" + $derivedRoot + "') is not a valid Crucible project, and neither is the current working directory ('" + $cwd + "') - both are missing .crucible/backlog and .crucible/config.yaml.")
 }

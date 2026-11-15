@@ -27,6 +27,25 @@ function New-ProjectDir {
 }
 
 try {
+    $results += Run-Test -Name "Review255 ancestor search ignores unrelated crucible directories" -Body {
+        $project = New-ProjectDir -Path (Join-Path $tempRoot "review255-ancestor") -WithConfig
+        $unrelated = Join-Path $project "nested"
+        $backlog = Join-Path $unrelated "deep/backlog"
+        New-Item -ItemType Directory -Force -Path $backlog, (Join-Path $unrelated ".crucible") | Out-Null
+        Assert-Result "unrelated ancestor skipped" ((Resolve-CrucibleProjectRoot -AncestorOf $backlog) -eq $project) "unrelated .crucible selected"
+    }
+
+    $results += Run-Test -Name "Item255 root policies preserve framework launches and backlog ancestor search" -Body {
+        $bare = New-ProjectDir -Path (Join-Path $tempRoot "item255-framework")
+        $scripts = Join-Path $bare "powershell"
+        New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+        Assert-Result "unchecked derivation" ((Resolve-CrucibleProjectRoot -ScriptRoot $scripts -RequireProject:$false) -eq $bare) "framework derivation required project markers"
+        $project = New-ProjectDir -Path (Join-Path $tempRoot "item255-ancestor") -WithConfig
+        $backlog = Join-Path $project "custom/deep/backlog"
+        New-Item -ItemType Directory -Force -Path $backlog | Out-Null
+        Assert-Result "ancestor search" ((Resolve-CrucibleProjectRoot -AncestorOf $backlog) -eq $project) "custom backlog resolved to wrong ancestor"
+    }
+
     $results += Run-Test -Name "A directory is a project when either marker is present" -Body {
         $withBacklog = New-ProjectDir -Path (Join-Path $tempRoot "marker-backlog") -WithBacklog
         $withConfig  = New-ProjectDir -Path (Join-Path $tempRoot "marker-config") -WithConfig
@@ -82,6 +101,19 @@ try {
             Pop-Location
         }
         Assert-Result -Name "cwd accepted when it is a project" -Condition ($resolved -eq $project) -FailureMessage ("expected '" + $project + "', got '" + $resolved + "'")
+    }
+
+    $results += Run-Test -Name "A non-FileSystem CWD is refused before project probing" -Body {
+        $framework = New-ProjectDir -Path (Join-Path $tempRoot 'framework-provider')
+        $scriptRoot = Join-Path $framework 'powershell'
+        New-Item -ItemType Directory -Path $scriptRoot -Force | Out-Null
+        $message = ''
+        Push-Location Env:/
+        try {
+            try { $null = Resolve-CrucibleProjectRoot -ProjectRoot '' -ScriptRoot $scriptRoot }
+            catch { $message = $_.Exception.Message }
+        } finally { Pop-Location }
+        Assert-Result 'explicit root requested' ($message -match 'Pass -ProjectRoot' -and $message -match 'Env:') $message
     }
 
     # The defect itself. With nothing to derive and a working directory that is not a

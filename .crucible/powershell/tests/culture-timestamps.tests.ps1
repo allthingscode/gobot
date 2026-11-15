@@ -217,7 +217,7 @@ try {
 }
 "@
         [System.IO.File]::WriteAllText($childScript, $scriptContent, (New-Object System.Text.UTF8Encoding $false))
-        $output = @(& (Get-Process -Id $PID).Path -NoProfile -ExecutionPolicy Bypass -File $childScript)
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-Process -Id $PID).Path -NoProfile -ExecutionPolicy Bypass -File $childScript })
         Assert-Result -Name "gate decision child exits zero" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("exit=" + $LASTEXITCODE + " output=" + ($output -join "`n"))
 
         $gatePath = Join-Path $sessionDir "global/gate_decisions/gate_decision_C-CULTURE-GATE_pending.json"

@@ -46,8 +46,11 @@ Bump `VERSION` BEFORE tagging. The tag references the commit that contains the n
 4. **Commit:** `chore(release): vX.Y.Z` (single commit covering the CHANGELOG promotion + VERSION bump).
 
 Under the batched push cadence in [../CONTRIBUTING.md](../CONTRIBUTING.md), the
-release commit can sit locally for days before it is pushed, and CI runs only on
-push - and only on the pushed tip, not on every commit in the batch. So the
+release commit can sit locally for days before it is pushed. Automatic CI
+verifies Ubuntu on the pushed `main` tip, and manual dispatch defaults to
+Windows on that ref's tip. The tip is green when the push run's Ubuntu job
+and the dispatched Windows job are both green, rather than every commit in
+the batch being verified. So the
 release commit is usually not the commit CI verifies: later commits land on top
 of it while the batch waits. Do not create the tag while the release is
 unpushed, and do not tag the release commit by hash. Push first, then tag the
@@ -79,12 +82,17 @@ else                         { "OK: released section intact, tag the tip" }
 
 On `STOP`, re-cut the release rather than tagging over it.
 
-5. **Push the commit, then wait for the matrix.**
+5. **Push the commit, dispatch CI, then wait for both OSes.**
    ```powershell
    git push origin main
+   gh workflow run ci.yml --ref main
    ```
-   Wait for the Windows and Linux legs to pass on the resulting tip. Do not
-   continue while either leg is red or still running.
+   Wait for the push run's Ubuntu job and the dispatched Windows job to pass
+   on the same resulting tip. Do not continue while either leg is red or still
+   running. If the push was tracking-doc-only, no push run exists; the last
+   code tip's Ubuntu result applies, or dispatch with `-f os=both`. Push CI triggers only on `main`; verifying another branch needs
+   `gh workflow run ci.yml --ref <branch> -f os=both` and both dispatched jobs
+   green. Push and dispatch runs have separate concurrency groups.
 
 6. **Tag the verified tip, then push the tag:**
    ```powershell

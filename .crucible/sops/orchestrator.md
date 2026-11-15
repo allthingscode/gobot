@@ -1,4 +1,4 @@
-<!-- prompt_version: orchestrator-sop-v7 -->
+<!-- prompt_version: orchestrator-sop-v8 -->
 # SOP: Orchestrator
 
 **Platform note:** Commands use `pwsh` (PowerShell 7+). Windows PowerShell 5.1 is not supported.
@@ -55,7 +55,7 @@ deployment     -> done | implementation (rejected with rework requested, or reba
 If a handoff's `target_phase` is not in the list above for that `source_phase`, it is a routing violation. Do not dispatch. Escalate to the human.
 
 ### Specialist CWD / Relative Paths Warning (D48)
-When a specialist's CWD is the framework repo and the task targets an adopter, built-in file tools (`Glob`, relative `Read` or `view_file` calls) resolve against the framework repo instead of the adopter. Specialists MUST use **absolute adopter paths** or Grep/search with an explicit path, and pass `-ProjectRoot` to every Crucible script.
+The [Specialist Workspace SOP](specialist-workspace.md) owns file-tool paths and inherited working directories. Supply resolved task paths in the dispatch facts, and pass `-ProjectRoot` to every Crucible script.
 
 ### Mandatory Human Gates
 These transitions always fire a gate that blocks the loop. They are not conditional.
@@ -122,13 +122,7 @@ The mode only removes the wait between phases. It never decides a gate, picks a 
 
 Use the sub-agent invocation mechanic for your environment (see tool-specific doc). The sub-agent receives:
 1. The content of `prompt.md`
-2. The checkpoint mandate:
-   ```
-   Follow your SOP checkpoint mandate: append `### CHECKPOINT [brief summary]` to
-   task.md after each major phase. Do not write the final handoff until all required
-   task checklist items are complete. Stop after running crucible.ps1 and report the
-   Crucible output. Do not spawn successor agents.
-   ```
+2. A pointer to the phase SOP linked by that prompt. The phase SOP owns checkpoints, handoff, pipeline advancement and session end; the dispatch payload does not restate those steps.
 
 **Non-Claude (multi-brand) specialists.** A phase may be run by a different agent brand (e.g. Codex)
 via a Crucible launcher rather than a native sub-agent. The launcher reports an explicit
@@ -140,7 +134,7 @@ escalated, or quit, and bring that to the human (after the human decides an esca
 account hit its usage limit: this is not a runtime fault, so stop, tell the human the reset time the
 launcher prints, and do not relaunch or rerun until at least one full minute after it (the launcher
 prints that time as `retry_not_before`; uncommitted work the run left in the working tree is kept and
-can be continued then). See the tool-specific doc for the launch command and preflight. If the launch result never reaches you (the shell reports an error or no output), read `codex-launch-status.txt` in the phase's session directory: `STATUS=RUNNING` with a live `launcher_pid` means the launch is still going, so wait for that process; otherwise the file holds the final STATUS line. The verdict-not-label rule in Step 5 applies.
+can be continued then). The launcher prints `STATUS=RUNNING` when Codex starts; the last STATUS line it prints is the outcome. See the tool-specific doc for the launch command and preflight. If the launch result never reaches you (the shell reports an error or no output), read `codex-launch-status.txt` in the phase's session directory: `STATUS=RUNNING` with a live `launcher_pid` means the launch is still going, so wait for that process; otherwise the file holds the final STATUS line. The verdict-not-label rule in Step 5 applies.
 
 ### Step 5 - Verify specialist output and track budget
 

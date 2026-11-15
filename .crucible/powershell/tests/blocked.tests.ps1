@@ -42,8 +42,52 @@ $payload | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot "u
 '@ | Set-Content -LiteralPath $stubScript -Encoding UTF8
 
 try {
+    foreach ($parameter in @('BacklogDir', 'FrameworkPowerShell', 'ProjectRoot')) {
+        foreach ($mode in @('missing', 'empty')) {
+            $results += Run-Test -Name "Required $parameter refuses $mode despite ambient defaults" -Body {
+                $caseRoot = Join-Path $tempRoot "$parameter-$mode"
+                New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+                $child = Join-Path $caseRoot 'required.ps1'
+                $supplied = if ($parameter -eq 'BacklogDir') { "-FrameworkPowerShell '$frameworkDir'" } else { "-BacklogDir '$caseRoot'" }
+                if ($parameter -eq 'ProjectRoot') { $supplied += " -FrameworkPowerShell '$frameworkDir'" }
+                if ($parameter -ne 'ProjectRoot') { $supplied += " -ProjectRoot '$tempRoot'" }
+                if ($mode -eq 'empty') { $supplied += " -$parameter ''" }
+                @"
+`$ErrorActionPreference = 'Stop'
+`$PSStyle.OutputRendering = 'PlainText'
+. '$CRUCIBLE_LIB'
+`$Quiet = `$true
+`$backlogDir = '$caseRoot'
+`$FRAMEWORK_POWERSHELL = '$frameworkDir'
+`$Context = @{ RepoRoot = '$tempRoot' }; `$repoRoot = '$tempRoot'
+Write-BlockedTaskRecord -TaskId F-369 -CircuitBreaker fixture -AttemptCount 1 -LastPhase implementation -Summary fixture $supplied
+Write-Host 'SILENT_SUCCESS'
+"@ | Set-Content -LiteralPath $child -Encoding utf8
+                $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -NonInteractive -File $child }
+                Assert-Result 'required input refuses' ($res.ExitCode -ne 0 -and $res.Output -notmatch 'SILENT_SUCCESS') $res.Output
+                Assert-Result 'refusal names required parameter' (($res.Output -match ("mandatory[\s|]+parameters:[\s|]*\b" + $parameter + "\b")) -or ($res.Output -match ("parameter '" + $parameter + "'"))) $res.Output
+                Assert-Result 'no partial blocked record' (-not (Test-Path (Join-Path $caseRoot 'blocked'))) $res.Output
+            }
+        }
+    }
+    $results += Run-Test -Name "Blocked record uses explicit project root despite unrelated caller scope" -Body {
+        $caseRoot = Join-Path $tempRoot "item255-ancestor"
+        $caseBacklog = Join-Path $caseRoot "external/backlog"
+        $caseFramework = Join-Path $caseRoot "framework"
+        New-Item -ItemType Directory -Force -Path $caseBacklog, $caseFramework | Out-Null
+        $capture = Join-Path $caseFramework "root.txt"
+        Set-Content -LiteralPath (Join-Path $caseFramework "update-session-state.ps1") -Encoding UTF8 -Value @'
+param($Specialist, $TaskId, $UpdateJson, $Merge, $ProjectRoot)
+Set-Content -LiteralPath (Join-Path $PSScriptRoot "root.txt") -Value $ProjectRoot
+'@
+        $Context = @{ RepoRoot = "wrong-context-root" }
+        $repoRoot = "wrong-repo-root"
+        Write-BlockedTaskRecord -TaskId "F-255" -CircuitBreaker "budget_exceeded" -AttemptCount 1 -LastPhase "verification" -Summary "Test" -ProjectRoot "owner-result" -BacklogDir $caseBacklog -FrameworkPowerShell $caseFramework
+        Assert-Result "blocked record uses supplied project root" ((Get-Content -LiteralPath $capture -Raw).Trim() -eq "owner-result") "blocked helper used an ambient project root"
+    }
+
     $results += Run-Test -Name "Write-BlockedTaskRecord creates blocked record" -Body {
-        Write-BlockedTaskRecord -TaskId "F-010" -CircuitBreaker "budget_exceeded" -AttemptCount 7 -LastPhase "verification" -Summary "Too many handoffs" -Artifacts @("report.md", "log.txt") -BacklogDir $backlogDir -FrameworkPowerShell $frameworkDir
+        Write-BlockedTaskRecord -TaskId "F-010" -CircuitBreaker "budget_exceeded" -AttemptCount 7 -LastPhase "verification" -Summary "Too many handoffs" -Artifacts @("report.md", "log.txt") -ProjectRoot $tempRoot -BacklogDir $backlogDir -FrameworkPowerShell $frameworkDir
 
         $blockedDir = Join-Path $backlogDir "blocked"
         Assert-Result -Name "blocked dir" -Condition (Test-Path -LiteralPath $blockedDir) -FailureMessage "blocked directory was not created"

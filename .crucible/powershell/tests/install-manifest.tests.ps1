@@ -3,6 +3,7 @@
 $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
+. (Join-Path $PSScriptRoot '_fixtures.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
 $HELPER = Join-Path $REPO_ROOT "powershell/lib/install-manifest.ps1"
 . $HELPER
@@ -11,7 +12,7 @@ $results = @()
 
 $tempRoot = New-TestFixtureRoot -NameHint "manifest-test"
 
-$expectedScaffoldCount = @(git -C $REPO_ROOT ls-files templates/project/.crucible).Count
+$expectedScaffoldCount = @(Invoke-ExternalCommand -AsLines { git -C $REPO_ROOT ls-files templates/project/.crucible }).Count
 
 try {
     # Guards the counts below against vacuous green: if the scaffold tree ever reads as
@@ -43,7 +44,7 @@ try {
     $results += Run-Test -Name "Fresh install ships scaffold snapshot and self-hosts downstream init" -Body {
         $gen1Root = Join-Path $tempRoot "gen1-adopter"
         $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-        $output1 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $gen1Root -ProjectName "Gen1 Adopter" -Description "Gen1" -Language go -Quiet 2>&1)
+        $output1 = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $gen1Root -ProjectName "Gen1 Adopter" -Description "Gen1" -Language go -Quiet 2>&1 })
         Assert-Result -Name "gen1 install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("gen1 install failed: " + ($output1 -join "`n"))
 
         $snapshotConfigFile = Join-Path $gen1Root ".crucible\templates\project\.crucible\config.yaml"
@@ -56,7 +57,7 @@ try {
         # Self-hosting check (Generation 2 from Generation 1's bundled installer)
         $gen2Root = Join-Path $tempRoot "gen2-adopter"
         $gen1InitScript = Join-Path $gen1Root ".crucible\powershell\init-project.ps1"
-        $output2 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $gen1InitScript -ProjectRoot $gen2Root -ProjectName "Gen2 Adopter" -Description "Gen2" -Language go -Quiet 2>&1)
+        $output2 = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $gen1InitScript -ProjectRoot $gen2Root -ProjectName "Gen2 Adopter" -Description "Gen2" -Language go -Quiet 2>&1 })
         Assert-Result -Name "gen2 install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("gen2 self-hosting install failed: " + ($output2 -join "`n"))
 
         $gen2Config = Join-Path $gen2Root ".crucible\config.yaml"
@@ -66,30 +67,31 @@ try {
     }
 
     $results += Run-Test -Name "Nested .crucible runtime directories remain excluded from shipping" -Body {
-        $junkDir = Join-Path $REPO_ROOT "powershell\.crucible"
+        # Seeded in a copy: the real powershell/.crucible/ is not ignored, so junk there
+        # is listed by parallel repository scans and can vanish before they read it.
+        $framework = New-InstallSourceCopy -Destination (Join-Path $tempRoot "junk-framework")
+        $junkDir = Join-Path $framework "powershell\.crucible"
         $junkFile = Join-Path $junkDir "junk.txt"
         New-Item -ItemType Directory -Path $junkDir -Force | Out-Null
         Set-Content -LiteralPath $junkFile -Value "runtime junk" -Encoding UTF8
-        try {
-            $ownedFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $REPO_ROOT)
-            Assert-Result -Name "junk excluded from Get-FrameworkOwnedFiles" -Condition ($ownedFiles -notcontains "powershell/.crucible/junk.txt") -FailureMessage "expected powershell/.crucible/junk.txt to be excluded from framework-owned files"
 
-            $guardInstallRoot = Join-Path $tempRoot "guard-install-check"
-            $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-            $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $guardInstallRoot -ProjectName "Guard Check" -Quiet 2>&1)
-            Assert-Result -Name "guard install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("guard check install failed: " + ($output -join "`n"))
+        $ownedFiles = @(Get-FrameworkOwnedFiles -FrameworkRoot $framework)
+        Assert-Result -Name "copy enumerates framework files" -Condition ($ownedFiles -contains "powershell/init-project.ps1") -FailureMessage "the copied framework enumerated no installer, so the exclusion below proves nothing"
+        Assert-Result -Name "junk excluded from Get-FrameworkOwnedFiles" -Condition ($ownedFiles -notcontains "powershell/.crucible/junk.txt") -FailureMessage "expected powershell/.crucible/junk.txt to be excluded from framework-owned files"
 
-            $installedJunkPath = Join-Path $guardInstallRoot ".crucible/powershell/.crucible/junk.txt"
-            Assert-Result -Name "junk excluded from fresh install" -Condition (-not (Test-Path -LiteralPath $installedJunkPath)) -FailureMessage "expected powershell/.crucible/junk.txt to not be copied during initialization"
-        } finally {
-            Remove-Item -LiteralPath $junkFile -Force -ErrorAction SilentlyContinue
-        }
+        $guardInstallRoot = Join-Path $tempRoot "guard-install-check"
+        $script = Join-Path $framework "powershell/init-project.ps1"
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $guardInstallRoot -ProjectName "Guard Check" -Quiet 2>&1 })
+        Assert-Result -Name "guard install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("guard check install failed: " + ($output -join "`n"))
+
+        $installedJunkPath = Join-Path $guardInstallRoot ".crucible/powershell/.crucible/junk.txt"
+        Assert-Result -Name "junk excluded from fresh install" -Condition (-not (Test-Path -LiteralPath $installedJunkPath)) -FailureMessage "expected powershell/.crucible/junk.txt to not be copied during initialization"
     }
 
     $results += Run-Test -Name "Framework-owned files map to files produced by a fresh install" -Body {
         $installRoot = Join-Path $tempRoot "manifest-install"
         $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Manifest Test" -Quiet 2>&1)
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Manifest Test" -Quiet 2>&1 })
         Assert-Result -Name "install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("install failed: " + ($output -join "`n"))
 
         $manifest = Get-InstallManifest -FrameworkRoot $REPO_ROOT
@@ -131,7 +133,7 @@ try {
 
         $installRoot = Join-Path $tempRoot "manifest-install-check"
         $script = Join-Path $REPO_ROOT "powershell/init-project.ps1"
-        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Exclusion Check" -Quiet 2>&1)
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $script -ProjectRoot $installRoot -ProjectName "Exclusion Check" -Quiet 2>&1 })
         Assert-Result -Name "install exit" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("install failed: " + ($output -join "`n"))
 
         foreach ($devOnlyTest in $devOnlyProbes) {
@@ -300,6 +302,18 @@ try {
         $threwOnSelf = $false
         try { $null = Get-SupersededRenameMap -Manifest $self } catch { $threwOnSelf = $true }
         Assert-Result -Name "self rename throws" -Condition $threwOnSelf -FailureMessage "an entry renaming a path to itself was accepted"
+    }
+
+    # Item 302: the file was placed under the git root by a bare prefix match, so a path in
+    # the sibling directory proj2 was asked of proj's ignore rules as 2/<file>.
+    $results += Run-Test -Name "A path in a sibling-prefixed directory is not judged by the project's ignore rules" -Body {
+        $project = Join-Path $tempRoot "gitignored-sibling/proj"
+        $bundle = Join-Path $project ".crucible"
+        New-Item -ItemType Directory -Path $bundle, (Join-Path $tempRoot "gitignored-sibling/proj2") -Force | Out-Null
+        $null = Invoke-ExternalCommand -AsLines { git init --quiet $project 2>$null }
+        [System.IO.File]::WriteAllText((Join-Path $project ".gitignore"), "/2/`n/local/`n", (New-Object System.Text.UTF8Encoding($false)))
+        Assert-Result -Name "an ignored path inside the project is reported" -Condition (Test-CrucibleGitIgnored -BundleRoot $bundle -RelativePath "../local/a.txt") -FailureMessage "the fixture's ignore rule did not apply inside the project, so the check below is vacuous"
+        Assert-Result -Name "a sibling path is not ignored by the project" -Condition (-not (Test-CrucibleGitIgnored -BundleRoot $bundle -RelativePath "../../proj2/ignored.txt")) -FailureMessage "a path outside the git root was judged against its ignore rules"
     }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

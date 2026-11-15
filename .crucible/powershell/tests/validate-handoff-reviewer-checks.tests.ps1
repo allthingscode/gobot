@@ -37,7 +37,7 @@ function Invoke-ValidatorOnChecks {
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $hf -Encoding UTF8
         Push-Location $root
         try {
-            $out = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $validateScript -HandoffFile $hf 2>&1
+            $out = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $validateScript -HandoffFile $hf 2>&1 }
             return @{ Code = $LASTEXITCODE; Out = ($out -join '') }
         } finally { Pop-Location }
     } finally {

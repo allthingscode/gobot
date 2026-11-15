@@ -74,13 +74,138 @@ function Invoke-Validator {
     if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
         $cmdArgs += @("-ProjectRoot", $ProjectRoot)
     }
-    $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT @cmdArgs 2>&1)
+    $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT @cmdArgs 2>&1 })
     return @{ ExitCode = $LASTEXITCODE; Output = ($outputLines -join "`n") }
 }
 
 $tempRoot = New-TestFixtureRoot -NameHint "validate-backlog-test"
 
 try {
+    foreach ($case in @(
+        @{ Field = 'priority'; Value = 'high' }, @{ Field = 'priority'; Value = 'P4' },
+        @{ Field = 'priority'; Value = '""' }, @{ Field = 'budget_tier'; Value = 'bad-tier' },
+        @{ Field = 'budget_tier'; Value = '""' }
+    )) {
+        $results += Run-Test -Name ("Rereview255 validator refuses " + $case.Field + '=' + $case.Value) -Body {
+            $root = Join-Path $tempRoot ('rereview-' + $results.Count)
+            New-MinimalBacklogTree -Root $root
+            $path = Join-Path $root 'chores/active/C-255.md'
+            $priority = if ($case.Field -eq 'priority') { $case.Value } else { 'P2' }
+            $budget = if ($case.Field -eq 'budget_tier') { $case.Value } else { 'low' }
+            Set-Content -LiteralPath $path -Value ("---`nitem_id: C-255`ntype: chore`npriority: $priority`nbudget_tier: $budget`n---") -Encoding UTF8
+            $backlog = Join-Path $root 'BACKLOG.md'
+            Set-Content -LiteralPath $backlog -Value '# Backlog' -Encoding UTF8
+            $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+            Assert-Result 'validator error names field and spec' ($r.ExitCode -eq 2 -and $r.Output.Contains($case.Field) -and $r.Output.Contains($path)) $r.Output
+        }
+    }
+    $results += Run-Test -Name "Review255 malformed filename is a validation error without a crash" -Body {
+        $root = Join-Path $tempRoot "review255-filename"
+        New-MinimalBacklogTree -Root $root
+        New-SpecFile -Root $root -RelPath "chores/active/_draft.md" -ItemId "C-255"
+        $backlog = Join-Path $root "BACKLOG.md"
+        Set-Content -LiteralPath $backlog -Value "# Backlog`n## Active Items`n| ID | Status |`n|---|---|" -Encoding UTF8
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result "malformed filename reported" ($r.ExitCode -eq 2 -and $r.Output.Contains("Invalid spec filename: '_draft.md'")) $r.Output
+        Assert-Result "validator completes diagnostics" (-not $r.Output.Contains("BACKLOG VALIDATION ERROR:")) $r.Output
+    }
+
+    $results += Run-Test -Name "Item255 validator shares quoted identity budget and status readers" -Body {
+        $root = Join-Path $tempRoot "item255-quotes"
+        New-MinimalBacklogTree -Root $root
+        $active = Join-Path $root "chores/active/C-255.md"
+        Set-Content -LiteralPath $active -Value "---`nitem_id: 'C-255'`npriority: 'P2'`ntype: 'chore'`nstatus: 'Stub'`nbudget_tier: 'low'`n---" -Encoding UTF8
+        $archived = Join-Path $root "chores/archived/C-256.md"
+        Set-Content -LiteralPath $archived -Value "---`nstatus: 'Resolved'`n---" -Encoding UTF8
+        $backlog = Join-Path $root "BACKLOG.md"
+        Set-Content -LiteralPath $backlog -Encoding UTF8 -Value @"
+# Backlog
+## Priority Summary
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+| **P2** | 1 | C-255 |
+| **P3** | 0 | - |
+## Active Items
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+| [C-255](chores/active/C-255.md) | P2 | Stub | Test | Groomer |
+"@
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result "quoted scalars validate" ($r.ExitCode -eq 0) $r.Output
+        Set-Content -LiteralPath $active -Value "---`nitem_id: C-255`npriority: P2`ntype: chore`nstatus: Stub`nbudget_tier: bad-tier`n---" -Encoding UTF8
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result "raw invalid tier reported" ($r.ExitCode -ne 0 -and $r.Output.Contains("'bad-tier'")) $r.Output
+        Set-Content -LiteralPath $active -Value "---`nitem_id: C-255`ntype: chore`nstatus: Stub`nbudget_tier: low`n---" -Encoding UTF8
+        $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
+        Assert-Result "missing priority defaults P2" ($r.ExitCode -eq 0) $r.Output
+    }
+
+    $results += Run-Test -Name "Validator helper initialization performs no command discovery" -Body {
+        # Item 262: an absent helper is a function-table lookup, not a search of
+        # modules and executable PATH entries. Count the expensive operation rather
+        # than timing it: WSL's inherited Windows PATH makes misses especially slow.
+        $probe = Join-Path $tempRoot 'helper-initialization.ps1'
+        $probeScript = @'
+param([string]$LibraryPath, [string]$DependencyNames, [string]$IsolatedHelper)
+$ErrorActionPreference = 'Stop'
+$helpers = $DependencyNames -split ','
+foreach ($helper in $helpers) {
+    if (Test-Path -LiteralPath "Function:$helper") {
+        throw "fresh child unexpectedly already defines $helper"
+    }
+}
+# Sibling imports can transitively supply the missing dependency (git.ps1, for
+# example, loads config-helpers.ps1). Stub their guards to isolate each import.
+if ($IsolatedHelper) {
+    foreach ($helper in $helpers) {
+        if ($helper -ne $IsolatedHelper) {
+            Set-Item -LiteralPath "Function:$helper" -Value { }
+        }
+    }
+}
+$lookups = [Collections.Generic.List[string]]::new()
+function Get-Command {
+    [CmdletBinding()]
+    param([Parameter(Position = 0)][string]$Name)
+    $lookups.Add($Name)
+    Microsoft.PowerShell.Core\Get-Command @PSBoundParameters
+}
+. $LibraryPath
+foreach ($helper in $helpers) {
+    if (-not (Test-Path -LiteralPath "Function:$helper")) {
+        throw "guarded dependency $helper was not loaded by $LibraryPath"
+    }
+}
+if ($lookups.Count -ne 0) {
+    throw ("expected 0 dependency command-discovery calls, got " + $lookups.Count + ": " + ($lookups -join ', '))
+}
+Write-Output 'guarded dependencies loaded; zero dependency command-discovery calls'
+'@
+        [IO.File]::WriteAllText($probe, $probeScript, [Text.UTF8Encoding]::new($false))
+        $dependencies = [ordered]@{
+            'backlog-io' = @('Get-ConfiguredPath', 'Get-PwshCommand', 'Open-FileLockHandle')
+            'crucible-command' = @('Get-ConfiguredCrucibleRoot')
+            'worktree' = @('Invoke-GitChecked', 'Resolve-PathFromRoot')
+            'archive-task' = @('Invoke-WithBacklogLock', 'Test-PathWithinDirectory')
+            'project-root' = @('Resolve-FilesystemPath')
+        }
+        foreach ($library in $dependencies.Keys) {
+            # One entirely cold child per library, then a fresh child per guard.
+            foreach ($isolatedHelper in (@('') + $dependencies[$library])) {
+                $libraryPath = Join-Path $REPO_ROOT "powershell/lib/$library.ps1"
+                $names = $dependencies[$library] -join ','
+                $output = @(Invoke-ExternalCommand -AsLines {
+                    & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $probe -LibraryPath $libraryPath -DependencyNames $names -IsolatedHelper $isolatedHelper 2>&1
+                })
+                $exitCode = $LASTEXITCODE
+                $mode = if ($isolatedHelper) { "isolated $isolatedHelper" } else { 'cold' }
+                Assert-Result -Name "$library ($mode) loads dependencies with zero discovery calls" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got ${exitCode}: " + ($output -join "`n"))
+            }
+        }
+    }
+
     # --- Test 1: clean tree with one valid link passes ---
     $results += Run-Test -Name "Clean tree with valid Active Items link passes" -Body {
         $root = Join-Path $tempRoot "clean"
@@ -140,21 +265,25 @@ try {
 
         . (Join-Path $REPO_ROOT "powershell/lib/backlog-io.ps1")
         $lockPath = Get-BacklogLockFilePath -BacklogPath $backlog
-        [System.IO.File]::WriteAllText($lockPath, "$PID;$(Get-Date -Format 'o')")
-        $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-PwshCommand))
-        foreach ($a in @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SCRIPT, "-BacklogPath", $backlog, "-FixSummary")) { $psi.ArgumentList.Add($a) }
-        $psi.RedirectStandardOutput = $true
-        $psi.UseShellExecute = $false
-        $proc = [System.Diagnostics.Process]::Start($psi)
+        # The handle holds the lock before the child reads the backlog; a pathname alone
+        # is immediately acquirable. Dispose only after the concurrent edit is complete.
+        $lockHandle = $null
         $seen = @()
         try {
+            $lockHandle = [System.IO.FileStream]::new($lockPath, [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite, [IO.FileShare]::None, 1, [IO.FileOptions]::DeleteOnClose)
+            $psi = [System.Diagnostics.ProcessStartInfo]::new((Get-PwshCommand))
+            foreach ($a in @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SCRIPT, "-BacklogPath", $backlog, "-FixSummary")) { $psi.ArgumentList.Add($a) }
+            $psi.RedirectStandardOutput = $true
+            $psi.UseShellExecute = $false
+            $proc = [System.Diagnostics.Process]::Start($psi)
             while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
                 $seen += $line
                 if ($line -like "Auto-fixing Priority Summary*") { break }
             }
             Add-Content -LiteralPath $backlog -Value "| [C-002](chores/active/C-002_Added.md) | P2 | Ready | Added meanwhile | Architect |" -Encoding UTF8
         } finally {
-            Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+            if ($null -ne $lockHandle) { $lockHandle.Dispose() }
         }
         $rest = $proc.StandardOutput.ReadToEnd()
         $proc.WaitForExit()
@@ -518,6 +647,7 @@ priority: P1
 
     # --- Test 10: file_affinity path-existence check ---
     $results += Run-Test -Name "file_affinity validation: valid, wildcard, and nonexistent paths" -Body {
+        $affinityTimer = [Diagnostics.Stopwatch]::StartNew()
         $root = Join-Path $tempRoot "affinity-validation"
         New-MinimalBacklogTree -Root $root
         
@@ -635,6 +765,7 @@ priority: P1
         $r = Invoke-Validator -BacklogPath $backlog -ProjectRoot $root
         Assert-Result -Name "bad wildcard warning passes" -Condition ($r.ExitCode -eq 0) -FailureMessage ("expected exit 0 (warn-only), got " + $r.ExitCode + ". Output: " + $r.Output)
         Assert-Result -Name "bad wildcard warning message" -Condition ($r.Output.Contains("internal/doctor/*.py")) -FailureMessage ("expected warning message referencing the bad wildcard path. Output: " + $r.Output)
+        Write-Host ("Affinity validation cases completed in {0:F2}s." -f $affinityTimer.Elapsed.TotalSeconds)
     }
 
     # --- Test 11: file_affinity is ProjectRoot-aware from different CWD ---
@@ -1101,7 +1232,7 @@ R-029 discovery was archived as Resolved after filing C-001.
 
         Push-Location $unrelated
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location

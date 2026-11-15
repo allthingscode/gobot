@@ -40,8 +40,16 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "lib/time.ps1")
 . (Join-Path $PSScriptRoot "lib/project-root.ps1")
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
+. (Join-Path $PSScriptRoot "lib/backlog-io.ps1")
 
 $ErrorActionPreference = "Stop"
+
+# I11: project/config helpers keep exceptions; this command owns refusal.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 
 $REPO_ROOT = Resolve-CrucibleProjectRoot -ProjectRoot $ProjectRoot -ScriptRoot $PSScriptRoot
 
@@ -63,28 +71,58 @@ function Split-ItemList {
     return , @($out)
 }
 
-$approvedList = Split-ItemList -Items $Approved
-$deferredList = Split-ItemList -Items $Deferred
-$rejectedList = Split-ItemList -Items $Rejected
+try {
+    $approvedList = Split-ItemList -Items $Approved
+    $deferredList = Split-ItemList -Items $Deferred
+    $rejectedList = Split-ItemList -Items $Rejected
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 $upstreamList = @(@($ApprovedUpstream) | Where-Object { $null -ne $_ } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 
 if ($approvedList.Count -eq 0 -and $deferredList.Count -eq 0 -and $rejectedList.Count -eq 0 -and $upstreamList.Count -eq 0) {
-    throw "At least one of -Approved / -Deferred / -Rejected / -ApprovedUpstream must be provided; a Research Gate decision cannot be empty."
+    [Console]::Error.WriteLine("At least one of -Approved / -Deferred / -Rejected / -ApprovedUpstream must be provided; a Research Gate decision cannot be empty.")
+    exit 1
 }
 
-$resolvedCrucibleRoot = if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) { $CrucibleRoot } else { Join-Path $REPO_ROOT $CrucibleRoot }
+$resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $CrucibleRoot
 # Item 188: gate continuation and decision records follow paths.session.
 $sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
 $researchSessionDir = Join-Path $sessionRoot (Join-Path $TaskId "research")
 if (-not (Test-Path -LiteralPath $researchSessionDir)) {
-    throw "No research session directory at $researchSessionDir. Run the research phase for $TaskId before recording its gate."
+    [Console]::Error.WriteLine("No research session directory at $researchSessionDir. Run the research phase for $TaskId before recording its gate.")
+    exit 1
 }
+
+# Every command the continuation and the guidance print. The human's reason and IDs are data:
+# the builder quotes them as literals, and one it cannot put on a command line prints as
+# command unavailable rather than stopping the gate from being recorded. Item 247.
+$pointerPath = Join-Path $researchSessionDir "gate-filing-pointer.md"
+$handoffParameters = [ordered]@{ TaskId = $TaskId; Source = "research"; Target = "grooming"; Reason = $Reason }
+if ($approvedList.Count -gt 0) { $handoffParameters["HumanApproved"] = @($approvedList); $handoffParameters["StubSpecsCreated"] = @($approvedList) }
+if ($deferredList.Count -gt 0) { $handoffParameters["HumanDeferred"] = @($deferredList) }
+if ($rejectedList.Count -gt 0) { $handoffParameters["HumanRejected"] = @($rejectedList) }
+# The Researcher runs Steps 3 and 4 in whichever shell it has (Codex's is often Bash). The
+# handoff carries ID lists and the human's reason, which no native -File line passes intact
+# from every launching shell, so it is written in the direct form into a generated script
+# that pwsh runs; only that script's path is on the printed line. Item 291.
+$handoffCommand = New-CrucibleCommand -Script "powershell/new-handoff.ps1" -Transport PowerShell -Parameters $handoffParameters -CrucibleRoot $CrucibleRoot
+$handoffRunnerPath = Join-Path $researchSessionDir "gate-handoff.ps1"
+$handoffRunCommand = New-CrucibleScriptFileCommand -Path $handoffRunnerPath
+$validateCommand = New-CrucibleCommand -Script "powershell/validate-backlog.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
+$advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; Quiet = $true; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $CrucibleRoot
+$dispatchCommand = New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Transport PowerShell -Parameters ([ordered]@{ TaskId = $TaskId; Phase = "research"; Model = "<model>"; Effort = "<effort>"; ProjectRoot = $REPO_ROOT; PromptFile = $pointerPath }) -CrucibleRoot $CrucibleRoot
 
 $researchDir = Join-Path $resolvedCrucibleRoot "research"
 $findingsRel = "$CrucibleRoot/research/<findings artifact>"
 if (Test-Path -LiteralPath $researchDir) {
-    $artifact = Get-ChildItem -LiteralPath $researchDir -Filter ($TaskId + "*.md") -File -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($artifact) { $findingsRel = "$CrucibleRoot/research/$($artifact.Name)" }
+    $artifacts = @(Get-ResearchFindingsArtifact -TaskId $TaskId -ResearchDirectory $researchDir)
+    if ($artifacts.Count -gt 1) {
+        [Console]::Error.WriteLine("Multiple exact findings artifacts for ${TaskId}:`n" + (($artifacts | ForEach-Object { $_.FullName }) -join "`n") + "`nKeep one exact findings file (move or rename the others), then record the research gate again.")
+        exit 1
+    }
+    if ($artifacts.Count -eq 1) { $findingsRel = "$CrucibleRoot/research/$($artifacts[0].Name)" }
 }
 
 $timestamp = Get-UtcFileTimestamp
@@ -105,7 +143,7 @@ $decision = [ordered]@{
 }
 $decisionPath = Join-Path $gateDir ($TaskId + "-" + $timestamp + ".json")
 $decisionJson = $decision | ConvertTo-Json -Depth 6
-[System.IO.File]::WriteAllText($decisionPath, $decisionJson, (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $decisionPath), $decisionJson, (New-Object System.Text.UTF8Encoding($false)))
 
 # --- Generated continuation prompt ---
 function Format-List {
@@ -118,15 +156,6 @@ $approvedMd = Format-List -Items $approvedList
 $deferredMd = Format-List -Items $deferredList
 $rejectedMd = Format-List -Items $rejectedList
 $upstreamMd = Format-List -Items $upstreamList
-
-$approvedQuoted = if ($approvedList.Count -gt 0) { ($approvedList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
-$deferredQuoted = if ($deferredList.Count -gt 0) { ($deferredList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
-$rejectedQuoted = if ($rejectedList.Count -gt 0) { ($rejectedList | ForEach-Object { '"' + $_ + '"' }) -join "," } else { '' }
-
-$handoffArgs = "-TaskId $TaskId -Source research -Target grooming -Reason `"$Reason`""
-if ($approvedQuoted -ne '') { $handoffArgs += " -HumanApproved $approvedQuoted -StubSpecsCreated $approvedQuoted" }
-if ($deferredQuoted -ne '') { $handoffArgs += " -HumanDeferred $deferredQuoted" }
-if ($rejectedQuoted -ne '') { $handoffArgs += " -HumanRejected $rejectedQuoted" }
 
 # Leave terminal status to human acceptance: the deployment gate refuses Production
 # or Resolved tasks before acceptance, and the Human Gate finalizes them.
@@ -205,16 +234,24 @@ $fileStep
 
 ## Step 3 - Write the research -> grooming handoff (do NOT hand-edit JSON)
 
-Run new-handoff.ps1:
+Run the generated handoff script from the project root, in Bash or PowerShell:
 
-    $CrucibleRoot/powershell/new-handoff.ps1 $handoffArgs
+    $handoffRunCommand
+
+It runs new-handoff.ps1 with the decision above, so no shell quoting touches the reason or
+the IDs, and exits nonzero if the handoff is refused. For reading only, not for pasting
+into a shell, it holds this PowerShell command:
+
+    # $handoffCommand
 
 This records the human decision in the handoff ``human_decisions`` block.
 
 ## Step 4 - Validate and advance
 
-    $CrucibleRoot/powershell/validate-backlog.ps1 -ProjectRoot "$REPO_ROOT"
-    $CrucibleRoot/powershell/crucible.ps1 -Init -TaskId $TaskId -Quiet -ProjectRoot "$REPO_ROOT"
+Run these from the project root, in Bash or PowerShell:
+
+    $validateCommand
+    $advanceCommand
 
 Fix any validate-backlog count mismatch before finishing. Append a ``### CHECKPOINT`` line to
 your research task.md noting the stubs filed and the handoff written. Report the Crucible
@@ -222,13 +259,27 @@ output. Do NOT spawn successor agents.
 "@
 
 $gateFilingPath = Join-Path $researchSessionDir "gate-filing.md"
-[System.IO.File]::WriteAllText($gateFilingPath, ($gateFilingContent -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $gateFilingPath), ($gateFilingContent -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
+
+# A refused handoff, including one the builder could not write, exits nonzero rather than
+# letting the Researcher advance on a handoff that was never written.
+$runnerExit = if ($handoffCommand.StartsWith("# (command unavailable: ")) {
+    "[Console]::Error.WriteLine(" + (ConvertTo-CrucibleCommandPowerShellLiteral -Value ("The research gate handoff " + $handoffCommand.Substring(2) + ". Record the gate again with a reason it can carry.")) + ")`nexit 2"
+} else {
+    "if (-not `$? -or `$LASTEXITCODE -ne 0) { if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }; exit 1 }; exit 0"
+}
+$handoffRunner = @(
+    "# generated_by: record-research-gate.ps1. Run with pwsh -File from the project root.",
+    '$global:LASTEXITCODE = 0',
+    $handoffCommand,
+    $runnerExit
+) -join "`n"
+[System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $handoffRunnerPath), ($handoffRunner + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 
 # --- Orchestrator guidance ---
 $pointer = "Researcher: $TaskId - read and follow all instructions in $gateFilingPath"
 # TODO item 208: file-sourced prompts survive background pwsh -File argument parsing.
-$pointerPath = Join-Path $researchSessionDir "gate-filing-pointer.md"
-[System.IO.File]::WriteAllText($pointerPath, ($pointer + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $pointerPath), ($pointer + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 Write-Host ""
 Write-Host "[RESEARCH GATE RECORDED] $TaskId" -ForegroundColor Green
 Write-Host ("  outcome: " + $decision.outcome + "  |  approved: " + $approvedList.Count + "  deferred: " + $deferredList.Count + "  rejected: " + $rejectedList.Count + "  upstream: " + $upstreamList.Count)
@@ -240,7 +291,8 @@ Write-Host ("  decision record: " + $decisionPath)
 Write-Host ("  continuation prompt: " + $gateFilingPath)
 Write-Host ""
 Write-Host "  Re-dispatch the Researcher with a ONE-LINE pointer to the continuation prompt:" -ForegroundColor Cyan
-Write-Host ("    Codex:  launch-codex-specialist.ps1 -TaskId $TaskId -Phase research -Model <model> -Effort <effort> -ProjectRoot `"$REPO_ROOT`" -PromptFile `"$pointerPath`"")
+Write-Host ("    Codex:  " + $dispatchCommand)
 Write-Host ("    Claude: Agent tool, prompt = `"$pointer`"")
 Write-Host ""
 Write-Host "  The gate is CLOSED; the specialist will file the approved stubs and hand off without re-presenting."
+exit 0

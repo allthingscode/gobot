@@ -85,6 +85,42 @@ exit 0
 $tempRoot = New-TestFixtureRoot -NameHint "crucible-doctor-test"
 
 try {
+    $results += Run-Test -Name 'Rereview255 doctor reports invalid root owner error' -Body {
+        . (Join-Path $REPO_ROOT 'powershell/lib/config-helpers.ps1')
+        $project = Join-Path $tempRoot 'rereview255-empty-root'
+        Write-DoctorFixture -ProjectRoot $project
+        $config = Join-Path $project '.crucible/config.yaml'
+        $text = Get-Content -LiteralPath $config -Raw
+        Set-Content -LiteralPath $config -Value ($text -replace '(?m)^crucible_root:.*', 'crucible_root: ""') -Encoding UTF8
+        $message = ''
+        try { Get-ConfiguredCrucibleRootValue -ProjectRoot $project -NoDefault | Out-Null } catch { $message = $_.Exception.Message }
+        Assert-Result 'owner refuses empty root' (-not [string]::IsNullOrWhiteSpace($message)) 'owner did not throw'
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $DOCTOR_SCRIPT -ProjectRoot $project 2>&1 }) -join "`n"
+        Assert-Result 'config.parse preserves owner error' ($output.Contains('[config.parse] ' + $message) -and -not $output.Contains("has no 'crucible_root:' key")) $output
+    }
+    $results += Run-Test -Name "Review255 doctor uses the root owner with an explicit absent policy" -Body {
+        . (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1")
+        $project = Join-Path $tempRoot "review255-root"
+        Write-DoctorFixture -ProjectRoot $project
+        $config = Join-Path $project ".crucible/config.yaml"
+        $configText = Get-Content -LiteralPath $config -Raw
+        Set-Content -LiteralPath $config -Value ($configText -replace '(?m)^crucible_root:.*\r?\n', '') -Encoding UTF8
+        Assert-Result "root owner keeps default policy" ((Get-ConfiguredCrucibleRootValue -ProjectRoot $project) -eq '.crucible') "default changed"
+        Assert-Result "root owner exposes absence" ($null -eq (Get-ConfiguredCrucibleRootValue -ProjectRoot $project -NoDefault)) "missing key defaulted"
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $DOCTOR_SCRIPT -ProjectRoot $project 2>&1 }) -join "`n"
+        Assert-Result "doctor diagnoses absent root" ($output.Contains("has no 'crucible_root:' key")) $output
+    }
+
+    $results += Run-Test -Name "Review255 doctor shares configured root scalar parsing" -Body {
+        $project = Join-Path $tempRoot "review255-root-comment"
+        Write-DoctorFixture -ProjectRoot $project
+        $config = Join-Path $project ".crucible/config.yaml"
+        $configText = Get-Content -LiteralPath $config -Raw
+        Set-Content -LiteralPath $config -Value ($configText -replace '(?m)^crucible_root:.*', 'crucible_root: .crucible # installed bundle') -Encoding UTF8
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $DOCTOR_SCRIPT -ProjectRoot $project 2>&1 }) -join "`n"
+        Assert-Result "doctor shares root scalar parsing" ($output.Contains("crucible_root = '.crucible'.")) $output
+    }
+
     $results += Run-Test -Name "Doctor emits structured results" -Body {
         $projectRoot = Join-Path $tempRoot "project"
         Write-DoctorFixture -ProjectRoot $projectRoot
@@ -133,7 +169,7 @@ try {
         # required siblings. Copying the whole powershell/ tree (lib/ included) is what makes
         # this real doctor output instead of a source-text assertion: crucible-lib.ps1 and its
         # dot-sourced chain must resolve for the doctor to run at all.
-        $isolatedRoot = Join-Path $tempRoot "isolated-doctor"
+        $isolatedRoot = Join-Path $tempRoot "isolated-doctor/powershell"
         New-Item -ItemType Directory -Path $isolatedRoot -Force | Out-Null
         $sourceDir = Join-Path $REPO_ROOT "powershell"
         foreach ($file in @(Get-ChildItem -LiteralPath $sourceDir -Filter "*.ps1" -File)) {
@@ -200,6 +236,7 @@ try {
             "claude.agents",
             "claude.agents.ignored",
             "codex.cli",
+            "config.committed",
             "config.parse",
             "crucible.required-scripts",
             "gh.auth",
@@ -224,6 +261,43 @@ try {
         $missingDynamic = @($expectedDynamic | Where-Object { -not ($actualDynamic -ccontains $_) })
         $extraDynamic = @($actualDynamic | Where-Object { -not ($expectedDynamic -ccontains $_) })
         Assert-Result -Name "dynamic check-ID prefix set matches the recorded inventory" -Condition ($missingDynamic.Count -eq 0 -and $extraDynamic.Count -eq 0) -FailureMessage ("dynamic check-ID prefix changed. missing: [" + ($missingDynamic -join ", ") + "] extra: [" + ($extraDynamic -join ", ") + "]")
+    }
+
+    # Item 254: the doctor reports the config state run-isolated-checks.ps1 refuses.
+    $results += Run-Test -Name "Doctor reports whether config.yaml is committed (item 254)" -Body {
+        $projectRoot = Join-Path $tempRoot "commit-state-project"
+        Write-DoctorFixture -ProjectRoot $projectRoot
+        function Invoke-CommitStateDoctor {
+            $savedCeiling = $env:GIT_CEILING_DIRECTORIES
+            $env:GIT_CEILING_DIRECTORIES = $tempRoot
+            try {
+                $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }
+            } finally { $env:GIT_CEILING_DIRECTORIES = $savedCeiling }
+            return ($res.Output -join "`n")
+        }
+        function Get-CommitStateSection {
+            param([string]$Text)
+            $section = ""
+            foreach ($line in ($Text -split "\r?\n")) {
+                if ($line -match '^(PASS|WARN|FAIL) \(') { $section = $Matches[1] }
+                if ($line.Contains("[config.committed]")) { return $section }
+            }
+            return "absent"
+        }
+
+        $outside = Invoke-CommitStateDoctor
+        Assert-Result -Name "a config outside git is a warning" -Condition ((Get-CommitStateSection $outside) -eq "WARN" -and $outside.Contains("is not inside a git work tree")) -FailureMessage $outside
+
+        $null = Invoke-ExternalCommand { git -C $projectRoot init --quiet }
+        $null = Invoke-ExternalCommand { git -C $projectRoot add -- .crucible/config.yaml }
+        $null = Invoke-ExternalCommand { git -C $projectRoot -c user.name=Test -c user.email=test@example.com -c commit.gpgSign=false commit --quiet -m config }
+        $committed = Invoke-CommitStateDoctor
+        Assert-Result -Name "a committed config passes" -Condition ((Get-CommitStateSection $committed) -eq "PASS") -FailureMessage $committed
+
+        [IO.File]::AppendAllText((Join-Path $projectRoot ".crucible/config.yaml"), "# uncommitted edit`n", [Text.UTF8Encoding]::new($false))
+        $dirty = Invoke-CommitStateDoctor
+        Assert-Result -Name "an uncommitted edit is a warning with the remedy" -Condition ((Get-CommitStateSection $dirty) -eq "WARN" -and $dirty.Contains("uncommitted changes") -and $dirty.Contains("git add .crucible/config.yaml")) -FailureMessage $dirty
+        Assert-Result -Name "the warning does not block readiness" -Condition ($dirty -match "\[DOCTOR\] Result: READY") -FailureMessage $dirty
     }
 
     $results += Run-Test -Name "Adopter without framework toolchain is READY (no Go required)" -Body {
@@ -274,6 +348,9 @@ try {
         Assert-Result -Name "no illegal-path crash" -Condition (-not ($output -match "Illegal characters in path")) -FailureMessage "folded-scalar command crashed the doctor. Output:`n$output"
         Assert-Result -Name "ran to completion" -Condition ($output -match "\[DOCTOR\] Result:") -FailureMessage "doctor did not complete with a folded-scalar command. Output:`n$output"
         Assert-Result -Name "block-scalar indicator not treated as a tool" -Condition (-not ($output -match "verification\.tool\.[>|]")) -FailureMessage "the YAML block-scalar indicator was misparsed as a verification tool. Output:`n$output"
+        # Item 245: the doctor reads the checks with the runner's reader, so the folded
+        # command's own tool is checked rather than skipped.
+        Assert-Result -Name "folded command names its tool" -Condition ($output -match "verification\.tool\.go\]") -FailureMessage "the folded command's tool was not checked. Output:`n$output"
     }
 
     $results += Run-Test -Name "Doctor reports unauthenticated gh as advisory, stays READY" -Body {
@@ -404,7 +481,7 @@ try {
             $shas = @()
             for ($i = 1; $i -le $Commits; $i++) {
                 git commit --allow-empty -m "commit $i" --quiet
-                $shas += (git rev-parse HEAD).Trim()
+                $shas += (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
             }
             return [pscustomobject]@{ Head = $shas[-1]; OlderCommit = $shas[0] }
         } finally {
@@ -428,7 +505,7 @@ try {
         Assert-Result -Name "missing definitions are reported" -Condition ($output -match "\[claude\.agents\]" -and $output -match "crucible-strong \(missing\)" -and $output -match "sync-claude-agents\.ps1") -FailureMessage "Output:`n$output"
         Assert-Result -Name "drift does not block" -Condition ($output -match "\[DOCTOR\] Result: READY") -FailureMessage "Output:`n$output"
 
-        & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $projectRoot 6>&1 | Out-Null
+        Invoke-ExternalCommand -AsLines { & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $projectRoot 6>&1 } | Out-Null
         git -C $projectRoot init --quiet
         [IO.File]::WriteAllText((Join-Path $projectRoot ".gitignore"), ".claude/`n")
         $ignoredRes = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }
@@ -438,6 +515,19 @@ try {
         $clean = $cleanRes.Output -join "`n"
         Assert-Result -Name "synced definitions pass" -Condition ($clean -notmatch "crucible-strong \(") -FailureMessage "Output:`n$clean"
     }
+    # Review of 9b0bb92 (item 247): the fix named .crucible and -ProjectRoot ., which from
+    # anywhere but the checked project regenerates the wrong tree.
+    $results += Run-Test -Name "Doctor's agent regeneration advice names the checked project and its bundle" -Body {
+        $projectRoot = Join-Path $tempRoot "claude-agents-other-project"
+        Write-DoctorFixture -ProjectRoot $projectRoot
+        $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot }
+        $output = $res.Output -join "`n"
+        $resolved = (Resolve-Path -LiteralPath $projectRoot).Path
+        $advice = @($output -split "`r?`n" | Where-Object { $_ -match 'sync-claude-agents\.ps1' }) -join "`n"
+        Assert-Result -Name "advice names the checked project" -Condition ($advice.Contains("-ProjectRoot '" + $resolved + "'")) -FailureMessage "Output:`n$output"
+        Assert-Result -Name "advice names the project's bundle" -Condition ($advice.Replace("\", "/").Contains(($resolved.Replace("\", "/") + "/.crucible/powershell/sync-claude-agents.ps1"))) -FailureMessage "Output:`n$output"
+    }
+
     $results += Run-Test -Name "Doctor reports Codex CLI as advisory, never blocks READY" -Body {
         $projectRoot = Join-Path $tempRoot "codex-probe-project"
         Write-DoctorFixture -ProjectRoot $projectRoot
@@ -459,6 +549,10 @@ try {
 
         $fwPath = Join-Path $tempRoot "fw-stale"
         $fw = Initialize-FrameworkFixture -Path $fwPath
+        git -C $fwPath branch release $fw.Head
+        git -C $fwPath reset --hard $fw.OlderCommit --quiet
+        New-Item -ItemType Directory -Path (Join-Path $fwPath ".crucible") -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $fwPath ".crucible/config.yaml") -Value "project:`n  default_branch: release`n" -Encoding UTF8
 
         @(
             'crucible_root: ".crucible"',
@@ -484,12 +578,16 @@ try {
             $res = Invoke-ExternalCommand {
                 & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $DOCTOR_SCRIPT -ProjectRoot $projectRoot
             }
+            $banner = Invoke-ExternalCommand {
+                & (Get-PwshCommand) -NoProfile -File (Join-Path $REPO_ROOT "powershell/crucible.ps1") -ProjectRoot $projectRoot
+            }
         } finally {
             $env:CRUCIBLE_DEV_ROOT = $oldDevRoot
         }
         $output = $res.Output -join "`n"
 
         Assert-Result -Name "staleness check warn status" -Condition ($output -match "\[bundle\.staleness\].*lags framework HEAD") -FailureMessage "doctor did not warn about staleness. Output:`n$output"
+        Assert-Result -Name "entrypoint staleness follows the configured framework branch" -Condition ($banner.Output -match 'Installed Crucible bundle lags framework HEAD') -FailureMessage ($banner.Output -join "`n")
     }
 
     $results += Run-Test -Name "Doctor checks for bundle staleness and stays silent when up-to-date" -Body {

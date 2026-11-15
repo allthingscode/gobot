@@ -41,12 +41,12 @@ try {
         }
 
         # 2. Initialize Crucible project
-        $null = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
+        $null = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $INIT_SCRIPT `
             -ProjectRoot $projectRoot `
             -ProjectName "Fabricated Test App" `
             -DefaultBranch "master" `
             -Language python `
-            -Quiet 2>&1
+            -Quiet 2>&1 }
 
         # 3. Configure failing verification check. Use the resolved pwsh command
         # with a non-zero exit so the check fails portably on Windows and Linux
@@ -67,6 +67,11 @@ verification:
       command: $pwshCmd -NoProfile -Command exit 1
 "@
         [System.IO.File]::WriteAllText($configPath, $configContent)
+        # The checks runner refuses an uncommitted config.yaml (item 254), so commit it with the
+        # bundle as docs/git-policy.md says an adopter does. Committing the config alone splits
+        # the untracked .crucible/ entry into the bundle files the integrity breaker reports.
+        $null = Invoke-ExternalCommand { git -C $projectRoot add -- .crucible }
+        $null = Invoke-ExternalCommand { git -C $projectRoot commit --quiet -m "commit the Crucible bundle and checks" }
 
         # 4. Set up task spec file
         $specPath = Join-Path $projectRoot ".crucible/backlog/chores/active/C-FABRICATED_CrucibleTest.md"

@@ -16,6 +16,16 @@ $results = @()
 # Each entry requires an exact RelativePath, a regex Pattern matching the line, and an explicit Decision reason.
 $PRODUCTION_2TO1_ALLOWLIST = @(
     @{
+        RelativePath = "powershell/lib/backlog-io.ps1"
+        Pattern      = '(?i)\$validationOutput\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*validateScript.*2>&1'
+        Reason       = "Item 261: native child PowerShell restore validation captures stdout and stderr so refusal includes the failing backlog row."
+    },
+    @{
+        RelativePath = "powershell/check-merge-conflicts.ps1"
+        Pattern      = '^\s*\}\s*2>&1\)$'
+        Reason       = "Item 336: capture Invoke-GitChecked diagnostics from the task-ref and integrity probes so diagnostic exit 1 refuses instead of permitting No-Code Closure; native stderr handling stays in the checked wrapper."
+    },
+    @{
         RelativePath = "powershell/crucible-doctor.ps1"
         Pattern      = '(?i)\$output\s*=\s*&\s*\$Command\s*@Arguments\s*2>&1'
         Reason       = "Generic command runner in diagnostic doctor tool that executes arbitrary user/diagnostic commands and captures combined output."
@@ -31,13 +41,13 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
         Reason       = "Codex CLI specialist execution capturing combined stdout and stderr to stream and parse agent verdicts."
     },
     @{
-        RelativePath = "powershell/lib/crucible-gates.ps1"
-        Pattern      = '(?i)\$preflightRaw\s*=\s*&\s*\$preflightScript.*2>&1'
-        Reason       = "PowerShell script invocation for handoff schema preflight validation capturing diagnostic stderr."
+        RelativePath = "powershell/lib/crucible-gates-handoff.ps1"
+        Pattern      = '(?i)\$preflightRaw\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*preflightScript.*2>&1'
+        Reason       = "Item 374: child PowerShell process captures validate-handoff's JSON findings and its Console.Error diagnostics for handoff preflight; ErrorRecords are separated from the JSON before parsing."
     },
     @{
-        RelativePath = "powershell/lib/crucible-gates.ps1"
-        Pattern      = '(?i)\$testOutput\s*=\s*&\s*\(Get-PwshCommand\).*isolatedChecksScript.*2>&1'
+        RelativePath = "powershell/lib/crucible-gates-breakers.ps1"
+        Pattern      = '(?i)\$testOutput\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*isolatedChecksScript.*2>&1'
         Reason       = "Child PowerShell process running isolated checks test suite to capture full runner output."
     },
     @{
@@ -46,24 +56,24 @@ $PRODUCTION_2TO1_ALLOWLIST = @(
         Reason       = "Invoke-GitChecked wrapper executing scriptblocks and capturing pipeline output for error diagnosis."
     },
     @{
-        RelativePath = "powershell/lib/crucible-gates.ps1"
-        Pattern      = '(?i)\$ciOutput\s*=\s*@\(&\s*\(Get-PwshCommand\).*watchScript.*2>&1\)'
+        RelativePath = "powershell/lib/crucible-gates-human.ps1"
+        Pattern      = '(?i)\$ciOutput\s*=\s*@\(&\s*\(Get-RunningPowerShellCommand\).*watchScript.*2>&1\)'
         Reason       = "Child PowerShell process running CI watcher during automated promotion."
     },
     @{
-        RelativePath = "powershell/lib/crucible-gates.ps1"
-        Pattern      = '(?i)\$postPushOutput\s*=\s*@\(&\s*\(Get-PwshCommand\).*watchScript.*2>&1\)'
+        RelativePath = "powershell/lib/crucible-gates-human.ps1"
+        Pattern      = '(?i)\$postPushOutput\s*=\s*@\(&\s*\(Get-RunningPowerShellCommand\).*watchScript.*2>&1\)'
         Reason       = "Child PowerShell process running post-push CI watcher during automated promotion."
     },
     @{
         RelativePath = "powershell/lib/crucible-gates.ps1"
-        Pattern      = '(?i)\$result\s*=\s*&\s*"\$FRAMEWORK_POWERSHELL/validate-backlog\.ps1".*2>&1'
-        Reason       = "PowerShell script invocation for backlog validation before handoff."
+        Pattern      = '(?i)\$result\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*validate-backlog\.ps1.*2>&1'
+        Reason       = "Child PowerShell process captures Console.Error refusal diagnostics for the backlog gate."
     },
     @{
-        RelativePath = "powershell/new-handoff.ps1"
-        Pattern      = '(?i)\$validationRaw\s*=\s*&\s*\$validatorPath.*2>&1'
-        Reason       = "PowerShell script invocation for handoff JSON validation against schema."
+        RelativePath = "powershell/lib/new-handoff-core.ps1"
+        Pattern      = '(?i)\$validationRaw\s*=\s*&\s*\(Get-RunningPowerShellCommand\).*validatorPath.*2>&1'
+        Reason       = "Child PowerShell process captures Console.Error refusal diagnostics for handoff schema validation."
     },
     @{
         RelativePath = "powershell/watch-adopter-ci.ps1"
@@ -240,7 +250,7 @@ $results += Run-Test -Name "Every lib that calls Invoke-GitChecked resolves it w
     $undeclared = @()
     foreach ($caller in $callers) {
         $libPath = $caller.FullName
-        $probe = ". `"$libPath`"; if (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue) { exit 0 } else { exit 3 }"
+        $probe = ". `"$libPath`"; if (Test-Path -LiteralPath Function:Invoke-GitChecked) { exit 0 } else { exit 3 }"
         $run = Invoke-ExternalCommand -Command { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command $probe }
         if ($run.ExitCode -ne 0) {
             $undeclared += ("powershell/lib/" + $caller.Name + ": exit " + $run.ExitCode + " - " + $run.Output)

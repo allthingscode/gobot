@@ -23,7 +23,8 @@ if (-not (Test-Path -LiteralPath $crucibleScript)) {
 [Console]::Error.WriteLine("[DEPRECATED] factory.ps1 is deprecated and will be removed. Invoke powershell/crucible.ps1 instead; forwarding this call unchanged.")
 
 # Telemetry is what makes D2's deletion criterion measurable rather than a guess,
-# but it must never be able to fail the call it is only observing.
+# with catchable telemetry errors reported before forwarding. A crucible-lib
+# bootstrap refusal exits before forwarding, with the same exit 1 as crucible.ps1.
 try {
     & {
         . (Join-Path $PSScriptRoot "crucible-lib.ps1")
@@ -37,13 +38,8 @@ try {
         for ($i = 0; $i -lt $args.Count - 1; $i++) {
             if ("$($args[$i])" -eq "-ProjectRoot") { $projectRoot = "$($args[$i + 1])"; break }
         }
-        if ([string]::IsNullOrWhiteSpace($projectRoot)) {
-            $derivedParent = Split-Path -Path $PSScriptRoot -Parent
-            if ((Split-Path -Path $derivedParent -Leaf) -eq ".crucible") {
-                $derivedParent = Split-Path -Path $derivedParent -Parent
-            }
-            $projectRoot = (Resolve-Path -LiteralPath $derivedParent).Path
-        }
+        . (Join-Path $PSScriptRoot "lib/project-root.ps1")
+        $projectRoot = Resolve-CrucibleProjectRoot -ProjectRoot $projectRoot -ScriptRoot $PSScriptRoot
 
         $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $projectRoot
         $logFile = if ($taskId -eq "unknown") {
@@ -64,6 +60,13 @@ try {
 # Invoked in-process rather than as a child process so arguments cross as objects.
 # Re-launching pwsh would re-quote them, and PowerShell 5.1's native-argument
 # quoting mangles embedded quotes - which -GateReason routinely carries.
-$global:LASTEXITCODE = 0
-& $crucibleScript @args
-exit $LASTEXITCODE
+try {
+    $forwarderScript = Join-Path $PSScriptRoot "lib/forward-entrypoint.ps1"
+    $global:LASTEXITCODE = 0
+    & $forwarderScript -TargetScript $crucibleScript -Arguments $args -Entrypoint 'factory.ps1'
+    if (-not $? -and $LASTEXITCODE -eq 0) { exit 1 }
+    exit $LASTEXITCODE
+} catch {
+    [Console]::Error.WriteLine("factory.ps1: " + $_.Exception.Message)
+    exit 1
+}

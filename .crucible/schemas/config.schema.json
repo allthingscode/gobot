@@ -189,10 +189,12 @@
         },
         "ci_timeout_minutes": {
           "type": "integer",
+          "minimum": 0,
           "description": "Timeout in minutes for CI run execution."
         },
         "ci_queued_grace_minutes": {
           "type": "integer",
+          "minimum": 0,
           "description": "Grace period in minutes before treating queued CI as unstarted."
         },
         "ci_staging_branch_prefix": {

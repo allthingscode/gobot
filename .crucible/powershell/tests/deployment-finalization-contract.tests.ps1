@@ -21,7 +21,7 @@ $CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $Quiet = $true
 . $CRUCIBLE_LIB
 
-if (-not (Get-Command Check-Dependencies -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Check-Dependencies)) {
     function Check-Dependencies {
         param([string]$BacklogItemPath, [string]$TargetSpecialist, [string]$TaskId)
     }
@@ -45,6 +45,11 @@ $prohibition = '(?i)(?:do not|must not|never)\s+(?:run|invoke|execute)\s+`?archi
 foreach ($doc in $operatorDocs) {
     $docName = $doc.Name
     $docText = Get-Content -LiteralPath (Join-Path $REPO_ROOT $doc.Path) -Raw -Encoding UTF8
+
+    if ($doc.Path -like 'prompts/*') {
+        Assert-Result -Name "$docName links finalization owner" -Condition ($docText.Contains('/sops/deployment.md#step-6')) -FailureMessage 'Missing finalization pointer'
+        $docText += Get-Content (Join-Path $REPO_ROOT 'sops/deployment.md') -Raw -Encoding UTF8
+    }
 
     # Judged line by line rather than document-wide. The original check excused every
     # mention in a file that carried the prohibition anywhere in it, and only looked at

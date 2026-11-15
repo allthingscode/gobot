@@ -164,6 +164,34 @@ try {
             "a path with no file behind it was returned, and the caller's next Get-Content throws: " + ($found -join ", "))
     }
 
+    $results += Run-Test -Name "A listed file removed before its read is skipped and other read failures throw" -Body {
+        # Item 358: another process can delete an untracked file after enumeration. That is
+        # the state the enumeration already drops, so the read reports $null; a path that
+        # still exists but cannot be read as a file must not be skipped the same way.
+        $repo = New-ScanFixture -Path (Join-Path $tempRoot "vanishing") -IgnoreContent ""
+        $vanishing = Join-Path $repo "powershell/lib/vanishing.json"
+        $empty = Join-Path $repo "powershell/lib/empty.ps1"
+        [System.IO.File]::WriteAllText($vanishing, "{}`n", $utf8)
+        [System.IO.File]::WriteAllText($empty, "", $utf8)
+        $listed = @(Get-RepoScannableFile -RepoRoot $repo)
+        $entry = @($listed | Where-Object { $_.RelativePath -eq "powershell/lib/vanishing.json" })
+        $emptyEntry = @($listed | Where-Object { $_.RelativePath -eq "powershell/lib/empty.ps1" })
+        Assert-Result -Name "the untracked files are listed" -Condition ($entry.Count -eq 1 -and $emptyEntry.Count -eq 1) -FailureMessage (
+            "the fixture did not list the files the reads below are about: " + ((Get-RelativeScanPath -Entry $listed) -join ", "))
+
+        Assert-Result -Name "a present file is read" -Condition ((Read-RepoScannableFileText $entry[0]) -ceq "{}`n") -FailureMessage "the listed file's text was not returned"
+        $emptyText = Read-RepoScannableFileText $emptyEntry[0]
+        Assert-Result -Name "an empty file is text, not a skip" -Condition ($null -ne $emptyText -and $emptyText.Length -eq 0) -FailureMessage "an empty file read as removed"
+
+        Remove-Item -LiteralPath $vanishing -Force
+        Assert-Result -Name "a removed file reads as skipped" -Condition ($null -eq (Read-RepoScannableFileText $entry[0])) -FailureMessage "a file removed after enumeration was not reported as gone"
+
+        New-Item -ItemType Directory -Path $vanishing | Out-Null
+        $failure = ""
+        try { $null = Read-RepoScannableFileText $entry[0] } catch { $failure = $_.Exception.Message }
+        Assert-Result -Name "a path that cannot be read as a file throws" -Condition ($failure -ne "") -FailureMessage "a listed path replaced by a directory was skipped as though it were gone"
+    }
+
     $results += Run-Test -Name "A root git cannot enumerate throws rather than reporting nothing" -Body {
         # The failure mode this helper is most likely to hide. Every caller asserts on the
         # violations it finds, so an enumeration that quietly returned an empty list would

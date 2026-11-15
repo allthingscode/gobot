@@ -6,6 +6,12 @@ param(
     [switch]$Check
 )
 
+# I11: configuration helpers remain reusable; this command owns refusal.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
@@ -23,7 +29,7 @@ if ($Check) {
     foreach ($item in $drift) {
         Write-Host ("[CLAUDE AGENTS] " + $item.Status + ": " + $item.Name) -ForegroundColor Yellow
     }
-    Write-Host ("[CLAUDE AGENTS] regenerate with: pwsh -File " + $script:CLAUDE_AGENT_REGENERATE) -ForegroundColor Yellow
+    Write-Host ("[CLAUDE AGENTS] regenerate with: " + (Get-ClaudeAgentRegenerateCommand -ProjectRoot $root)) -ForegroundColor Yellow
     exit 1
 }
 

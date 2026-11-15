@@ -1,8 +1,11 @@
-if (-not (Get-Command "Invoke-WithBacklogLock" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Invoke-WithBacklogLock)) {
     $backlogIoPath = Join-Path $PSScriptRoot "backlog-io.ps1"
     if (Test-Path -LiteralPath $backlogIoPath) {
         . $backlogIoPath
     }
+}
+if (-not (Test-Path -LiteralPath Function:Test-PathWithinDirectory)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
 }
 
 function Get-BacklogTerminalStatus {
@@ -25,7 +28,7 @@ function Set-BacklogSpecFrontmatterStatus {
     }
 
     $lines = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in [System.IO.File]::ReadAllLines($Path, [System.Text.Encoding]::UTF8)) {
+    foreach ($line in [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $Path), [System.Text.Encoding]::UTF8)) {
         [void]$lines.Add($line)
     }
 
@@ -66,7 +69,7 @@ function Set-BacklogSpecFrontmatterStatus {
         $lines.Insert($insertAt, $replacement)
     }
 
-    [System.IO.File]::WriteAllText($Path, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $Path), (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 }
 
 function Get-MarkdownTableStatusColumn {
@@ -114,10 +117,11 @@ function Get-BacklogArchiveRow {
             break
         }
     }
-    # Item 227: both ID fallbacks must match the complete first cell.
+    # Item 227: both ID fallbacks must match the complete first cell, which is what the
+    # row matcher in backlog-io.ps1 checks. Item 245.
     if ($rowIndex -lt 0 -and -not [string]::IsNullOrEmpty($ItemId)) {
         for ($i = 0; $i -lt $Lines.Count; $i++) {
-            if ($Lines[$i] -match ('^\s*\|\s*(?:' + [regex]::Escape($ItemId) + '|\[' + [regex]::Escape($ItemId) + '\]\([^|]*\))\s*\|')) {
+            if (Test-BacklogTaskRow -Line $Lines[$i] -TaskId $ItemId) {
                 $rowIndex = $i
                 break
             }
@@ -125,9 +129,9 @@ function Get-BacklogArchiveRow {
     }
     if ($rowIndex -lt 0) {
         $fileName = Split-Path -Leaf $ActiveRelPath
-        $taskIdFromFile = ($fileName -replace '_.*$', '') -replace '\.md$', ''
+        $taskIdFromFile = Get-BacklogSpecFiles -SpecPath $fileName -DecodeId
         for ($i = 0; $i -lt $Lines.Count; $i++) {
-            if ($Lines[$i] -match ('^\s*\|\s*(?:' + [regex]::Escape($taskIdFromFile) + '|\[' + [regex]::Escape($taskIdFromFile) + '\]\([^|]*\))\s*\|')) {
+            if (Test-BacklogTaskRow -Line $Lines[$i] -TaskId $taskIdFromFile) {
                 $rowIndex = $i
                 break
             }
@@ -163,7 +167,7 @@ function Update-BacklogArchiveRow {
         }
 
         $lines = [System.Collections.Generic.List[string]]::new()
-        foreach ($line in [System.IO.File]::ReadAllLines($BacklogPath, [System.Text.Encoding]::UTF8)) {
+        foreach ($line in [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $BacklogPath), [System.Text.Encoding]::UTF8)) {
             [void]$lines.Add($line)
         }
         $archiveRow = Get-BacklogArchiveRow -Lines $lines.ToArray() -BacklogPath $BacklogPath -ActiveRelPath $ActiveRelPath -ItemId $ItemId
@@ -177,7 +181,7 @@ function Update-BacklogArchiveRow {
         $cells[$archiveRow.StatusColumn] = $Status
         $lines[$archiveRow.RowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
 
-        [System.IO.File]::WriteAllText($BacklogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $BacklogPath), (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
     }
 }
 
@@ -194,7 +198,7 @@ function Update-BacklogPrioritySummary {
         }
 
         $lines = [System.Collections.Generic.List[string]]::new()
-        foreach ($line in [System.IO.File]::ReadAllLines($BacklogPath, [System.Text.Encoding]::UTF8)) {
+        foreach ($line in [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $BacklogPath), [System.Text.Encoding]::UTF8)) {
             [void]$lines.Add($line)
         }
 
@@ -279,7 +283,7 @@ function Update-BacklogPrioritySummary {
             }
 
             # Write back to file as UTF-8 no-BOM
-            [System.IO.File]::WriteAllText($BacklogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+            [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $BacklogPath), (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
         }
     }
 }
@@ -298,19 +302,19 @@ function Invoke-BacklogTaskArchive {
 
     $hasShippedCode = $PSBoundParameters.ContainsKey("ShippedCode")
     return Invoke-WithBacklogLock -BacklogPath $BacklogPath -ScriptBlock {
-        $resolvedBacklog = (Resolve-Path -LiteralPath $BacklogPath).Path
-        $resolvedBacklogDir = (Resolve-Path -LiteralPath (Split-Path -Parent $resolvedBacklog)).Path
+        $resolvedBacklog = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BacklogPath))
+        $resolvedBacklogDir = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath (Split-Path -Parent $resolvedBacklog)))
         $specMatches = @(Resolve-Path -Path $SpecPath)
         if ($specMatches.Count -ne 1) {
             throw "SpecPath must resolve to exactly one spec file; found $($specMatches.Count): $SpecPath"
         }
-        $resolvedSpec = $specMatches[0].Path
+        $resolvedSpec = (Resolve-FilesystemPath -Path $specMatches[0])
 
-        if (-not $resolvedSpec.StartsWith($resolvedBacklogDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+        if (-not (Test-PathWithinDirectory -Path $resolvedSpec -Directory $resolvedBacklogDir)) {
             throw "Spec path is not under backlog directory: $resolvedSpec"
         }
 
-        $relativeSpec = $resolvedSpec.Substring($resolvedBacklogDir.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+        $relativeSpec = (Get-PathRelativeToDirectory -Path $resolvedSpec -Directory $resolvedBacklogDir)
         $relativeSpec = $relativeSpec.Replace("\", "/")
         if ($relativeSpec -notmatch '^(features|bugs|chores)/active/[^/]+\.md$') {
             throw "Spec path must be an active feature, bug, or chore markdown file: $relativeSpec"
@@ -320,27 +324,9 @@ function Invoke-BacklogTaskArchive {
         $terminalStatus = $Status
         if ([string]::IsNullOrEmpty($terminalStatus)) {
             # Check if the active spec's frontmatter status is already a terminal value ("Production" or "Resolved")
-            $specLines = [System.IO.File]::ReadAllLines($resolvedSpec, [System.Text.Encoding]::UTF8)
-            $frontmatterEnd = -1
-            if ($specLines.Count -gt 0 -and $specLines[0] -eq "---") {
-                for ($i = 1; $i -lt $specLines.Count; $i++) {
-                    if ($specLines[$i] -eq "---") {
-                        $frontmatterEnd = $i
-                        break
-                    }
-                }
-            }
-            if ($frontmatterEnd -gt 0) {
-                $specStatus = ""
-                for ($i = 1; $i -lt $frontmatterEnd; $i++) {
-                    if ($specLines[$i] -match '^\s*status\s*:\s*["'']?([^"''\s\r\n]+)"?') {
-                        $specStatus = $Matches[1]
-                        break
-                    }
-                }
-                if ($specStatus -eq "Production" -or $specStatus -eq "Resolved") {
-                    $terminalStatus = $specStatus
-                }
+            $specStatus = Get-BacklogSpecStatus -SpecPath $resolvedSpec -RequireFrontmatter
+            if ($specStatus -eq "Production" -or $specStatus -eq "Resolved") {
+                $terminalStatus = $specStatus
             }
         }
         if ([string]::IsNullOrEmpty($terminalStatus)) {
@@ -350,36 +336,13 @@ function Invoke-BacklogTaskArchive {
             $terminalStatus = Get-BacklogTerminalStatus -ShippedCode ([bool]$ShippedCode)
         }
 
-        # Read item_id and priority from active spec frontmatter before moving
-        $itemId = $null
-        $priority = $null
-        if (Test-Path -LiteralPath $resolvedSpec) {
-            $specLines = [System.IO.File]::ReadAllLines($resolvedSpec, [System.Text.Encoding]::UTF8)
-            $frontmatterEnd = -1
-            if ($specLines.Count -gt 0 -and $specLines[0] -eq "---") {
-                for ($i = 1; $i -lt $specLines.Count; $i++) {
-                    if ($specLines[$i] -eq "---") {
-                        $frontmatterEnd = $i
-                        break
-                    }
-                }
-            }
-            if ($frontmatterEnd -gt 0) {
-                for ($i = 1; $i -lt $frontmatterEnd; $i++) {
-                    $line = $specLines[$i]
-                    if ($line -match '^\s*item_id\s*:\s*["'']?([^"''\s\r\n]+)"?') {
-                        $itemId = $Matches[1]
-                    }
-                    elseif ($line -match '^\s*priority\s*:\s*["'']?([P][0-3])"?') {
-                        $priority = $Matches[1]
-                    }
-                }
-            }
-        }
+        $identity = Get-SpecIdentity -SpecPath $resolvedSpec -RequireFrontmatter
+        $itemId = $identity.item_id
+        $priority = if ($identity.priority -match '^P[0-3]$') { $identity.priority } else { $null }
 
         if ([string]::IsNullOrEmpty($itemId)) {
             $fileName = Split-Path -Leaf $resolvedSpec
-            $itemId = ($fileName -replace '_.*$', '') -replace '\.md$', ''
+            $itemId = Get-BacklogSpecFiles -SpecPath $fileName -DecodeId
         }
 
         $archivedRelPath = $relativeSpec -replace '/active/', '/archived/'
@@ -391,10 +354,10 @@ function Invoke-BacklogTaskArchive {
 
         # TODO item 191: validate before mutation and preserve bytes, since a move back
         # alone leaves terminal frontmatter and a late failure leaves an archived link.
-        $backlogLines = [System.IO.File]::ReadAllLines($resolvedBacklog, [System.Text.Encoding]::UTF8)
+        $backlogLines = [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $resolvedBacklog), [System.Text.Encoding]::UTF8)
         Get-BacklogArchiveRow -Lines $backlogLines -BacklogPath $resolvedBacklog -ActiveRelPath $relativeSpec -ItemId $itemId | Out-Null
-        $originalSpec = [System.IO.File]::ReadAllBytes($resolvedSpec)
-        $originalBacklog = [System.IO.File]::ReadAllBytes($resolvedBacklog)
+        $originalSpec = [System.IO.File]::ReadAllBytes((Resolve-FilesystemPath -Path $resolvedSpec))
+        $originalBacklog = [System.IO.File]::ReadAllBytes((Resolve-FilesystemPath -Path $resolvedBacklog))
         try {
             if (-not (Test-Path -LiteralPath $archiveDir)) {
                 New-Item -ItemType Directory -Path $archiveDir -Force -ErrorAction Stop | Out-Null
@@ -408,9 +371,9 @@ function Invoke-BacklogTaskArchive {
                 if ((Test-Path -LiteralPath $archivedPath) -and -not (Test-Path -LiteralPath $resolvedSpec)) {
                     Move-Item -LiteralPath $archivedPath -Destination $resolvedSpec -ErrorAction Stop
                 }
-                [System.IO.File]::WriteAllBytes($resolvedSpec, $originalSpec)
+                [System.IO.File]::WriteAllBytes((Resolve-FilesystemPath -Path $resolvedSpec), $originalSpec)
             } finally {
-                [System.IO.File]::WriteAllBytes($resolvedBacklog, $originalBacklog)
+                [System.IO.File]::WriteAllBytes((Resolve-FilesystemPath -Path $resolvedBacklog), $originalBacklog)
             }
             throw
         }

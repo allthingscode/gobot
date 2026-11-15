@@ -119,7 +119,7 @@ Invoke-HumanGate -Context `$ctx
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # If gate is NOT bypassed, it writes gate_decision_F-038_pending.json and exits 0
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $pendingFile = Join-Path $gateDir "gate_decision_F-038_pending.json"
 
         Assert-Result -Name "D55: rejected decision does not bypass gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_decision_F-038_pending.json to be created, but it was bypassed"
@@ -135,7 +135,7 @@ Invoke-HumanGate -Context `$ctx
         $decisionAccepted | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "F-038-20260604T130000Z.json") -Encoding UTF8
 
         # Run guard check again
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
 
         Assert-Result -Name "D55: same-cycle accepted decision bypasses gate" -Condition (-not (Test-Path $pendingFile)) -FailureMessage "expected gate to be bypassed, but pending file was created"
 
@@ -152,7 +152,7 @@ Invoke-HumanGate -Context `$ctx
         }
         $decisionStale | ConvertTo-Json | Set-Content -Path (Join-Path $gateDir "F-038-20260604T140000Z.json") -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
 
         Assert-Result -Name "D55: stale-cycle accepted decision does NOT bypass gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected stale-cycle accept to re-prompt (pending file created), but the gate was bypassed using a prior-cycle acceptance"
     }
@@ -199,6 +199,7 @@ item_id: "F-999"
 type: "Feature"
 status: "Ready for Deploy"
 priority: "P2"
+budget_tier: "low"
 target_phase: "deployment"
 created_at: "2026-06-04"
 ---
@@ -294,7 +295,7 @@ try {
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # Run rejected outcome
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "E2E Reject: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -340,7 +341,7 @@ try {
         $initScriptContent | Set-Content -LiteralPath $initScriptPath -Encoding UTF8
 
         # Run crucible init to see if it advances to implementation without tripping the artifact gate
-        $initOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $initScriptPath 2>&1
+        $initOutput = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $initScriptPath 2>&1 }
         $initExitCode = $LASTEXITCODE
 
         Assert-Result -Name "E2E Reject: crucible init succeeded" -Condition ($initExitCode -eq 0) -FailureMessage ("expected crucible init to pass, got exit code $initExitCode. Output: " + $initOutput)
@@ -438,7 +439,7 @@ Push-Location '$localRepo'
 try { Invoke-HumanGate -Context `$ctx } finally { Pop-Location }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
         Assert-Result -Name "reject exit code" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit 0, got $exitCode. Output: " + ($output | Out-String))
         $afterHead = (Invoke-GitChecked { git -C $localRepo rev-parse master }).Trim()
@@ -491,7 +492,7 @@ Write-Host "SUCCESS_MARKER"
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $outputStr = $output -join "`n"
         $pendingFile = Join-Path $gateDir "gate_decision_F-039_pending.json"
 
@@ -527,7 +528,7 @@ Write-Host "SUCCESS_MARKER"
 "@
         $scriptContentDone | Set-Content -LiteralPath $scriptPathDone -Encoding UTF8
 
-        $outputDone = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathDone 2>&1
+        $outputDone = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathDone 2>&1 }
         $outputDoneStr = $outputDone -join "`n"
 
         Assert-Result -Name "D56: deployment -> done fires gate" -Condition (Test-Path $pendingFile) -FailureMessage "expected gate_decision_F-039_pending.json to be created"
@@ -627,7 +628,7 @@ created_at: "2026-06-04"
         # Legacy/old behavior: archive the task BEFORE the gate runs
         # Load archive-task helper
         $archiveLibPath = Join-Path $FRAMEWORK_POWERSHELL "lib/archive-task.ps1"
-        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+        if (-not (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive)) {
             . $archiveLibPath
         }
         Invoke-BacklogTaskArchive -BacklogPath (Join-Path $backlogDir "BACKLOG.md") -SpecPath (Join-Path $backlogDir "features/active/F-888_Test_Spec.md") -Status "Production" | Out-Null
@@ -674,7 +675,7 @@ try {
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # Run rejected outcome
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D57 Reject Restore: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -830,7 +831,7 @@ try {
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
         # Run abandoned outcome
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D57 Abandon: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -982,7 +983,7 @@ try {
 }
 "@
         $scriptContentReject | Set-Content -LiteralPath $scriptPathReject -Encoding UTF8
-        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathReject 2>&1 | Out-Null
+        Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathReject 2>&1 } | Out-Null
 
         # Verify spec is active and status is In Progress
         Assert-Result -Name "D57 Loop: active spec exists after reject" -Condition (Test-Path (Join-Path $backlogDir "features/active/F-666_Test_Spec.md")) -FailureMessage "expected active spec to exist after reject"
@@ -1035,7 +1036,7 @@ try {
 "@
         $scriptContentAccept | Set-Content -LiteralPath $scriptPathAccept -Encoding UTF8
 
-        $acceptOutput = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathAccept 2>&1
+        $acceptOutput = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPathAccept 2>&1 }
         $acceptExitCode = $LASTEXITCODE
 
         Assert-Result -Name "D57 Loop Accept: exit code is 0" -Condition ($acceptExitCode -eq 0) -FailureMessage ("expected exit code 0, got $acceptExitCode. Output: " + $acceptOutput)
@@ -1182,7 +1183,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D58 Redirect: exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -1288,7 +1289,7 @@ created_at: "2026-06-04"
 
         # Legacy path: archive the task as Production BEFORE the gate runs.
         $archiveLibPath = Join-Path $FRAMEWORK_POWERSHELL "lib/archive-task.ps1"
-        if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+        if (-not (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive)) {
             . $archiveLibPath
         }
         Invoke-BacklogTaskArchive -BacklogPath (Join-Path $backlogDir "BACKLOG.md") -SpecPath (Join-Path $backlogDir "features/active/F-444_Test_Spec.md") -Status "Production" | Out-Null
@@ -1335,7 +1336,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "D59 Abandon(pre-archived): exit code is 0" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got $exitCode. Output: " + $output)
@@ -1399,7 +1400,7 @@ Spec content
         Assert-Result -Name "F12 row restored to active" -Condition ($backlogText -match '\| In Progress \|') -FailureMessage "expected row status to be In Progress"
 
         $valScript = Join-Path $REPO_ROOT "powershell/validate-backlog.ps1"
-        $valOutput = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $valScript -ProjectRoot $caseRoot 2>&1
+        $valOutput = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $valScript -ProjectRoot $caseRoot 2>&1 }
         Assert-Result -Name "F12 validate-backlog passes post-recovery" -Condition ($LASTEXITCODE -eq 0) -FailureMessage ("expected validate-backlog exit 0, got $LASTEXITCODE. Output: " + ($valOutput | Out-String))
     }
 
@@ -1409,6 +1410,10 @@ Spec content
         New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
         "paths:`n  backlog: `"backlog`"" | Set-Content -LiteralPath (Join-Path $caseRoot ".crucible/config.yaml") -Encoding UTF8
         "---`nitem_id: `"F-501`"`ntitle: Test Feature 501`ntype: feature`npriority: P1`nstatus: In Progress`n---`nSpec content`n" | Set-Content -LiteralPath (Join-Path $caseRoot "backlog/features/active/F-501_Spec.md") -Encoding UTF8
+        # Restore now propagates validator failure; the unrelated sibling must
+        # have the archived spec its row promises.
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot "backlog/features/archived") -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $caseRoot "backlog/features/archived/F-502_Spec.md"), "---`nitem_id: F-502`ntitle: Test Feature 502`ntype: feature`npriority: P1`nstatus: Production`n---`nSpec content`n", [Text.UTF8Encoding]::new($false))
         $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
         @"
 # Project Backlog
@@ -1490,6 +1495,34 @@ $f14Row
         Assert-Result -Name "Restore word boundary normalizes F-1 row" -Condition ($backlogText.Contains("| [F-1](features/active/F-1_Spec.md) | P1 | In Progress | Feature One | Riley |")) -FailureMessage ("expected F-1 row to be restored to In Progress, got: " + $backlogText)
     }
 
+    # Item 245: restore deleted every row naming the ID in any cell, so a row that only
+    # mentioned F-1 in its title was removed with it.
+    $results += Run-Test -Name "Restore-BacklogTask removes only the rows whose ID cell is the task" -Body {
+        $caseRoot = Join-Path $tempRoot "restore-id-cell"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot ".crucible/config.yaml"), "paths:`n  backlog: `"backlog`"`n", [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot "backlog/features/active/F-1_Spec.md"), "---`nitem_id: `"F-1`"`ntitle: Feature One`ntype: feature`npriority: P1`nstatus: In Progress`n---`nSpec content`n", [System.Text.UTF8Encoding]::new($false))
+        $f2Row = "| [F-2](features/active/F-2_Spec.md) | P2 | Ready | Follow-up to F-1 | Casey |"
+        [IO.File]::WriteAllText((Join-Path $caseRoot "backlog/features/active/F-2_Spec.md"), "---`nitem_id: F-2`ntitle: Follow-up to F-1`ntype: feature`npriority: P2`nstatus: Ready`n---`nSpec content`n", [Text.UTF8Encoding]::new($false))
+        $backlogPath = Join-Path $caseRoot "backlog/BACKLOG.md"
+        $backlogText = @(
+            "# Project Backlog",
+            "",
+            "## Features",
+            "| ID | Priority | Status | Title | Owner |",
+            "|---|---|---|---|---|",
+            "| [F-1](features/active/F-1_Spec.md) | P1 | Production | Feature One | Riley |",
+            $f2Row
+        ) -join "`n"
+        [System.IO.File]::WriteAllText($backlogPath, $backlogText + "`n", [System.Text.UTF8Encoding]::new($false))
+
+        Restore-BacklogTask -TaskId "F-1" -ProjectRoot $caseRoot -ActiveStatus "In Progress"
+
+        $after = [System.IO.File]::ReadAllText($backlogPath)
+        Assert-Result -Name "the row that mentions F-1 is kept" -Condition ($after.Contains($f2Row)) -FailureMessage ("F-2's row was removed with F-1's: " + $after)
+        Assert-Result -Name "F-1's own row is restored" -Condition ($after.Contains("| [F-1](features/active/F-1_Spec.md) | P1 | In Progress | Feature One | Riley |")) -FailureMessage ("F-1 was not restored: " + $after)
+    }
+
     $results += Run-Test -Name "F14 Deployment gate detects BOM encoding corruption in BACKLOG.md" -Body {
         $caseRoot = Join-Path $tempRoot "f14-bom-guard"
         New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
@@ -1550,7 +1583,7 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F14 BOM exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on BOM corruption"
@@ -1632,7 +1665,7 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F12 premature Production exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on premature Production status"
@@ -1696,7 +1729,7 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F14 U+FFFD exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on U+FFFD corruption"
@@ -1778,10 +1811,74 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F12 title with Production exit code is not 2" -Condition ($exitCode -ne 2) -FailureMessage ("expected gate not to block with exit code 2 when Status is Active, got exit code: $exitCode. Output: " + ($output | Out-String))
+    }
+
+    # Item 245: the guard matched the first row that mentioned the ID anywhere, so another
+    # task's Production row naming F-702 in its title stopped F-702's deployment.
+    $results += Run-Test -Name "F12 Deployment gate reads the task's own row, not one that mentions its ID" -Body {
+        $caseRoot = Join-Path $tempRoot "f12-other-row-mentions-id"
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot ".crucible"), (Join-Path $caseRoot "backlog/features/active") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot ".crucible/config.yaml"), "paths:`n  backlog: `"backlog`"`n", [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot "backlog/features/active/F-702_Spec.md"), "---`nid: F-702`nstatus: Ready for Deploy`n---`nSpec content`n", [System.Text.UTF8Encoding]::new($false))
+        $backlogText = @(
+            "# Project Backlog",
+            "",
+            "## Production Items",
+            "| ID | Title | Priority | Status | Spec |",
+            "| F-703 | Follow-up to F-702 | P1 | Production | [F-703_Spec.md](features/archived/F-703_Spec.md) |",
+            "",
+            "## Features",
+            "| ID | Title | Priority | Status | Spec |",
+            "| F-702 | Deploy pipeline | P1 | Ready for Deploy | [F-702_Spec.md](features/active/F-702_Spec.md) |"
+        ) -join "`n"
+        [System.IO.File]::WriteAllText((Join-Path $caseRoot "backlog/BACKLOG.md"), $backlogText + "`n", [System.Text.UTF8Encoding]::new($false))
+
+        $sessionDir = Join-Path $caseRoot "session"
+        New-Item -ItemType Directory -Path (Join-Path $sessionDir "F-702/deployment"), (Join-Path $sessionDir "handoffs") -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $sessionDir "F-702/deployment/task.md"), "# Task List`n- [x] Step 1`n", [System.Text.UTF8Encoding]::new($false))
+        Write-TestHandoff -Path (Join-Path $sessionDir "handoffs/F-702-20260801.json") -Values @{
+            task_id = "F-702"
+            source_phase = "deployment"
+            target_phase = "done"
+            cumulative_handoff_count = 1
+        }
+
+        $scriptPath = Join-Path $caseRoot "run_test.ps1"
+        @"
+`$ErrorActionPreference = 'Stop'
+`$REPO_ROOT = '$($REPO_ROOT.Replace("'", "''"))'
+. (Join-Path `$REPO_ROOT 'powershell/lib/platform.ps1')
+. (Join-Path `$REPO_ROOT 'powershell/crucible-lib.ps1')
+
+`$ctx = @{
+    IsBootstrap = `$false
+    SessionDir = '$sessionDir'
+    RepoRoot = '$caseRoot'
+    CrucibleRoot = '$caseRoot/.crucible'
+    LogFile = '$sessionDir/pipeline.log.jsonl'
+    CircuitBreakerHistoryFile = '$sessionDir/global/circuit_breakers.jsonl'
+    Quiet = `$true
+    Ceiling = 6
+    BudgetCeilings = @{ low = 6; medium = 10; high = 24; extended = 32 }
+    Handoff = [PSCustomObject]@{
+        task_id = 'F-702'
+        source_phase = 'deployment'
+        target_phase = 'done'
+        cumulative_handoff_count = 1
+        budget_tier = 'low'
+    }
+}
+Complete-CrucibleSourceSession -Context `$ctx
+"@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
+
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
+        $exitCode = $LASTEXITCODE
+        $outputText = $output | Out-String
+        Assert-Result -Name "another task's Production row does not stop F-702" -Condition ($outputText -notmatch "marked Production or Resolved in BACKLOG.md prior to human gate approval") -FailureMessage ("the gate read F-703's row as F-702's status. Exit: $exitCode. Output: " + $outputText)
     }
 
     $results += Run-Test -Name "F12 Deployment gate blocks premature Resolved status in BACKLOG.md" -Body {
@@ -1859,11 +1956,71 @@ Spec content
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
         $exitCode = $LASTEXITCODE
 
         Assert-Result -Name "F12 premature Resolved exit code is 2" -Condition ($exitCode -eq 2) -FailureMessage "expected exit code 2 on premature Resolved status"
         Assert-Result -Name "F12 premature Resolved error message" -Condition (($output | Out-String) -match "marked Production or Resolved in BACKLOG.md prior to human gate approval") -FailureMessage ("expected premature Resolved message, got: " + ($output | Out-String))
+    }
+
+    $results += Run-Test -Name "The reject unwind resets the primary branch only for this task's own merge" -Body {
+        # I8 at its reject-unwind enforcement point, in process: Get-HumanGateRejectUnwind
+        # returns instead of exiting (item 14 step C4). A merge of task/F-10 is not F-1's
+        # merge, a plain commit is nobody's, and once the branch is gone only the merge
+        # subject or the fast-forward reflog entry can name the task. Item 180.
+        $repo = Join-Path $tempRoot "unwind-identity"
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        Push-Location $repo
+        try {
+            $null = Invoke-Git init -q -b master
+            $null = Invoke-Git config user.email "test@example.com"
+            $null = Invoke-Git config user.name "Test"
+            $null = Invoke-Git commit -q --allow-empty -m "base"
+            $null = Invoke-Git branch "task/F-1"
+            $null = Invoke-Git branch "task/F-10"
+            $null = Invoke-Git checkout -q "task/F-10"
+            $null = Invoke-Git commit -q --allow-empty -m "F-10 work"
+            $null = Invoke-Git checkout -q "task/F-1"
+            $null = Invoke-Git commit -q --allow-empty -m "F-1 work"
+            $null = Invoke-Git checkout -q master
+            $base = (Invoke-Git rev-parse HEAD).Raw.Trim()
+
+            $null = Invoke-Git merge -q --no-ff --no-edit "task/F-10"
+            $other = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "a merge of task/F-10 is not F-1's merge" -Condition (-not $other.HeadIsTaskMerge) `
+                -FailureMessage ("F-1's unwind would reset master to " + $other.UnwindTarget + " for F-10's merge")
+
+            $null = Invoke-Git reset -q --hard $base
+            $null = Invoke-Git merge -q --no-ff --no-edit "task/F-1"
+            $own = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "F-1's own merge is unwound to its first parent" -Condition ($own.HeadIsTaskMerge -and $own.UnwindTarget -eq $base) `
+                -FailureMessage ("expected HeadIsTaskMerge and target " + $base + ", got " + $own.HeadIsTaskMerge + " / " + $own.UnwindTarget)
+            Assert-Result -Name "the merge's parents are returned for the branch restore" -Condition (@($own.ParentList).Count -eq 2) `
+                -FailureMessage ("expected two parents, got " + (@($own.ParentList) -join " "))
+
+            $null = Invoke-Git branch -D "task/F-1"
+            $bySubject = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "with the branch gone, the merge subject names the task" -Condition ($bySubject.HeadIsTaskMerge -and $bySubject.UnwindTarget -eq $base) `
+                -FailureMessage ("expected the subject to identify F-1's merge, got " + $bySubject.HeadIsTaskMerge)
+
+            $null = Invoke-Git reset -q --hard $base
+            $null = Invoke-Git commit -q --allow-empty -m "unrelated"
+            $plain = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "a plain commit is nobody's merge" -Condition (-not $plain.HeadIsTaskMerge -and $null -eq $plain.UnwindTarget) `
+                -FailureMessage ("a plain head was identified as F-1's merge, target " + $plain.UnwindTarget)
+
+            $null = Invoke-Git reset -q --hard $base
+            $null = Invoke-Git branch "task/F-1" "HEAD"
+            $null = Invoke-Git checkout -q "task/F-1"
+            $null = Invoke-Git commit -q --allow-empty -m "F-1 fast-forward work"
+            $null = Invoke-Git checkout -q master
+            $null = Invoke-Git merge -q --ff-only "task/F-1"
+            $ff = Get-HumanGateRejectUnwind -TaskId "F-1" -PrimaryBranch "master"
+            Assert-Result -Name "a fast-forward counts only through its reflog entry" -Condition ($ff.HeadIsTaskMerge -and $ff.UnwindTarget -eq $base) `
+                -FailureMessage ("expected the fast-forward reflog entry to identify F-1, got " + $ff.HeadIsTaskMerge + " / " + $ff.UnwindTarget)
+        } finally {
+            Pop-Location
+        }
     }
 
 } finally {

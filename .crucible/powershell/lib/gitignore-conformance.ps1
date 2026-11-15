@@ -1,4 +1,7 @@
 . (Join-Path $PSScriptRoot "platform.ps1")
+if (-not (Test-Path -LiteralPath Function:Test-PathWithinDirectory)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
 
 # Crucible tells adopters which installed files to commit, but nothing verified
 # that the adopter's own ignore rules leave those files committable. An unanchored
@@ -33,7 +36,7 @@ function Get-BundleCommittablePath {
         [Parameter(Mandatory=$true)][string]$BundleRoot
     )
 
-    $rootFull = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $rootFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
     $collected = New-Object System.Collections.Generic.List[string]
 
     foreach ($entry in Get-CommitByDefaultPath) {
@@ -43,16 +46,16 @@ function Get-BundleCommittablePath {
                 $collected.Add($file.FullName) | Out-Null
             }
         } elseif (Test-Path -LiteralPath $candidate -PathType Leaf) {
-            $collected.Add((Resolve-Path -LiteralPath $candidate).Path) | Out-Null
+            $collected.Add((Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $candidate))) | Out-Null
         }
     }
 
     $relative = New-Object System.Collections.Generic.List[string]
     foreach ($full in $collected) {
-        $rel = $full
-        if ($full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $rel = $full.Substring($rootFull.Length)
-        }
+        # A file outside the project is not the project's to ignore, and an absolute path
+        # with its leading slash trimmed would read as project-relative. Item 302.
+        if (-not (Test-PathWithinDirectory -Path $full -Directory $rootFull)) { continue }
+        $rel = Get-PathRelativeToDirectory -Path $full -Directory $rootFull
         $rel = $rel.Replace("\", "/").TrimStart("/")
         if ([string]::IsNullOrWhiteSpace($rel)) { continue }
         if ($rel.StartsWith(".git/")) { continue }
@@ -92,11 +95,19 @@ function Test-GitignoreConformance {
         return $result
     }
 
+    $ProjectRoot = Resolve-FilesystemPath -Path $ProjectRoot
+    $BundleRoot = Resolve-FilesystemPath -Path $BundleRoot
     $topResult = Invoke-Git @("rev-parse", "--show-toplevel") -Directory $ProjectRoot
     $topLevel = ($topResult.Raw | Out-String).Trim()
     if ($topResult.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($topLevel)) {
         $result.Status = "skipped"
         $result.Reason = "Not inside a git work tree; ignore rules cannot be evaluated."
+        return $result
+    }
+
+    if (-not (Test-PathWithinDirectory -Path (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BundleRoot)) -Directory (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot)))) {
+        $result.Status = "skipped"
+        $result.Reason = "Bundle at " + $BundleRoot + " is outside the project; the project's ignore rules cannot exclude its files."
         return $result
     }
 
@@ -108,7 +119,7 @@ function Test-GitignoreConformance {
         return $result
     }
 
-    $bundleFull = (Resolve-Path -LiteralPath $BundleRoot).Path.Replace("\", "/").TrimEnd("/")
+    $bundleFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BundleRoot)).Replace("\", "/").TrimEnd("/")
     # A plain hashtable, not HashSet[string]: PowerShell 5.1 cannot resolve the
     # HashSet comparer constructor overload, and hashtable lookup is already
     # case-insensitive, which is what a Windows path comparison needs.
@@ -174,10 +185,7 @@ function Test-GitignoreConformance {
             # The source is relative to the git top-level while the path is relative
             # to ProjectRoot: two different bases on the same output line.
             $source = $match.Groups["source"].Value
-            $sourceFull = $source
-            if (-not [System.IO.Path]::IsPathRooted($sourceFull)) {
-                $sourceFull = Join-Path $topLevel $source
-            }
+            $sourceFull = Resolve-PathFromRoot -Root $topLevel -Path $source
             $sourceFull = $sourceFull.Replace("\", "/")
             if ($sourceFull.StartsWith(($bundleFull + "/"), [System.StringComparison]::OrdinalIgnoreCase)) {
                 continue

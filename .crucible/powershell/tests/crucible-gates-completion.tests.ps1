@@ -11,6 +11,13 @@ $pwshCmd = Get-PwshCommand
 
 $results = @()
 
+$results += Run-Test -Name "Item255 research filing predicate rejects non-markdown and prefix IDs" -Body {
+    $scope = @{ BacklogPrefix = ".crucible/backlog/"; Ids = @("F-255") }
+    Assert-Result "slug accepted" (Test-ResearchGateFilingPath -Scope $scope -RelativePath ".crucible/backlog/features/active/F-255_notes.md") "spec rejected"
+    Assert-Result "non-spec refused" (-not (Test-ResearchGateFilingPath -Scope $scope -RelativePath ".crucible/backlog/features/active/F-255_notes.txt")) "non-markdown accepted as a filing"
+    Assert-Result "prefix refused" (-not (Test-ResearchGateFilingPath -Scope $scope -RelativePath ".crucible/backlog/features/active/F-2550.md")) "prefix ID accepted"
+}
+
 function Write-TestHandoff {
     param(
         [Parameter(Mandatory=$true)][string]$Path,
@@ -88,7 +95,7 @@ try {
             }
 
             $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-            $outputLines = @(& $pwshCmd -NoProfile -Command @"
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -Command @"
 `$ErrorActionPreference = 'Stop'
 `$Quiet = `$true
 . '$libPath'
@@ -98,6 +105,7 @@ Set-Location '$($caseRoot.Replace("'", "''"))'
     BacklogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
     SessionDir = '$($ctx.SessionDir.Replace("'", "''"))'
     WorkspacesDir = '$($ctx.WorkspacesDir.Replace("'", "''"))'
+    FrameworkPowerShell = '$($ctx.FrameworkPowerShell.Replace("'", "''"))'
     LogFile = '$($ctx.LogFile.Replace("'", "''"))'
     CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
     Handoff = [PSCustomObject]@{
@@ -109,7 +117,7 @@ Set-Location '$($caseRoot.Replace("'", "''"))'
 }
 Test-CompletionArtifactGate -Context `$ctx
 Write-Host 'HANDOFF_PASSED'
-"@ 2>&1)
+"@ 2>&1 })
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"
 
@@ -252,14 +260,14 @@ APPROVED. Looks great!
         $contextPath = Join-Path $caseRoot "context.xml"
         $ctx | Export-Clixml -LiteralPath $contextPath
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-        $outputLines = @(& $pwshCmd -NoProfile -Command @"
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -Command @"
 `$ErrorActionPreference = 'Stop'
 `$Quiet = `$true
 . '$libPath'
 `$ctx = Import-Clixml -LiteralPath '$($contextPath.Replace("'", "''"))'
 Test-CompletionArtifactGate -Context `$ctx
 Write-Host 'HANDOFF_PASSED'
-"@ 2>&1)
+"@ 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
         Assert-Result -Name "plain-text approval refuses handoff" -Condition ($exitCode -eq 1 -and -not $output.Contains("HANDOFF_PASSED")) -FailureMessage "expected exit 1, got $exitCode. Output: $output"
@@ -285,14 +293,14 @@ Write-Host 'HANDOFF_PASSED'
             $contextPath = Join-Path $caseRoot "context.xml"
             $ctx | Export-Clixml -LiteralPath $contextPath
             $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-            $outputLines = @(& $pwshCmd -NoProfile -Command @"
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -Command @"
 `$ErrorActionPreference = 'Stop'
 `$Quiet = `$true
 . '$libPath'
 `$ctx = Import-Clixml -LiteralPath '$($contextPath.Replace("'", "''"))'
 Test-CompletionArtifactGate -Context `$ctx
 Write-Host 'HANDOFF_PASSED'
-"@ 2>&1)
+"@ 2>&1 })
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"
             Assert-Result -Name "body example refuses handoff" -Condition ($exitCode -eq 1 -and -not $output.Contains("HANDOFF_PASSED")) -FailureMessage "expected exit 1, got $exitCode. Output: $output"
@@ -303,6 +311,7 @@ Write-Host 'HANDOFF_PASSED'
         $scriptPath = Join-Path $caseRoot "run-d21.ps1"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $frameworkPath = (Split-Path -Parent $CRUCIBLE_LIB).Replace("'", "''")
         @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -319,6 +328,7 @@ New-Item -ItemType Directory -Path `$verifyDir -Force | Out-Null
     CircuitBreakerHistoryFile = Join-Path `$sessionDir 'global/circuit_breakers.jsonl'
     RepoRoot = '$caseRoot'
     WorkspacesDir = Join-Path '$caseRoot' 'workspaces'
+    FrameworkPowerShell = '$frameworkPath'
     Quiet = `$true
     Handoff = [PSCustomObject]@{
         task_id = 'F-004'
@@ -343,22 +353,21 @@ if (`$logContent -match "accepted plain-text APPROVED") {
     Write-Host "PASSED_UNQUOTED"
 }
 
-# Sub-test 2: YAML CHANGES_REQUESTED with APPROVED in prose - should block (exit 1)
-try {
-    `$yaml2 = "---`nreview_decision: CHANGES_REQUESTED`nacceptance_criteria_met: false`n---`nProse has APPROVED somewhere in it."
-    `$yaml2 | Set-Content -LiteralPath `$reportPath -Encoding UTF8
+# Sub-test 2: YAML CHANGES_REQUESTED with APPROVED in prose - must block with exit 1 and a blocked record
+`$yaml2 = "---`nreview_decision: CHANGES_REQUESTED`nacceptance_criteria_met: false`n---`nProse has APPROVED somewhere in it."
+`$yaml2 | Set-Content -LiteralPath `$reportPath -Encoding UTF8
 
-    Test-CompletionArtifactGate -Context `$ctx
-    Write-Host "FAILED_SHOULD_HAVE_BLOCKED"
-} catch {
-    Write-Host "PASSED_BLOCKED"
-}
+Test-CompletionArtifactGate -Context `$ctx
+Write-Host "FAILED_SHOULD_HAVE_BLOCKED"
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "D21: unquoted YAML parses without fallback warning" -Condition ($output -match "PASSED_UNQUOTED") -FailureMessage ("expected PASSED_UNQUOTED, got: " + $output)
-        Assert-Result -Name "D21: CHANGES_REQUESTED YAML blocks even if APPROVED in prose" -Condition ($output -match "PASSED_BLOCKED") -FailureMessage ("expected PASSED_BLOCKED, got: " + $output)
+        $exitCode = $LASTEXITCODE
+        Assert-Result -Name "D21: CHANGES_REQUESTED YAML blocks even if APPROVED in prose" -Condition ($exitCode -eq 1 -and $output -notmatch "FAILED_SHOULD_HAVE_BLOCKED") -FailureMessage ("expected exit 1 without continuation, got exit " + $exitCode + ": " + $output)
+        $blockedRecords = @(Get-ChildItem -LiteralPath (Join-Path $caseRoot "backlog/blocked") -File -ErrorAction SilentlyContinue)
+        Assert-Result -Name "D21: blocked completion writes its blocked record" -Condition ($blockedRecords.Count -eq 1) -FailureMessage ("expected one blocked record, found " + $blockedRecords.Count + ": " + $output)
     }
 
     $results += Run-Test -Name "Invoke-CrucibleRuntimeValidation D20 regression: artifact resolution inside worktree" -Body {
@@ -391,6 +400,7 @@ try {
 
         $scriptPath = Join-Path $caseRoot "run-d20.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $frameworkPath = (Split-Path -Parent $CRUCIBLE_LIB).Replace("'", "''")
         @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -419,7 +429,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "D20: artifacts resolve relative to implementation worktree path" -Condition ($output -match "PASSED_RESOLVED") -FailureMessage ("expected PASSED_RESOLVED, got: " + $output)
     }
@@ -445,6 +455,7 @@ try {
 
         $scriptPath = Join-Path $caseRoot "run-d35.ps1"
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $frameworkPath = (Split-Path -Parent $CRUCIBLE_LIB).Replace("'", "''")
         @"
 `$ErrorActionPreference = "Stop"
 `$Quiet = `$true
@@ -473,7 +484,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         Assert-Result -Name "D35: artifacts resolve from both worktree and repo root" -Condition ($output -match "PASSED_RESOLVED") -FailureMessage ("expected PASSED_RESOLVED, got: " + $output)
     }
@@ -591,6 +602,39 @@ try {
         Assert-Result -Name "D25 normalized to relative" -Condition ($savedArtifact -eq "docs/METRICS.md") -FailureMessage "expected docs/METRICS.md, got $savedArtifact"
     }
 
+    $results += Run-Test -Name "I8: stale-lock cleanup for F-1 keeps F-10's lock and other phases" -Body {
+        $caseRoot = Join-Path $tempRoot "i8-stale-lock-test"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-1"
+        $lockDir = Join-Path $caseRoot ".crucible/locks"
+        New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
+        $own = Join-Path $lockDir "F-1_verification.lock"
+        $other = Join-Path $lockDir "F-10_verification.lock"
+        $otherPhase = Join-Path $lockDir "F-1_implementation.lock"
+        $tail = Join-Path $lockDir "XF-1_verification.lock"
+        "own" | Set-Content -LiteralPath $own -Encoding UTF8
+        "other" | Set-Content -LiteralPath $other -Encoding UTF8
+        "phase" | Set-Content -LiteralPath $otherPhase -Encoding UTF8
+        "tail" | Set-Content -LiteralPath $tail -Encoding UTF8
+        $otherBefore = (Get-FileHash -LiteralPath $other -Algorithm SHA256).Hash
+
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-1-20260530T120000Z.json"
+        $handoffObj = @{ task_id = "F-1"; source_phase = "implementation"; target_phase = "verification"; cumulative_handoff_count = 1; reason = "lock test" }
+        $handoffObj | ConvertTo-Json | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $ctx.LatestHandoff = Get-Item $handoffPath
+        $ctx.Handoff = [PSCustomObject]$handoffObj
+        $ctx.RepoRoot = $caseRoot
+
+        Push-Location $caseRoot
+        try { Normalize-CrucibleInputState -Context $ctx } finally { Pop-Location }
+
+        Assert-Result -Name "own stale lock removed" -Condition (-not (Test-Path -LiteralPath $own)) -FailureMessage "F-1 verification lock should be removed"
+        Assert-Result -Name "F-10 lock kept" -Condition ((Test-Path -LiteralPath $other) -and (Get-FileHash -LiteralPath $other -Algorithm SHA256).Hash -eq $otherBefore) -FailureMessage "F-10's lock was deleted or changed by a cleanup for F-1"
+        Assert-Result -Name "other phase lock kept" -Condition (Test-Path -LiteralPath $otherPhase) -FailureMessage "F-1 implementation lock must survive a verification cleanup"
+        Assert-Result -Name "suffix-colliding lock kept" -Condition (Test-Path -LiteralPath $tail) -FailureMessage "XF-1 lock must survive a cleanup for F-1"
+    }
+
     $results += Run-Test -Name "Checklist gate STOP does not emit degraded event and is actionable" -Body {
         $caseRoot = Join-Path $tempRoot "checklist-actionable-test"
         New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
@@ -633,7 +677,7 @@ Write-EventLog -Event "session_start" -TaskId "F-099" -Phase "grooming" -Handoff
 Complete-CrucibleSourceSession -Context `$ctx
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         $exitCode = $LASTEXITCODE
 
@@ -668,12 +712,12 @@ Complete-CrucibleSourceSession -Context `$ctx
             Set-Content -LiteralPath "README.md" -Value "# d40" -Encoding UTF8
             git add README.md
             git commit -m "init" --quiet
-            $mainBranch = (git rev-parse --abbrev-ref HEAD).Trim()
+            $mainBranch = (Invoke-ExternalCommand -AsLines { git rev-parse --abbrev-ref HEAD }).Trim()
             git checkout -b side-only --quiet
             Set-Content -LiteralPath "side.txt" -Value "side" -Encoding UTF8
             git add side.txt
             git commit -m "side" --quiet
-            $sideHash = (git rev-parse HEAD).Trim()
+            $sideHash = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
             git checkout $mainBranch --quiet
         } finally {
             Pop-Location
@@ -688,7 +732,7 @@ Complete-CrucibleSourceSession -Context `$ctx
         New-Item -ItemType Directory -Path (Split-Path -Parent $ctx.LogFile) -Force | Out-Null
 
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$Quiet = `$true
             `$backlogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
             `$FRAMEWORK_POWERSHELL = '$(Split-Path -Parent $CRUCIBLE_LIB)'
@@ -699,6 +743,7 @@ Complete-CrucibleSourceSession -Context `$ctx
                 BacklogDir = '$($ctx.BacklogDir.Replace("'", "''"))'
                 SessionDir = '$($ctx.SessionDir.Replace("'", "''"))'
                 WorkspacesDir = '$($ctx.WorkspacesDir.Replace("'", "''"))'
+                FrameworkPowerShell = '$($ctx.FrameworkPowerShell.Replace("'", "''"))'
                 LogFile = '$($ctx.LogFile.Replace("'", "''"))'
                 CircuitBreakerHistoryFile = '$($ctx.CircuitBreakerHistoryFile.Replace("'", "''"))'
                 Handoff = [PSCustomObject]@{
@@ -711,7 +756,7 @@ Complete-CrucibleSourceSession -Context `$ctx
                 }
             }
             Test-CompletionArtifactGate -Context `$ctx
-"@ 2>&1
+"@ 2>&1 }
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         $logContent = if (Test-Path -LiteralPath $ctx.LogFile) { Get-Content -LiteralPath $ctx.LogFile -Raw -Encoding UTF8 } else { "" }
@@ -742,7 +787,7 @@ Complete-CrucibleSourceSession -Context `$ctx
         Set-Content -LiteralPath (Join-Path $gateDir "F-040F-20260902T120000Z.json") -Value '{"task_id":"F-040F","outcome":"accepted"' -Encoding UTF8
 
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-        $output = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
             `$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop
             `$Quiet = `$true
             Set-Location '$($caseRoot.Replace("'", "''"))'
@@ -763,7 +808,7 @@ Complete-CrucibleSourceSession -Context `$ctx
                 }
             }
             Complete-CrucibleSourceSession -Context `$ctx
-"@)
+"@ })
         $exitCode = $LASTEXITCODE
         $outputText = $output -join "`n"
         $logContent = if (Test-Path -LiteralPath $logFile) { Get-Content -LiteralPath $logFile -Raw -Encoding UTF8 } else { "" }
@@ -771,6 +816,93 @@ Complete-CrucibleSourceSession -Context `$ctx
         Assert-Result -Name "unreadable decision still enforces backlog finalization" -Condition ($exitCode -eq 2) -FailureMessage ("an unfinalized backlog passed the source-session finalization gate. Exit " + $exitCode + ". Output: " + $outputText)
         Assert-Result -Name "unreadable decision names the finalization failure" -Condition ($outputText -match "did not finalize the backlog") -FailureMessage ("expected the finalization reason. Output: " + $outputText)
         Assert-Result -Name "unreadable finalization decision is reported as unverifiable" -Condition ($logContent -match '"kind":"unreadable_gate_decision"' -and $logContent -match '"outcome":"unverifiable"') -FailureMessage ("expected an unreadable_gate_decision degraded event. Log: " + $logContent)
+    }
+
+    function Invoke-FinalizationGateCase {
+        param([string]$CaseName, [string]$TaskId, [string]$BacklogRows, [bool]$ArchivedProduction = $false, [bool]$OmitBacklogFile = $false)
+        $caseRoot = Join-Path $tempRoot $CaseName
+        $sessionDir = Join-Path $caseRoot ".crucible/session"
+        $backlogDir = Join-Path $caseRoot ".crucible/backlog"
+        $gateDir = Join-Path $sessionDir "global/gate_decisions"
+        $logFile = Join-Path $sessionDir ($TaskId + "/pipeline.log.jsonl")
+        New-Item -ItemType Directory -Path $backlogDir, $gateDir, (Split-Path -Parent $logFile) -Force | Out-Null
+        $header = "# Backlog`n`n## Active Items`n`n| ID | Priority | Status | Title | Target |`n|---|---|---|---|---|`n"
+        if (-not $OmitBacklogFile) {
+            [System.IO.File]::WriteAllText((Join-Path $backlogDir "BACKLOG.md"), ($header + $BacklogRows + "`n"), (New-Object System.Text.UTF8Encoding $false))
+        }
+        Set-Content -LiteralPath (Join-Path $gateDir ($TaskId + "-20260902T120000Z.json")) -Value ('{"task_id":"' + $TaskId + '","outcome":"accepted"}') -Encoding UTF8
+        if ($ArchivedProduction) {
+            $archDir = Join-Path $backlogDir "features/archived"
+            New-Item -ItemType Directory -Path $archDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $archDir ($TaskId + "_test.md")) -Value "---`nitem_id: `"$TaskId`"`nstatus: `"Production`"`n---`n# $TaskId" -Encoding UTF8
+        }
+        $libPath = $CRUCIBLE_LIB.Replace("'", "''")
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -Command @"
+            `$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop
+            `$Quiet = `$true
+            Set-Location '$($caseRoot.Replace("'", "''"))'
+            . '$libPath'
+            `$ctx = @{
+                RepoRoot = '$($caseRoot.Replace("'", "''"))'
+                SessionDir = '$($sessionDir.Replace("'", "''"))'
+                LogFile = '$($logFile.Replace("'", "''"))'
+                CircuitBreakerHistoryFile = '$(Join-Path $sessionDir "global/circuit_breakers.jsonl")'
+                Quiet = `$true
+                Ceiling = 10
+                Handoff = [PSCustomObject]@{
+                    task_id = '$TaskId'
+                    source_phase = 'deployment'
+                    target_phase = 'done'
+                    cumulative_handoff_count = 2
+                    budget_tier = 'low'
+                }
+            }
+            Complete-CrucibleSourceSession -Context `$ctx
+"@ 2>&1 })
+        return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Text = ($output -join "`n") }
+    }
+
+    $results += Run-Test -Name "I8: deployment-to-done finalization fails closed without an exact backlog row" -Body {
+        $prefixOnly = Invoke-FinalizationGateCase -CaseName "i8-final-prefix" -TaskId "F-1" -BacklogRows "| [F-10](features/active/F-10_test.md) | P2 | Ready for Deploy | Test | Operator |"
+        Assert-Result -Name "prefix-only row refuses" -Condition ($prefixOnly.ExitCode -eq 2 -and $prefixOnly.Text -match "no exact row for F-1") -FailureMessage ("expected exit 2 naming the missing exact row. Exit " + $prefixOnly.ExitCode + ". Output: " + $prefixOnly.Text)
+        Assert-Result -Name "refusal names the remedy" -Condition ($prefixOnly.Text -match "Repair the row") -FailureMessage ("expected a remedy. Output: " + $prefixOnly.Text)
+
+        $malformed = Invoke-FinalizationGateCase -CaseName "i8-final-malformed" -TaskId "F-1" -BacklogRows "| **F-1** | P2 | Production | Test | Operator |"
+        Assert-Result -Name "malformed row refuses" -Condition ($malformed.ExitCode -eq 2 -and $malformed.Text -match "no exact row for F-1") -FailureMessage ("expected exit 2 for a malformed row. Exit " + $malformed.ExitCode + ". Output: " + $malformed.Text)
+
+        $open = Invoke-FinalizationGateCase -CaseName "i8-final-open" -TaskId "F-1" -BacklogRows "| [F-1](features/active/F-1_test.md) | P2 | Ready for Deploy | Test | Operator |"
+        Assert-Result -Name "exact non-terminal row still stops" -Condition ($open.ExitCode -eq 2 -and $open.Text -match "did not finalize the backlog") -FailureMessage ("expected the finalization stop. Exit " + $open.ExitCode + ". Output: " + $open.Text)
+
+        $done = Invoke-FinalizationGateCase -CaseName "i8-final-done" -TaskId "F-1" -BacklogRows "| [F-1](features/archived/F-1_test.md) | P2 | Production | Test | Operator |" -ArchivedProduction $true
+        Assert-Result -Name "exact terminal row advances" -Condition ($done.ExitCode -eq 0 -and $done.Text -notmatch "STOP") -FailureMessage ("expected exit 0. Exit " + $done.ExitCode + ". Output: " + $done.Text)
+    }
+
+    $results += Run-Test -Name "I11: deployment-to-done finalization fails closed without BACKLOG.md" -Body {
+        $missing = Invoke-FinalizationGateCase -CaseName "i11-final-nofile" -TaskId "F-1" -BacklogRows "" -OmitBacklogFile $true
+        Assert-Result -Name "missing BACKLOG.md refuses with exit 2" -Condition ($missing.ExitCode -eq 2 -and $missing.Text -match "BACKLOG\.md is missing at .*BACKLOG\.md") -FailureMessage ("expected exit 2 naming the missing path. Exit " + $missing.ExitCode + ". Output: " + $missing.Text)
+        Assert-Result -Name "missing BACKLOG.md refusal names the remedy" -Condition ($missing.Text -match "Restore BACKLOG\.md with an exact row for F-1") -FailureMessage ("expected a remedy. Output: " + $missing.Text)
+    }
+
+    $results += Run-Test -Name "I8: stale-lock cleanup keeps whole-identifier semantics with separators" -Body {
+        $caseRoot = Join-Path $tempRoot "i8-lock-separators"
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-1"
+        $lockDir = Join-Path $caseRoot ".crucible/locks"
+        New-Item -ItemType Directory -Path $lockDir -Force | Out-Null
+        $removed = @("F-1-verification.lock", "lock-F-1_verification.lock")
+        $kept = @("F-10_verification.lock", "F-1a_verification.lock", "F-1.2_verification.lock")
+        foreach ($n in ($removed + $kept)) { "x" | Set-Content -LiteralPath (Join-Path $lockDir $n) -Encoding UTF8 }
+        $handoffDir = Join-Path $caseRoot "handoffs"
+        New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
+        $handoffPath = Join-Path $handoffDir "F-1-20260530T120000Z.json"
+        $handoffObj = @{ task_id = "F-1"; source_phase = "implementation"; target_phase = "verification"; cumulative_handoff_count = 1; reason = "lock test" }
+        $handoffObj | ConvertTo-Json | Set-Content -LiteralPath $handoffPath -Encoding UTF8
+        $ctx.LatestHandoff = Get-Item $handoffPath
+        $ctx.Handoff = [PSCustomObject]$handoffObj
+        $ctx.RepoRoot = $caseRoot
+        Push-Location $caseRoot
+        try { Normalize-CrucibleInputState -Context $ctx } finally { Pop-Location }
+        foreach ($n in $removed) { Assert-Result -Name "$n removed" -Condition (-not (Test-Path -LiteralPath (Join-Path $lockDir $n))) -FailureMessage "$n is a lock for F-1 verification and must be cleaned" }
+        foreach ($n in $kept) { Assert-Result -Name "$n kept" -Condition (Test-Path -LiteralPath (Join-Path $lockDir $n)) -FailureMessage "$n belongs to another task and must survive" }
     }
 
     $results += Run-Test -Name "Workspace cleanliness gate: start-phase probe and deploy-phase block with classification" -Body {
@@ -886,7 +1018,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output = $outputLines -join "`n"
         $exitCode = $LASTEXITCODE
 
@@ -939,7 +1071,7 @@ try {
 }
 "@ | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines2 = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines2 = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $output2 = $outputLines2 -join "`n"
         $exitCode2 = $LASTEXITCODE
 

@@ -110,10 +110,16 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 foreach ($lib in "config-helpers.ps1", "instruction-blocks.ps1", "language-presets.ps1", "project-root.ps1") {
     $libPath = Join-Path $PSScriptRoot "lib/$lib"
     if (-not (Test-Path -LiteralPath $libPath)) {
-        throw "Required helper script not found at $libPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+        [Console]::Error.WriteLine("Required helper script not found at $libPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+        exit 1
     }
 }
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
@@ -124,17 +130,13 @@ $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
 function Get-CrucibleRoot {
     param([string]$ProjectRoot = "")
     $root = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { $REPO_ROOT } else { $ProjectRoot }
-    if ([string]::IsNullOrWhiteSpace($root)) { $root = (Get-Location).Path }
-    $configPath = Join-Path $root ".crucible/config.yaml"
-    if (Test-Path -LiteralPath $configPath) {
-        try {
-            $content = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-            if ($content -match '(?m)^crucible_root:\s*["'']([^"''\r\n]+)["'']\s*$') {
-                return $Matches[1].Trim()
-            }
-        } catch {}
-    }
-    return ".crucible"
+    if ([string]::IsNullOrWhiteSpace($root)) { $root = Resolve-ConfigProjectRoot }
+    # Read through the one owner of crucible_root (I13). An unreadable value keeps this
+    # entrypoint's long-standing default rather than stopping every phase. Item 247.
+    $value = $null
+    try { $value = Get-ConfiguredCrucibleRootValue -ProjectRoot $root } catch { $value = $null }
+    if ([string]::IsNullOrWhiteSpace($value)) { return ".crucible" }
+    return $value
 }
 # Framework powershell/ directory - used to resolve sibling scripts regardless of CWD.
 $FRAMEWORK_POWERSHELL = $PSScriptRoot
@@ -149,7 +151,7 @@ try {
     # unhandled exception. $ErrorActionPreference = "Stop" would exit non-zero either way,
     # but the operator would be reading a stack trace instead of the one sentence that says
     # which parameter to pass.
-    Write-Host ("Error: " + $_.Exception.Message) -ForegroundColor Red
+    [Console]::Error.WriteLine("Error: " + $_.Exception.Message)
     exit 1
 }
 $crucibleRoot = Get-CrucibleRoot -ProjectRoot $ProjectRoot
@@ -185,17 +187,20 @@ if (-not $Quiet) {
                         }
                     }
                     if ($frameworkSource) {
-                        $gitMainResult = git -C $frameworkSource rev-parse --verify --quiet main
+                        $frameworkSource = Resolve-FilesystemPath -Path $frameworkSource
+                        $frameworkBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $frameworkSource
+                        $gitMainResult = git -C (Resolve-FilesystemPath -Path $frameworkSource) rev-parse --verify --quiet $frameworkBranch
                         $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitMainResult) { ($gitMainResult | Out-String).Trim() } else { "" }
                         if (-not ($frameworkHead -match '^[0-9a-f]{40}$')) {
-                            $gitHeadResult = git -C $frameworkSource rev-parse HEAD 2>$null
+                            $gitHeadResult = git -C (Resolve-FilesystemPath -Path $frameworkSource) rev-parse HEAD 2>$null
                             $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitHeadResult) { ($gitHeadResult | Out-String).Trim() } else { "" }
                         }
                         if ($frameworkHead -match '^[0-9a-f]{40}$' -and $bannerCommit -ne $frameworkHead) {
-                            $null = git -C $frameworkSource merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
+                            $null = git -C (Resolve-FilesystemPath -Path $frameworkSource) merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
                             if ($LASTEXITCODE -eq 0) {
                                 Write-Host ("WARNING: Installed Crucible bundle lags framework HEAD. Installed: " + $bannerCommit.Substring(0, 7) + " | Upstream HEAD: " + $frameworkHead.Substring(0, 7)) -ForegroundColor Yellow
-                                Write-Host ("  Run 'update-bundle.ps1 -FrameworkSource " + $frameworkSource + "' to bring it current.") -ForegroundColor Yellow
+                                $updateCommand = New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Transport PowerShell -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource
+                                Write-Host ("  Run " + $updateCommand + " to bring it current.") -ForegroundColor Yellow
                             }
                         }
                     }
@@ -218,6 +223,7 @@ if ($Doctor) {
         Write-Host ("Error: Doctor script not found at " + $doctorScript) -ForegroundColor Red
         exit 1
     }
+    $global:LASTEXITCODE = 0
     & $doctorScript
     exit $LASTEXITCODE
 }
@@ -264,6 +270,7 @@ if ($NewHandoff) {
     if ($HumanDeferred.Count -gt 0) { $genParams.HumanDeferred = [string[]]$HumanDeferred }
     if ($HumanRejected.Count -gt 0) { $genParams.HumanRejected = [string[]]$HumanRejected }
 
+    $global:LASTEXITCODE = 0
     & $generatorScript @genParams
     exit $LASTEXITCODE
 }
@@ -337,6 +344,7 @@ if ($Health -or $Cleanup) {
         Write-Host ("Error: Health script not found at " + $healthScript) -ForegroundColor Red
         exit 1
     }
+    $global:LASTEXITCODE = 0
     & $healthScript -Health:$Health -Cleanup:$Cleanup -Force:$Force -Quiet:$Quiet -TaskId $TaskId
     exit $LASTEXITCODE
 }
@@ -347,6 +355,7 @@ if ($Status) {
         Write-Host ("Error: Status script not found at " + $statusScript) -ForegroundColor Red
         exit 1
     }
+    $global:LASTEXITCODE = 0
     & $statusScript
     exit $LASTEXITCODE
 }
@@ -372,9 +381,10 @@ if ($Rewind) {
 # --- 0a. Require -TaskId for all pipeline operations ---
 if ([string]::IsNullOrEmpty($TaskId)) {
     Write-Host "`n[ERROR] -TaskId is required." -ForegroundColor Red
-    Write-Host "Usage: .\.crucible\powershell\crucible.ps1 -Init -TaskId {task_id} -ProjectRoot `"{project_root}`"" -ForegroundColor Yellow
-    Write-Host "       .\.crucible\powershell\crucible.ps1 -Health  (no -TaskId needed for health checks)" -ForegroundColor DarkGray
-    Write-Host "       .\.crucible\powershell\crucible.ps1 -Doctor  (no -TaskId needed for readiness checks)" -ForegroundColor DarkGray
+    $crucibleRootForUsage = if ([System.IO.Path]::IsPathRooted($crucibleRoot)) { $crucibleRoot } else { ".\" + $crucibleRoot.Replace("/", "\") }
+    Write-Host ("Usage: " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = "{task_id}"; ProjectRoot = "{project_root}" }) -CrucibleRoot $crucibleRootForUsage)) -ForegroundColor Yellow
+    Write-Host ("       " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Health = $true }) -CrucibleRoot $crucibleRootForUsage) + "  (no -TaskId needed for health checks)") -ForegroundColor DarkGray
+    Write-Host ("       " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Doctor = $true }) -CrucibleRoot $crucibleRootForUsage) + "  (no -TaskId needed for readiness checks)") -ForegroundColor DarkGray
     Write-Host "No task ID? Start orchestration in bootstrap mode: a Groomer selects the next item (sops/orchestrator.md, Session Start, step 5)." -ForegroundColor Yellow
     exit 1
 }
@@ -384,27 +394,7 @@ function Check-Dependencies {
 
     if (-not (Test-Path $BacklogItemPath)) { return }
 
-    $frontmatter = Get-Content -LiteralPath $BacklogItemPath -Head 20 -Encoding UTF8
-    $dependsOn = @()
-    $parsing = $false
-    foreach ($line in $frontmatter) {
-        if ($line -match 'depends_on:\s*\[([^\]]*)\]') {
-            $rawDeps = $matches[1].Split(',') | ForEach-Object { $_.Trim().Replace('"', '').Replace("'", "") }
-            $dependsOn = @($rawDeps | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-            break
-        }
-        if ($line -match 'depends_on:') {
-            $parsing = $true
-            continue
-        }
-        if ($parsing) {
-            if ($line -match '^\s*-\s*([A-Z][A-Z0-9\-]+)') {
-                $dependsOn += $matches[1]
-            } elseif ($line -match '^[a-z_]+:') {
-                $parsing = $false
-            }
-        }
-    }
+    $dependsOn = @(Get-SpecDependencies -SpecPath $BacklogItemPath)
 
     if ($dependsOn.Count -eq 0) { return }
 

@@ -16,8 +16,8 @@ function Write-InstallInfo {
 }
 
 # Determine if we are in the framework repo or an adopter
-$parentDir = (Resolve-Path -Path "$PSScriptRoot/..").Path
-$grandParentDir = (Resolve-Path -Path "$PSScriptRoot/../..").Path
+$parentDir = (Resolve-Path -Path "$PSScriptRoot/..").ProviderPath
+$grandParentDir = (Resolve-Path -Path "$PSScriptRoot/../..").ProviderPath
 
 if (Test-Path -LiteralPath (Join-Path $parentDir ".git")) {
     # Framework repo mode
@@ -28,13 +28,15 @@ if (Test-Path -LiteralPath (Join-Path $parentDir ".git")) {
     $repoRoot = $grandParentDir
     $hooksPath = ".crucible/scripts/hooks"
 } else {
-    throw "Not a git repository (missing .git directory)."
+    [Console]::Error.WriteLine("Not a git repository (missing .git directory).")
+    exit 1
 }
 
 # Verify the hooks directory actually exists
 $fullHooksDir = Join-Path $repoRoot $hooksPath
 if (-not (Test-Path -LiteralPath $fullHooksDir)) {
-    throw "Hooks directory not found: $fullHooksDir"
+    [Console]::Error.WriteLine("Hooks directory not found: $fullHooksDir")
+    exit 1
 }
 
 # Configure core.hooksPath in Git
@@ -125,7 +127,7 @@ if ($hooksPath -ne "scripts/hooks") {
         }
         $unnamed = @($trackedHookDirs | Where-Object {
             $full = (Join-Path $repoRoot $_)
-            $null -eq $configured -or ([System.IO.Path]::GetFullPath($full).TrimEnd('\', '/') -ne [System.IO.Path]::GetFullPath($configured).TrimEnd('\', '/'))
+            $null -eq $configured -or ([System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $full)).TrimEnd('\', '/') -ne [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $configured)).TrimEnd('\', '/'))
         })
         if ($unnamed.Count -gt 0) {
             Write-InstallInfo ("Warning: core.hooksPath now shadows git hooks this project tracks, and they will not run:") -ForegroundColor Yellow
@@ -156,3 +158,4 @@ if (-not $onWindows) {
     Write-InstallInfo "Marked hook scripts executable for this platform." -ForegroundColor Green
 }
 
+exit 0

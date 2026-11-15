@@ -1,12 +1,15 @@
 . (Join-Path $PSScriptRoot "normalized-hash.ps1")
+if (-not (Test-Path -LiteralPath Function:Test-PathWithinDirectory)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
+}
 
 function Get-InstallManifest {
     param([string]$FrameworkRoot = "")
 
     if ([string]::IsNullOrWhiteSpace($FrameworkRoot)) {
-        $FrameworkRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")).Path
+        $FrameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")))
     } elseif (Test-Path -LiteralPath $FrameworkRoot) {
-        $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkRoot).Path
+        $FrameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $FrameworkRoot))
     }
 
     $manifestPath = Join-Path $FrameworkRoot "install-manifest.json"
@@ -109,12 +112,38 @@ function Test-FrameworkDevOnlyFile {
         # deliberately carries none of those rules, so a shipped copy would fail for the
         # adopter. The adopter-facing half of item 84 is docs/git-policy.md, not a rule.
         "powershell/tests/framework-gitignore.tests.ps1",
+        # Guards the framework's hosted CI policy; .github/ is not installed.
+        "powershell/tests/ci-docs-only.tests.ps1",
         # Asserts against the worktree registrations of the Crucible repo itself, and its shared
         # fixture registers worktrees of it. In an adopter bundle $REPO_ROOT is the bundle root,
         # whose worktree list is not the framework's; both are dead weight there.
         "powershell/tests/framework-worktree-hygiene.tests.ps1",
+        "powershell/tests/run-all-tests-worktree-cleanup.tests.ps1",
         "powershell/tests/_worktree-fixture.ps1",
         "powershell/tests/crucible-lint-authoring.tests.ps1",
+        # Its owners table and allowances name the framework's own powershell/ paths and
+        # line patterns. A bundle lays them out under .crucible/powershell/, so every owner
+        # would report itself missing. Item 245.
+        "powershell/tests/format-owners.tests.ps1",
+        # These whole-class caller audits invoke framework-only ASCII and mirror-sync
+        # tooling; an installed bundle deliberately omits those entrypoints.
+        "powershell/tests/native-alias-sweep.tests.ps1",
+        "powershell/tests/manifest-path-boundaries.tests.ps1",
+        # Scans Crucible's runtime command call sites, not an adopter's source tree.
+        "powershell/tests/printed-commands.tests.ps1",
+        # Framework runtime invocation inventory and its reasoned exclusion ledger.
+        "powershell/tests/script-invocations.tests.ps1",
+        # Extracts the framework's consuming boundaries for the item 370 audit.
+        "powershell/tests/script-diagnostics.tests.ps1",
+        # Binds the advice the framework's own tests print, against its scripts. Item 364.
+        "powershell/tests/test-command-advice.tests.ps1",
+        # The static renderer only those two dev-only guards load. _command-binding.ps1 ships,
+        # because documented-commands.tests.ps1 does.
+        "powershell/tests/_command-rendering.ps1",
+        # Exercises the same framework-only detector and catalog. Item 257 review.
+        "powershell/tests/format-owners-review.tests.ps1",
+        # Scans this framework repo's runtime for I2 discard sites and stale allowances.
+        "powershell/tests/git-discard-guard.tests.ps1",
         # Proves the two shipped test files that still name scripts/crucible_lint.go
         # do not invoke it from a bundle that has been through this list. Item 108.
         # The named files themselves ship; this wrapper does not, because it uses
@@ -166,6 +195,9 @@ function Test-FrameworkDevOnlyFile {
         # every entry naming an excluded file would report itself stale and fail the adopter's run
         # for a rule that is about this repository's migration rather than about their tests.
         "powershell/tests/fixture-root-conformance.tests.ps1",
+        # Inventories framework test capture sites and process seams. Item 338.
+        "powershell/tests/_capture-audit.ps1",
+        "powershell/tests/fixture-capture-guard.tests.ps1",
         # Exclude framework tooling per file; scripts/hooks/ must ship because
         # core.hooksPath uses all four hooks in adopter bundles. Item 83.
         #
@@ -174,12 +206,14 @@ function Test-FrameworkDevOnlyFile {
         "scripts/test-linux.ps1",
         # Windows process profiling is maintainer tooling, not adopter runtime. Item 201.
         "scripts/profile-tests.ps1",
+        "powershell/tests/profile-tests.tests.ps1",
         # Provisions WSL tools for the dev-only Linux leg and Go linter.
         "scripts/wsl-bootstrap.sh",
         # Lints framework backlog, docs and schema. The hook invokes it only when
         # REPO_ROOT equals FRAMEWORK_ROOT, which adopter bundle layouts cannot satisfy.
         # Shipped tests skip the go-run when this file is absent. Item 108.
-        "scripts/crucible_lint.go"
+        "scripts/crucible_lint.go",
+        "scripts/crucible_lint_test.go"
     )
     if ($devOnlyPaths -contains $normalized) {
         return $true
@@ -225,9 +259,9 @@ function Get-FrameworkOwnedFiles {
     )
 
     if ([string]::IsNullOrWhiteSpace($FrameworkRoot)) {
-        $FrameworkRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")).Path
+        $FrameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")))
     } else {
-        $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkRoot).Path
+        $FrameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $FrameworkRoot))
     }
     $manifest = Get-InstallManifest -FrameworkRoot $FrameworkRoot
     $roots = @(Get-InstallSourceRoot -Manifest $manifest)
@@ -235,7 +269,7 @@ function Get-FrameworkOwnedFiles {
     if (-not [string]::IsNullOrWhiteSpace($AtCommit)) {
         $files = @()
         foreach ($root in $roots) {
-            $treeOutput = @(git -C $FrameworkRoot ls-tree -r --name-only $AtCommit -- $root 2>$null)
+            $treeOutput = @(git -C (Resolve-FilesystemPath -Path $FrameworkRoot) ls-tree -r --name-only $AtCommit -- $root 2>$null)
             if ($LASTEXITCODE -ne 0) {
                 throw "Unable to enumerate install files at commit $AtCommit under $root"
             }
@@ -251,12 +285,12 @@ function Get-FrameworkOwnedFiles {
             continue
         }
         if (Test-Path -LiteralPath $absoluteRoot -PathType Leaf) {
-            $resolvedFile = (Resolve-Path -LiteralPath $absoluteRoot).Path
+            $resolvedFile = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $absoluteRoot))
             $relative = $resolvedFile.Substring($FrameworkRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
             $files += ConvertTo-ManifestRelativePath -Path $relative
             continue
         }
-        $resolvedRoot = (Resolve-Path -LiteralPath $absoluteRoot).Path
+        $resolvedRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $absoluteRoot))
         $files += Get-ChildItem -LiteralPath $resolvedRoot -Force -Recurse -File | Where-Object {
             $rel = $_.FullName.Substring($FrameworkRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
             # Exclude gitignored runtime state that can accumulate under a
@@ -356,8 +390,21 @@ function Test-CrucibleGitIgnored {
         [Parameter(Mandatory=$true)][string]$BundleRoot,
         [Parameter(Mandatory=$true)][string]$RelativePath
     )
+    $ignored = Get-CrucibleGitIgnoredPaths -BundleRoot $BundleRoot -RelativePaths @($RelativePath)
+    return $ignored.Contains($RelativePath)
+}
+
+# One ignore query for the complete classification snapshot, including paths
+# that do not exist yet. NUL framing avoids git's quoted-path display format.
+function Get-CrucibleGitIgnoredPaths {
+    param(
+        [Parameter(Mandatory=$true)][string]$BundleRoot,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][string[]]$RelativePaths
+    )
+    $ignored = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    if ($RelativePaths.Count -eq 0) { return ,$ignored }
     $gitRoot = $null
-    $dir = [System.IO.Path]::GetFullPath($BundleRoot)
+    $dir = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $BundleRoot))
     while ($null -ne $dir) {
         if (Test-Path -LiteralPath (Join-Path $dir ".git")) {
             $gitRoot = $dir
@@ -370,19 +417,42 @@ function Test-CrucibleGitIgnored {
         $dir = $parent
     }
     if ($null -eq $gitRoot) {
-        return $false
+        return ,$ignored
     }
-
-    $absoluteFilePath = [System.IO.Path]::GetFullPath((Join-Path $BundleRoot $RelativePath))
-
-    if ($absoluteFilePath.StartsWith($gitRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-        $relativeToGit = $absoluteFilePath.Substring($gitRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::AltDirectorySeparatorChar)
-        $relativeToGit = $relativeToGit -replace '\\', '/'
-
-        $null = git -C $gitRoot check-ignore --quiet -- $relativeToGit 2>$null
-        return ($LASTEXITCODE -eq 0)
+    $pathsByGitName = @{}
+    foreach ($relativePath in $RelativePaths) {
+        $absoluteFilePath = [IO.Path]::GetFullPath((Resolve-FilesystemPath -Path (Join-Path $BundleRoot $relativePath)))
+        if (Test-PathWithinDirectory -Path $absoluteFilePath -Directory $gitRoot) {
+            $gitName = (Get-PathRelativeToDirectory -Path $absoluteFilePath -Directory $gitRoot) -replace '\\', '/'
+            $pathsByGitName[$gitName] = $relativePath
+        }
     }
-    return $false
+    if ($pathsByGitName.Count -eq 0) { return ,$ignored }
+    $psi = [Diagnostics.ProcessStartInfo]::new('git')
+    foreach ($argument in @('-C', (Resolve-FilesystemPath -Path $gitRoot), 'check-ignore', '--stdin', '-z')) { $psi.ArgumentList.Add($argument) }
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
+    $psi.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $proc = [Diagnostics.Process]::Start($psi)
+    try {
+        $stdout = $proc.StandardOutput.ReadToEndAsync()
+        $stderr = $proc.StandardError.ReadToEndAsync()
+        foreach ($gitName in $pathsByGitName.Keys) { $proc.StandardInput.Write($gitName + [char]0) }
+        $proc.StandardInput.Close()
+        $proc.WaitForExit()
+        if ($proc.ExitCode -gt 1) { throw ("git check-ignore failed: " + $stderr.GetAwaiter().GetResult()) }
+        foreach ($gitName in $stdout.GetAwaiter().GetResult().Split([char]0, [StringSplitOptions]::RemoveEmptyEntries)) {
+            [void]$ignored.Add($pathsByGitName[$gitName])
+        }
+    } finally {
+        if (-not $proc.HasExited) { $proc.Kill($true) }
+        $proc.Dispose()
+    }
+    return ,$ignored
 }
 
 function Test-ScaffoldSnapshotPath {
@@ -470,7 +540,7 @@ function New-ProvenanceManifest {
         [Parameter(Mandatory=$false)]$Manifest = $null
     )
 
-    $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkRoot).Path
+    $FrameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $FrameworkRoot))
     if ($null -eq $Manifest) {
         $Manifest = Get-InstallManifest -FrameworkRoot $FrameworkRoot
     }
@@ -494,8 +564,10 @@ function New-ProvenanceManifest {
     }
 
     $files = [ordered]@{}
-    foreach ($entry in @(Get-ProvenanceBundlePaths -FrameworkRoot $FrameworkRoot -Manifest $Manifest -Commit $Commit)) {
-        $content = Get-GitFileContent -Repo $FrameworkRoot -Commit $Commit -Path $entry.SourcePath
+    $entries = @(Get-ProvenanceBundlePaths -FrameworkRoot $FrameworkRoot -Manifest $Manifest -Commit $Commit)
+    $contents = Get-GitFileContents -Repo $FrameworkRoot -Commit $Commit -Paths @($entries | ForEach-Object { $_.SourcePath })
+    foreach ($entry in $entries) {
+        $content = $contents[$entry.SourcePath]
         if ($null -eq $content) { continue }
         $hash = Get-NormalizedSha256 -Content $content
         $baseContent = Get-ContentWithoutCustomRegions -Content $content
@@ -514,7 +586,7 @@ function New-ProvenanceManifest {
 
     try {
         $json = $prov | ConvertTo-Json -Depth 10
-        [System.IO.File]::WriteAllText($cachePath, $json, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $cachePath), $json, [System.Text.UTF8Encoding]::new($false))
     } catch {
         # Ignore cache write errors
     }
@@ -530,7 +602,7 @@ function Write-ProvenanceManifest {
     $path = Get-ProvenanceManifestPath -BundleRoot $BundleRoot
     # ConvertTo-Json on PS 5.1 emits CRLF; normalize to LF for git policy under .crucible/
     $json = ($ProvenanceManifest | ConvertTo-Json -Depth 10) -replace "`r`n", "`n"
-    [System.IO.File]::WriteAllText($path, $json, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $path), $json, [System.Text.UTF8Encoding]::new($false))
     return $path
 }
 
@@ -551,9 +623,9 @@ function Get-ExpectedScaffoldFiles {
     )
 
     if ([string]::IsNullOrWhiteSpace($FrameworkRoot)) {
-        $FrameworkRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")).Path
+        $FrameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")))
     } else {
-        $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkRoot).Path
+        $FrameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $FrameworkRoot))
     }
 
     if ($null -eq $Manifest) {
@@ -594,7 +666,7 @@ function Get-ExpectedScaffoldFiles {
         }
 
         if ($null -ne $gitRoot) {
-            $treeOutput = @(git -C $FrameworkRoot ls-files -- $scaffoldPrefix 2>$null)
+            $treeOutput = @(git -C (Resolve-FilesystemPath -Path $FrameworkRoot) ls-files -- $scaffoldPrefix 2>$null)
             if ($LASTEXITCODE -eq 0 -and $treeOutput.Count -gt 0) {
                 foreach ($line in $treeOutput) {
                     if ([string]::IsNullOrWhiteSpace($line)) { continue }
@@ -638,9 +710,9 @@ function Test-ScaffoldTemplateComplete {
     )
 
     if ([string]::IsNullOrWhiteSpace($FrameworkRoot)) {
-        $FrameworkRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")).Path
+        $FrameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "../..")))
     } else {
-        $FrameworkRoot = (Resolve-Path -LiteralPath $FrameworkRoot).Path
+        $FrameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $FrameworkRoot))
     }
 
     if ($null -eq $Manifest) {
@@ -699,7 +771,7 @@ function Get-DriftClassification {
         [Parameter(Mandatory=$true)]$Manifest
     )
 
-    $BundleRoot = (Resolve-Path -LiteralPath $BundleRoot).Path
+    $BundleRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BundleRoot))
     $results = [ordered]@{
         pristine = New-Object System.Collections.Generic.List[string]
         customized = New-Object System.Collections.Generic.List[string]

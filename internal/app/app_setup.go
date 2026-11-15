@@ -23,7 +23,8 @@ import (
 )
 
 // SetupLogging initializes the global structured logger based on configuration.
-func SetupLogging(cfg *config.Config, hub *dashboard.Hub) {
+// The caller must close the returned log writer when logging is finished.
+func SetupLogging(cfg *config.Config, hub *dashboard.Hub) io.Closer {
 	opts := &slog.HandlerOptions{
 		Level: cfg.LogLevel(),
 	}
@@ -69,6 +70,7 @@ func SetupLogging(cfg *config.Config, hub *dashboard.Hub) {
 	}
 
 	slog.SetDefault(slog.New(handler))
+	return rotator
 }
 
 // LogBootMemory emits a single DEBUG record with the process memory footprint at

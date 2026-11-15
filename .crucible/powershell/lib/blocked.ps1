@@ -1,3 +1,6 @@
+. (Join-Path $PSScriptRoot "project-root.ps1")
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 function Write-BlockedTaskRecord {
     param(
         [Parameter(Mandatory=$true)][string]$TaskId,
@@ -8,8 +11,9 @@ function Write-BlockedTaskRecord {
         [Parameter(Mandatory=$true)][string]$Summary,
         [string]$HumanDecisionNeeded = "Should we reduce scope, split the task, or abandon it?",
         [string[]]$Artifacts = @(),
-        [string]$BacklogDir = $backlogDir,
-        [string]$FrameworkPowerShell = $FRAMEWORK_POWERSHELL
+        [Parameter(Mandatory=$true)][string]$BacklogDir,
+        [Parameter(Mandatory=$true)][string]$FrameworkPowerShell,
+        [Parameter(Mandatory=$true)][string]$ProjectRoot
     )
     $blockedDir = Join-Path $BacklogDir "blocked"
     if (-not (Test-Path $blockedDir)) { New-Item -ItemType Directory -Force -Path $blockedDir | Out-Null }
@@ -31,41 +35,20 @@ function Write-BlockedTaskRecord {
     $record | ConvertTo-Json | Set-Content -Path $recordPath -Encoding UTF8
     Write-Quiet ("[BLOCKED] Record written to $recordPath") -ForegroundColor Cyan
 
-    $actualProjectRoot = ""
-    if (Test-Path "variable:Context") {
-        $localContext = Get-Variable "Context" -ValueOnly -ErrorAction SilentlyContinue
-        if ($null -ne $localContext -and $localContext.ContainsKey("RepoRoot")) {
-            $actualProjectRoot = $localContext.RepoRoot
-        }
-    }
-    if ([string]::IsNullOrEmpty($actualProjectRoot) -and (Test-Path "variable:repoRoot")) {
-        $localRepoRoot = Get-Variable "repoRoot" -ValueOnly -ErrorAction SilentlyContinue
-        if ($null -ne $localRepoRoot) {
-            $actualProjectRoot = $localRepoRoot
-        }
-    }
-    if ([string]::IsNullOrEmpty($actualProjectRoot)) {
-        try {
-            $resolvedBacklog = (Resolve-Path $BacklogDir).Path
-            $dir = Split-Path -Parent $resolvedBacklog
-            while (-not [string]::IsNullOrEmpty($dir)) {
-                if (Test-Path (Join-Path $dir ".crucible")) {
-                    $actualProjectRoot = $dir
-                    break
-                }
-                $nextDir = Split-Path -Parent $dir
-                if ($nextDir -eq $dir) { break }
-                $dir = $nextDir
-            }
-        } catch {}
-    }
-
     # Session-state updates are secondary to the blocked record. Warn on failure so
     # an in-process config error under "Stop" cannot replace the refusal or its exit code.
     $updateJson = @{ status = "blocked"; circuit_breaker = $CircuitBreaker } | ConvertTo-Json -Compress
+    $previousConsoleError = [Console]::Error
     try {
-        & "$FrameworkPowerShell/update-session-state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true -ProjectRoot $actualProjectRoot 2>$null
+        # Console.Error bypasses PowerShell redirection. Keep this advisory failure
+        # on the blocked warning surface, and restore the writer even on exceptions.
+        [Console]::SetError([IO.TextWriter]::Null)
+        $global:LASTEXITCODE = 0
+        & "$FrameworkPowerShell/update-session-state.ps1" -Specialist $LastPhase -TaskId $TaskId -UpdateJson $updateJson -Merge $true -ProjectRoot $ProjectRoot 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Session state updater exited $LASTEXITCODE." }
     } catch {
         Write-Quiet ("[BLOCKED] Warning: session state was not updated for " + $TaskId + ": " + $_.Exception.Message) -ForegroundColor Yellow
+    } finally {
+        [Console]::SetError($previousConsoleError)
     }
 }

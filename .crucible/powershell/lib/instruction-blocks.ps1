@@ -1,5 +1,9 @@
+if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
+
 # Idempotent instruction-block management for adopter root instruction files.
 # Owns the sentinel markers, canonical block content, and append/detect logic.
+
+. (Join-Path $PSScriptRoot "crucible-command.ps1")
 
 $SENTINEL_START = "<!-- crucible-instructions-start -->"
 $SENTINEL_END   = "<!-- crucible-instructions-end -->"
@@ -15,21 +19,12 @@ function Get-CrucibleBlock {
         the doc "matches", with nothing comparing the two; by the time anything checked, the
         doc still told adopters to run the pre-rename factory.ps1. Edit here and regenerate.
 
-        PwshCommand overrides the host named on the runtime line. The gate pins
-        pwsh so the generated region is byte-identical on every platform;
-        callers that actually write the block omit it and get Get-PwshCommand.
+        PwshCommand is retained for existing callers and intentionally unused. Direct
+        commands run in the reader's PowerShell 7+ prompt; no invoker is passed to the builder.
     #>
     param(
         [Parameter(Mandatory=$false)][string]$PwshCommand
     )
-
-    if ([string]::IsNullOrWhiteSpace($PwshCommand)) {
-        if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
-            . (Join-Path $PSScriptRoot "platform.ps1")
-        }
-        $PwshCommand = Get-PwshCommand
-    }
-    $pwshCmd = $PwshCommand
 
     $agentsBody = @'
 ## Crucible
@@ -70,12 +65,14 @@ Do not commit runtime data:
 - `.crucible/cache/`
 - generated logs, JSONL files, handoffs, and eval output
 
-Run the installed runtime from the project root:
+Run the installed runtime from the project root at a PowerShell 7+ prompt:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task-id> -ProjectRoot "{project_root}"
+{{init_command}}
 ```
-'@ -replace 'powershell.exe', $pwshCmd
+'@
+    $initCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = "<task-id>"; ProjectRoot = "{project_root}" }) -CrucibleRoot "{{crucible_root}}"
+    $agentsBody = $agentsBody.Replace("{{init_command}}", $initCommand)
 
     $claudeBody = @'
 # Claude Instructions
@@ -189,7 +186,7 @@ function Add-CrucibleInstructionBlock {
                     $separator = "`n"
                 }
                 $newContent = $existing + $separator + $BlockContent + "`n"
-                [System.IO.File]::WriteAllText($FilePath, $newContent, [System.Text.UTF8Encoding]::new($false))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $FilePath), $newContent, [System.Text.UTF8Encoding]::new($false))
                 if (-not $Quiet) {
                     Write-Host "  [APPEND] $FileName - Crucible block appended." -ForegroundColor Green
                 }
@@ -201,7 +198,7 @@ function Add-CrucibleInstructionBlock {
                 if (-not (Test-Path -LiteralPath $parentDir)) {
                     New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
                 }
-                [System.IO.File]::WriteAllText($FilePath, $newContent, [System.Text.UTF8Encoding]::new($false))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $FilePath), $newContent, [System.Text.UTF8Encoding]::new($false))
                 if (-not $Quiet) {
                     Write-Host "  [CREATE] $FileName - created with Crucible block." -ForegroundColor Green
                 }

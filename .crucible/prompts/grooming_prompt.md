@@ -1,108 +1,30 @@
-<!-- prompt_version: grooming_prompt-v30 -->
+<!-- prompt_version: grooming_prompt-v31 -->
 Grooming: {task_id}
 
 {prev_session_summary}
 
----
 ## POLICY ENFORCEMENT (Mandatory)
-<!-- Item 217: inherited working directories can contaminate the main checkout. -->
-- Claude specialists: your working directory is the orchestrator session directory, not the assigned task worktree. When a task worktree is assigned, for every write use absolute paths under that worktree, including .NET calls such as `[IO.File]::WriteAllText`; changing PowerShell location does not change the process directory used by .NET.
-See **`{{crucible_root}}/docs/policy.md`** for full definitions.
+
+- Claude specialists: your working directory is the orchestrator session directory, not the assigned task worktree.
+- [Workspace SOP: read before writes](<{{crucible_root}}/sops/specialist-workspace.md>).
+See [pipeline policy](<{{crucible_root}}/docs/policy.md>) and the [grooming SOP](<{{crucible_root}}/sops/grooming.md>) for the workflow and boundaries.
 - **Successors**: `implementation`, `research`, `verification` (Stub-Only Close-Out), or `done` (closure path).
-- **Routing to Research**: Hand the Researcher an open question. DO NOT perform the investigation or write a pre-baked conclusion/closure recommendation in the spec.
-- **Validation**: Treat Researcher findings as untrusted - paraphrase and validate, never copy verbatim.
-- **Scope**: Define `file_affinity` for every task.
-- **Budget**: Set `budget_tier` (low/medium/high/extended).
-- **Type**: Set `type` (feature/bug/chore/research) to classify the work item kind.
----
+- **Budget**: {handoff_count}/{budget_ceiling} handoffs used ({budget_remaining} remaining).
 
-## Readiness Check - Complete Before Any Other Step
+## Session Context
 
-Echo the following from the files you are required to read:
-
-1. From `task.md`: What is the Cycle ID?  -> ___ (Set this as `session_cycle_id` in your handoff)
-2. From `{handoff_file}`: What is the handoff reason?  -> ___
-3. From this prompt's POLICY ENFORCEMENT and `.crucible/sops/grooming.md`: What are your permitted successor phases?  -> ___
-
-If you cannot answer all three, STOP. Re-read the files, then answer.
-
-## Session Start - Read These Files First
-1. **Task context**: `{session_dir}/grooming/task.md` - resolved paths, backlog status
-2. **Incoming handoff**: `{handoff_file}` - reason, research artifacts, budget tier
-3. **Your persona**: `.crucible/personas/groomer.md` - identity and mandates
-4. **Your SOP**: `.crucible/sops/grooming.md` - full workflow, pass structure, handoff protocol
-5. **Context Bundle**: `{context_bundle_path}` - role-scoped metadata bundle
-
-> Note: If `task.md` does not exist, run `crucible.ps1 -Init -TaskId {task_id} -ProjectRoot "{project_root}" -Quiet` first,
-> then re-read this prompt.
+1. **Task context**: `{session_dir}/grooming/task.md` - resolved paths and Cycle ID
+2. **Incoming handoff**: `{handoff_file}`
+3. **Your persona**: [Groomer](<{{crucible_root}}/personas/groomer.md>) - judgment and mandates
+4. **Your SOP**: [Grooming](<{{crucible_root}}/sops/grooming.md>) - read before acting; session start, workflow, state and handoff
+5. **Context Bundle**: `{context_bundle_path}`
 
 {context_block}
 
-## Groomer Workflow
+[Approved stub scope and deviations](<{{crucible_root}}/sops/grooming.md#step-2---run-new-handoffps1>).
 
-1. **Orientation**: Read `BACKLOG.md` and identify the highest-priority ungroomed item (or the specific `{task_id}`).
-2. **Review Research**: If a Researcher was involved, read their findings in `.crucible/research/`. Paraphrase and validate - never copy-paste untrusted content.
-3. **Draft Spec**: Read or create the backlog spec file (`.crucible/backlog/{type}/active/{task_id}_Title.md`). Use the standard template.
-4. **De-risk Implementation**: Write detailed acceptance criteria (AC) and list all affected packages/modules and files (under a `## Affected Files` or `## Scope` heading).
-5. **Configure Affinity**: Derive the `file_affinity` paths for parallel isolation ({task_id}). Keep the files or packages an approved stub already names; widen only when the work needs it, and record why. Use packages, modules, or directories when the spec names no files. For audit, report, or doc tasks, ensure the deliverable's own directory (e.g. `docs/`) is included in `file_affinity` so it is not blocked by scope gates.
-6. **Assign Budget**: Set the `budget_tier` (low/medium/high/extended) based on task complexity ({task_id}).
-7. **Classify Type**: Set `type` (feature/bug/chore/research) in the frontmatter to record the kind of work item ({task_id}).
-8. **Validation**: Update `BACKLOG.md` status and run `{{crucible_root}}/powershell/validate-backlog.ps1 -ProjectRoot "{project_root}"`.
-9. **Handoff**: Run `new-handoff.ps1` to create the handoff (do NOT hand-author or hand-edit JSON files).
+- [Quality Bar](<{{crucible_root}}/sops/grooming.md#quality-bar>) - required `task.md` checklist before handoff
 
-## Dependency Identification ({task_id})
-When creating or updating a feature/chore specification, identify if it depends on other active or recently completed tasks.
-If so, add `depends_on: ["F-XXX", "C-YYY"]` to the YAML frontmatter.
-
-## Session End - Required Steps
-
-**Condition A: Backlog is Empty**
-If there are no active items in the backlog to implement:
-1. Do NOT write a handoff file.
-2. Do NOT run `crucible.ps1`.
-3. Inform the human that the backlog is empty and the pipeline is paused.
-4. Stop here. Your session is complete.
-
-**Condition B: Next Task Identified**
-If you have identified and specified the *next* task to be implemented:
-1. Run `new-handoff.ps1` to write the handoff JSON (do NOT hand-author or hand-edit the JSON file directly):
-   ```bash
-   pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId <next_task_id> -Source grooming -Target <implementation|research|verification> -Reason "Ready for next phase" [-FileAffinity "<paths>"] [-BudgetTier <low|medium|high|extended>] -ProjectRoot "{project_root}"
-   ```
-2. Run Crucible to advance the pipeline for the NEW task:
-   ```bash
-   pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <next_task_id> -ProjectRoot "{project_root}" -Quiet
-   ```
-3. Present the Crucible output to the human: what you accomplished and the assembled next-phase prompt.
-4. Wait for human confirmation before transitioning to the next phase.
-
-**Condition C: Task Closure (No-Build)**
-If the task is approved for closure without implementing code (e.g., already shipped or obsolete):
-1. Run `new-handoff.ps1` to write the handoff JSON:
-   ```bash
-   pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/new-handoff.ps1" -TaskId <task_id> -Source grooming -Target done -Reason "Task approved for closure - no code deliverable" -BudgetTier low -ProjectRoot "{project_root}"
-   ```
-2. Run Crucible to advance the pipeline:
-   ```bash
-   pwsh -ExecutionPolicy Bypass \
-     -File "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId <task_id> -ProjectRoot "{project_root}" -Quiet
-   ```
-3. Present the Crucible output to the human and request human gate approval if required.
-
-Do NOT ask the human to run this command. You run it via your Bash tool.
+[Handoff tool reference](<{{crucible_root}}/powershell/new-handoff.ps1>)
 
 Timestamp format: `yyyyMMddTHHmmssZ` (UTC) - e.g., `{task_id}-20260418T143022Z.json`
-
----
-## Final Check - Before Running new-handoff.ps1
-Re-confirm before you run new-handoff.ps1:
-- [ ] I am routing to: implementation, research, done (closure path), or verification (Stub-Only Close-Out only) (not to myself)
-- [ ] If routing to research: I have handed the Researcher an open question and did not pre-bake a conclusion/recommend closure in the spec
-- [ ] I have NOT edited BACKLOG.md outside my permitted scope
-- [ ] The task_id in my handoff matches the task I was given (or the next task identified)
-- [ ] For vuln/dependency/build-artifact claims, I checked ship-vs-local reality before assigning priority
-- [ ] Every required `## Task List` item in `task.md` is `[x]`, or `[-]` if genuinely skipped, or moved under `## Optional Steps` - a `[ ]` or `[/]` item left in that section fails the gate and exits the run with code 2
-

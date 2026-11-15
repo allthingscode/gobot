@@ -109,7 +109,7 @@
     },
     "commit_hash": {
       "type": ["string", "null"],
-      "description": "The merge commit hash on master when deployment is complete."
+      "description": "Deployment commit identity; see docs/operating-manual.md#deployment-commit-identity. For deployment -> done, a handoff written before merge retains its recorded task tip after merge; regeneration after task branch deletion requires an explicit CommitHash (otherwise null); completion checks ancestry, not equality with the merge commit. Null/absent for No-Code Closures."
     },
     "base_commit": {
       "type": ["string", "null"],

@@ -66,9 +66,9 @@ try {
         New-Item -ItemType Directory -Path $nonExistentRoot -Force | Out-Null
         Push-Location $nonExistentRoot
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
-                -Affinity @("src/main.go") 2>&1)
+                -Affinity @("src/main.go") 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location
@@ -80,9 +80,9 @@ try {
     $results += Run-Test -Name "Detects overlap with active groomer task" -Body {
         Push-Location $projectRoot
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
-                -Affinity @("src/main.go") 2>&1)
+                -Affinity @("src/main.go") 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location
@@ -95,9 +95,9 @@ try {
     $results += Run-Test -Name "Ignores overlaps with completed tasks" -Body {
         Push-Location $projectRoot
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
-                -Affinity @("src/db/query.go") 2>&1)
+                -Affinity @("src/db/query.go") 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location
@@ -109,9 +109,9 @@ try {
     $results += Run-Test -Name "Detects prefix overlap with glob pattern" -Body {
         Push-Location $projectRoot
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
-                -Affinity @("config/app.yaml") 2>&1)
+                -Affinity @("config/app.yaml") 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location
@@ -124,9 +124,9 @@ try {
     $results += Run-Test -Name "Succeeds when there is no overlap" -Body {
         Push-Location $projectRoot
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
-                -Affinity @("src/auth/") 2>&1)
+                -Affinity @("src/auth/") 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location
@@ -139,9 +139,9 @@ try {
         Push-Location $projectRoot
         try {
             # TASK-1 checking its own affinity list (src/main.go)
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-1" `
-                -Affinity @("src/main.go") 2>&1)
+                -Affinity @("src/main.go") 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location
@@ -154,15 +154,15 @@ try {
         Push-Location $projectRoot
         try {
             '{}' | Set-Content -LiteralPath $stateFilePath -Encoding UTF8
-            $missingOutputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $missingOutputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
-                -Affinity @("src/main.go") 2>&1)
+                -Affinity @("src/main.go") 2>&1 })
             $missingExitCode = $LASTEXITCODE
 
             '{"tasks":{}}' | Set-Content -LiteralPath $stateFilePath -Encoding UTF8
-            $emptyOutputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
+            $emptyOutputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT `
                 -TaskId "TASK-4" `
-                -Affinity @("src/main.go") 2>&1)
+                -Affinity @("src/main.go") 2>&1 })
             $emptyExitCode = $LASTEXITCODE
         } finally {
             Pop-Location

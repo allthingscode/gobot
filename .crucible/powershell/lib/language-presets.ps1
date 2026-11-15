@@ -7,7 +7,7 @@ function Get-LanguagePresets {
             full = @(
                 @{ name = "vet"; command = "go vet ./..." }
                 @{ name = "lint"; command = "golangci-lint run ./..." }
-                @{ name = "test"; command = "go test ./..." }
+                @{ name = "full-test"; command = "go test ./..." }
                 @{ name = "mod-tidy"; command = "go mod tidy -diff" }
             )
         }
@@ -18,7 +18,7 @@ function Get-LanguagePresets {
             full = @(
                 @{ name = "lint"; command = "npm run lint" }
                 @{ name = "typecheck"; command = "npx tsc --noEmit" }
-                @{ name = "test"; command = "npm test" }
+                @{ name = "full-test"; command = "npm test" }
             )
         }
         python = @{
@@ -28,7 +28,7 @@ function Get-LanguagePresets {
             full = @(
                 @{ name = "lint"; command = "ruff check ." }
                 @{ name = "typecheck"; command = "mypy ." }
-                @{ name = "test"; command = "pytest" }
+                @{ name = "full-test"; command = "pytest" }
             )
         }
         rust = @{
@@ -38,7 +38,7 @@ function Get-LanguagePresets {
             full = @(
                 @{ name = "fmt"; command = "cargo fmt --check" }
                 @{ name = "clippy"; command = "cargo clippy --all-targets" }
-                @{ name = "test"; command = "cargo test" }
+                @{ name = "full-test"; command = "cargo test" }
             )
         }
     }

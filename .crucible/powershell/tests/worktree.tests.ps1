@@ -49,12 +49,12 @@ try {
         try {
             git worktree add $wtPath -b task/F-197-remove main 2>$null | Out-Null
             $script:Quiet = $false
-            $output = & { $script:removedResult = Remove-ImplementationWorktree -TaskId "F-197-remove" -ProjectRoot $repoPath } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { $script:removedResult = Remove-ImplementationWorktree -TaskId "F-197-remove" -ProjectRoot $repoPath } 6>&1 } | Out-String
             $removed = $script:removedResult
             Assert-Result -Name "removal message" -Condition ($output.Trim() -eq "[HUMAN GATE] Removing implementation worktree at $wtPath...") -FailureMessage $output
             Assert-Result -Name "removal reports success" -Condition ($removed -eq $true) -FailureMessage ("returned " + $removed)
             Assert-Result -Name "clean worktree removed" -Condition (-not (Test-Path -LiteralPath $wtPath)) -FailureMessage "implementation worktree remains"
-            Assert-Result -Name "worktree registration removed" -Condition ((git worktree list --porcelain | Out-String) -notmatch 'implementation-F-197-remove') -FailureMessage "worktree is still registered"
+            Assert-Result -Name "worktree registration removed" -Condition ((Invoke-ExternalCommand -AsLines { git worktree list --porcelain } | Out-String) -notmatch 'implementation-F-197-remove') -FailureMessage "worktree is still registered"
             git show-ref --verify --quiet refs/heads/task/F-197-remove
             Assert-Result -Name "task branch retained for the gate" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "helper deleted the task branch"
         } finally {
@@ -74,7 +74,7 @@ try {
             [System.IO.File]::WriteAllText((Join-Path $wtPath "README.md"), "tracked edit after the last commit`n", [System.Text.UTF8Encoding]::new($false))
             [System.IO.File]::WriteAllText((Join-Path $wtPath "untracked.txt"), "new work`n", [System.Text.UTF8Encoding]::new($false))
             $script:Quiet = $false
-            $output = & { $script:removedResult = Remove-ImplementationWorktree -TaskId "F-221-dirty" -ProjectRoot $repoPath } *>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { $script:removedResult = Remove-ImplementationWorktree -TaskId "F-221-dirty" -ProjectRoot $repoPath } *>&1 } | Out-String
             Assert-Result -Name "dirty removal reports failure" -Condition ($script:removedResult -eq $false) -FailureMessage ("returned " + $script:removedResult)
             Assert-Result -Name "tracked edit survives" -Condition ((Get-Content -LiteralPath (Join-Path $wtPath "README.md") -Raw) -match 'tracked edit') -FailureMessage "the tracked edit was deleted"
             Assert-Result -Name "untracked file survives" -Condition (Test-Path -LiteralPath (Join-Path $wtPath "untracked.txt")) -FailureMessage "the untracked file was deleted"
@@ -95,9 +95,9 @@ try {
             git worktree add $stalePath -b task/stale main 2>$null | Out-Null
             Remove-Item -LiteralPath $stalePath -Recurse -Force
             $script:Quiet = $false
-            $output = & { $null = Remove-ImplementationWorktree -TaskId "F-197-absent" -ProjectRoot $repoPath } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { $null = Remove-ImplementationWorktree -TaskId "F-197-absent" -ProjectRoot $repoPath } 6>&1 } | Out-String
             Assert-Result -Name "absent removal is silent" -Condition ([string]::IsNullOrWhiteSpace($output)) -FailureMessage $output
-            Assert-Result -Name "absent removal leaves stale registration" -Condition ((git worktree list --porcelain | Out-String) -match 'refs/heads/task/stale') -FailureMessage "absent removal pruned worktrees"
+            Assert-Result -Name "absent removal leaves stale registration" -Condition ((Invoke-ExternalCommand -AsLines { git worktree list --porcelain } | Out-String) -match 'refs/heads/task/stale') -FailureMessage "absent removal pruned worktrees"
         } finally {
             $script:Quiet = $oldQuiet
             Pop-Location
@@ -111,7 +111,7 @@ try {
         try {
             git worktree add $wtPath -b task/F-197-locked main 2>$null | Out-Null
             git worktree lock $wtPath
-            $output = & { $script:removedResult = Remove-ImplementationWorktree -TaskId "F-197-locked" -ProjectRoot $repoPath } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { $script:removedResult = Remove-ImplementationWorktree -TaskId "F-197-locked" -ProjectRoot $repoPath } 6>&1 } | Out-String
             Assert-Result -Name "locked worktree retained" -Condition (Test-Path -LiteralPath $wtPath) -FailureMessage "locked worktree was removed"
             Assert-Result -Name "locked removal reports failure" -Condition ($script:removedResult -eq $false) -FailureMessage ("returned " + $script:removedResult)
             Assert-Result -Name "locked warning" -Condition ($output.Contains("[HUMAN GATE] Worktree at $wtPath is locked") -and $output.Contains("task/F-197-locked")) -FailureMessage $output
@@ -140,12 +140,12 @@ try {
             git config extensions.worktreeConfig true
             git config core.hooksPath scripts/hooks
             $script:Quiet = $false
-            $output = & { Restore-ImplementationWorktree -TaskId "F-197-restore" -ProjectRoot $repoPath } 6>&1 | Out-String
-            Assert-Result -Name "restored branch checked out" -Condition ((git -C $wtPath branch --show-current) -eq "task/F-197-restore") -FailureMessage "wrong branch was recreated"
+            $output = Invoke-ExternalCommand -AsLines { & { Restore-ImplementationWorktree -TaskId "F-197-restore" -ProjectRoot $repoPath } 6>&1 } | Out-String
+            Assert-Result -Name "restored branch checked out" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtPath branch --show-current }) -eq "task/F-197-restore") -FailureMessage "wrong branch was recreated"
             Assert-Result -Name "restored checkout exists" -Condition (Test-Path -LiteralPath (Join-Path $wtPath "README.md")) -FailureMessage "worktree was not checked out"
             Assert-Result -Name "restored worktree hook installer called" -Condition ($hookPaths.Count -eq 1 -and $hookPaths[0] -eq $wtPath) -FailureMessage "hook installer was not called once for the recreated worktree"
-            Assert-Result -Name "restored worktree hooks initialized" -Condition ([string]::IsNullOrWhiteSpace((git -C $wtPath config --worktree --get core.hooksPath))) -FailureMessage "legacy hook override remains"
-            Assert-Result -Name "restored worktree uses shared hooks" -Condition ((git -C $wtPath config --get core.hooksPath) -eq "scripts/hooks") -FailureMessage "worktree does not use the shared hook path"
+            Assert-Result -Name "restored worktree hooks initialized" -Condition ([string]::IsNullOrWhiteSpace((Invoke-ExternalCommand -AsLines { git -C $wtPath config --worktree --get core.hooksPath }))) -FailureMessage "legacy hook override remains"
+            Assert-Result -Name "restored worktree uses shared hooks" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtPath config --get core.hooksPath }) -eq "scripts/hooks") -FailureMessage "worktree does not use the shared hook path"
             Assert-Result -Name "recreation message" -Condition ($output -match [regex]::Escape("[HUMAN GATE] Recreated implementation worktree at $wtPath")) -FailureMessage $output
         } finally {
             $script:Quiet = $oldQuiet
@@ -163,9 +163,9 @@ try {
             git config extensions.worktreeConfig true
             git -C $wtPath config --worktree core.hooksPath scripts/hooks/architect
             $script:Quiet = $false
-            $output = & { Restore-ImplementationWorktree -TaskId "F-197-existing" -ProjectRoot $repoPath } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { Restore-ImplementationWorktree -TaskId "F-197-existing" -ProjectRoot $repoPath } 6>&1 } | Out-String
             Assert-Result -Name "existing recreation is silent" -Condition ([string]::IsNullOrWhiteSpace($output)) -FailureMessage $output
-            Assert-Result -Name "existing recreation skips hook initialization" -Condition ((git -C $wtPath config --worktree --get core.hooksPath) -eq "scripts/hooks/architect") -FailureMessage "existing worktree hook override was changed"
+            Assert-Result -Name "existing recreation skips hook initialization" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtPath config --worktree --get core.hooksPath }) -eq "scripts/hooks/architect") -FailureMessage "existing worktree hook override was changed"
         } finally {
             $script:Quiet = $oldQuiet
             Pop-Location
@@ -177,7 +177,7 @@ try {
         $wtPath = Join-Path $repoPath "workspaces/implementation-F-197-missing"
         Push-Location $repoPath
         try {
-            $output = & { Restore-ImplementationWorktree -TaskId "F-197-missing" -ProjectRoot $repoPath } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { Restore-ImplementationWorktree -TaskId "F-197-missing" -ProjectRoot $repoPath } 6>&1 } | Out-String
             Assert-Result -Name "failed recreation warns in Quiet mode" -Condition ($output -match [regex]::Escape("Warning: Failed to recreate implementation worktree at $wtPath")) -FailureMessage $output
             Assert-Result -Name "failed recreation has no success message" -Condition ($output -notmatch 'Recreated implementation worktree') -FailureMessage $output
             Assert-Result -Name "failed recreation leaves no worktree" -Condition (-not (Test-Path -LiteralPath $wtPath)) -FailureMessage "worktree unexpectedly exists"
@@ -194,8 +194,8 @@ try {
         try {
             Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-new" | Out-Null
             Assert-Result -Name "new worktree exists" -Condition (Test-Path -LiteralPath (Join-Path $wtPath "README.md")) -FailureMessage "worktree was not checked out"
-            Assert-Result -Name "new task branch checked out" -Condition ((git -C $wtPath branch --show-current) -eq "task/F-197-new") -FailureMessage "wrong worktree branch"
-            Assert-Result -Name "new task branch starts at primary" -Condition ((git -C $wtPath rev-parse HEAD) -eq (git rev-parse main)) -FailureMessage "task branch did not start at main"
+            Assert-Result -Name "new task branch checked out" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtPath branch --show-current }) -eq "task/F-197-new") -FailureMessage "wrong worktree branch"
+            Assert-Result -Name "new task branch starts at primary" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtPath rev-parse HEAD }) -eq (Invoke-ExternalCommand -AsLines { git rev-parse main })) -FailureMessage "task branch did not start at main"
         } finally { Pop-Location }
     }
 
@@ -209,11 +209,11 @@ try {
             [System.IO.File]::WriteAllText((Join-Path $repoPath "task.txt"), "existing task work`n", [System.Text.UTF8Encoding]::new($false))
             git add task.txt
             git commit -m "task work" --quiet
-            $taskHead = git rev-parse HEAD
+            $taskHead = Invoke-ExternalCommand -AsLines { git rev-parse HEAD }
             git checkout main --quiet
             Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-reuse" | Out-Null
-            Assert-Result -Name "existing task branch checked out" -Condition ((git -C $wtPath branch --show-current) -eq "task/F-197-reuse") -FailureMessage "wrong worktree branch"
-            Assert-Result -Name "existing task commit retained" -Condition ((git -C $wtPath rev-parse HEAD) -eq $taskHead -and (Test-Path -LiteralPath (Join-Path $wtPath "task.txt"))) -FailureMessage "existing task branch was reset"
+            Assert-Result -Name "existing task branch checked out" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtPath branch --show-current }) -eq "task/F-197-reuse") -FailureMessage "wrong worktree branch"
+            Assert-Result -Name "existing task commit retained" -Condition ((Invoke-ExternalCommand -AsLines { git -C $wtPath rev-parse HEAD }) -eq $taskHead -and (Test-Path -LiteralPath (Join-Path $wtPath "task.txt"))) -FailureMessage "existing task branch was reset"
         } finally { Pop-Location }
     }
 
@@ -228,11 +228,11 @@ try {
             git config extensions.worktreeConfig true
             git -C $wtPath config --worktree core.hooksPath scripts/hooks/architect
             $script:Quiet = $false
-            $output = & { Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-exists" } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-exists" } 6>&1 } | Out-String
             Assert-Result -Name "existing worktree message" -Condition ($output.Trim() -eq "[INIT] Worktree already exists at $wtPath.") -FailureMessage $output
-            Assert-Result -Name "existing worktree hooks initialized" -Condition ([string]::IsNullOrWhiteSpace((git -C $wtPath config --worktree --get core.hooksPath))) -FailureMessage "legacy hook override remains"
+            Assert-Result -Name "existing worktree hooks initialized" -Condition ([string]::IsNullOrWhiteSpace((Invoke-ExternalCommand -AsLines { git -C $wtPath config --worktree --get core.hooksPath }))) -FailureMessage "legacy hook override remains"
             $script:Quiet = $true
-            $quietOutput = & { Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-exists" } 6>&1 | Out-String
+            $quietOutput = Invoke-ExternalCommand -AsLines { & { Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-197-exists" } 6>&1 } | Out-String
             Assert-Result -Name "existing worktree message respects Quiet" -Condition ([string]::IsNullOrWhiteSpace($quietOutput)) -FailureMessage $quietOutput
         } finally {
             $script:Quiet = $oldQuiet
@@ -321,7 +321,7 @@ try {
         [IO.File]::WriteAllText((Join-Path $repoPath "unrelated.txt"), "changed`n", [Text.UTF8Encoding]::new($false))
         git -C $repoPath add .
         git -C $repoPath commit -m "out of scope" --quiet
-        Assert-Result -Name "fixture is clean" -Condition (-not (git -C $repoPath status --porcelain)) -FailureMessage "fixture has uncommitted changes"
+        Assert-Result -Name "fixture is clean" -Condition (-not (Invoke-ExternalCommand -AsLines { git -C $repoPath status --porcelain })) -FailureMessage "fixture has uncommitted changes"
         $outside = @(Get-OutOfScopeImplementationFiles -WorktreePath $repoPath -TaskId F-225 -FileAffinity @("powershell/"))
         Assert-Result -Name "release commit violates scope" -Condition ($outside.Count -eq 1 -and $outside[0] -eq "unrelated.txt") -FailureMessage ($outside -join ", ")
     }

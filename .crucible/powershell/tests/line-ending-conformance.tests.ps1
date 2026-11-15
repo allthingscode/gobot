@@ -159,6 +159,25 @@ try {
         Assert-Result -Name "bundle files not counted" -Condition ($report.Checked -eq 1) -FailureMessage "expected 1 file outside the bundle, got $($report.Checked)"
     }
 
+    # Item 302: the bundle was placed under the project by a bare prefix match, so a
+    # bundle in the sibling directory apps beside the project app excluded the project's
+    # own s/ directory as if it were the bundle, and a CRLF file there went unreported.
+    $results += Run-Test -Name "A bundle in a sibling-prefixed directory excludes none of the project's files" -Body {
+        $holder = Join-Path $tempRoot "sibling"
+        $project = Join-Path $holder "app"
+        $bundle = Join-Path $holder "apps"
+        New-Item -ItemType Directory -Path $bundle -Force | Out-Null
+        Write-RawFile -Path (Join-Path $bundle "config.yaml") -Content "crucible_root: `".crucible`"`n"
+        $null = New-EolFixture -Path $project -NoCommit
+        Write-RawFile -Path (Join-Path $project "s/build.cmd") -Content "@echo off`r`necho hi`r`n"
+        $null = Invoke-Git @("add", "-A") -Directory $project
+
+        $report = Test-LineEndingConformance -ProjectRoot $project -BundleRoot $bundle
+        $paths = @($report.Violations | ForEach-Object { $_.Path })
+        Assert-Result -Name "status ok" -Condition ($report.Status -eq "ok") -FailureMessage "expected ok, got '$($report.Status)': $($report.Reason)"
+        Assert-Result -Name "project file under s/ reported" -Condition ($paths -contains "s/build.cmd") -FailureMessage "a project file was excluded as if it were in the sibling bundle: $($paths -join ', ')"
+    }
+
     $results += Run-Test -Name "Outside a git work tree the check skips rather than passing" -Body {
         $project = Join-Path $tempRoot "no-git"
         $bundle = New-EolFixture -Path $project -NoGit

@@ -10,6 +10,12 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+# Exit 1 reports overlap; exit 2 reports an internal failure.
+trap {
+    [Console]::Error.WriteLine("check-file-affinity.ps1 crashed: " + $_.Exception.Message)
+    exit 2
+}
 $helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
 if (-not (Test-Path -LiteralPath $helpersPath)) {
     throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."

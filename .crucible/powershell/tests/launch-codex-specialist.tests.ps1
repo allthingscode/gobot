@@ -6,6 +6,38 @@ $LAUNCHER = Join-Path $REPO_ROOT "powershell/launch-codex-specialist.ps1"
 
 $results = @()
 
+$results += Run-Test -Name "Item255 launcher requests derivation without the project check" -Body {
+    . (Join-Path $REPO_ROOT "powershell/lib/project-root.ps1")
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($LAUNCHER, [ref]$null, [ref]$null)
+    $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Resolve-ProjectRoot" }, $true)
+    . ([scriptblock]::Create($definition.Extent.Text))
+    function Resolve-CrucibleProjectRoot {
+        param([string]$ProjectRoot, [string]$ScriptRoot, [bool]$RequireProject = $true)
+        if ($RequireProject) { throw "launcher must request unchecked script derivation" }
+        return "owner-result"
+    }
+    Assert-Result "launcher routes through owner" ((Resolve-ProjectRoot -Candidate "" -ScriptDir (Join-Path $REPO_ROOT "powershell")) -eq "owner-result") "launcher bypassed root owner"
+}
+
+$results += Run-Test -Name "Review255 bare framework launch derives its project before refusing a missing prompt" -Body {
+    $dir = New-TestFixtureRoot -NameHint "review255-bare-launch"
+    try {
+        $bare = Join-Path $dir "framework"
+        $scripts = Join-Path $bare "powershell"
+        New-Item -ItemType Directory -Path $scripts -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib") -Destination (Join-Path $scripts "lib") -Recurse
+        $bareLauncher = Join-Path $scripts "launch-codex-specialist.ps1"
+        Copy-Item -LiteralPath $LAUNCHER -Destination $bareLauncher
+        Assert-Result "bare framework has no project marker" (-not (Test-Path -LiteralPath (Join-Path $bare ".crucible"))) "fixture is an adopter"
+        # No prompt exists: the real entrypoint must stop before Invoke-CodexExec.
+        $output = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $bareLauncher -TaskId F-255 -Phase implementation -Model test-model 2>&1 }) -join "`n"
+        $code = $LASTEXITCODE
+        Assert-Result "real launch stops at prompt check" ($code -eq 2 -and $output.Contains("phase prompt not found:")) $output
+        Assert-Result "real launch reports derived framework root" ($output.Contains("project root: " + $bare + "  (derived from script location)")) $output
+        Assert-Result "real launch uses derived session path" ($output.Contains((Join-Path $bare ".crucible/session/F-255/implementation/prompt.md"))) $output
+    } finally { Remove-Item -LiteralPath $dir -Recurse -Force }
+}
+
 # Writes a fake `codex` onto PATH whose behavior is driven by the CODEX_FAKE_MODE env var.
 # Both OS wrappers delegate to a shared pwsh impl so arg parsing is identical and robust.
 function Write-FakeCodex {
@@ -132,6 +164,22 @@ switch ($mode) {
         if ($outFile) { [System.IO.File]::WriteAllText($outFile, "Pipeline complete", $enc) }
         exit 0
     }
+    "oldlogfields" {
+        # Item 246: a log line with no task_id, and a phase logged under the older "specialist"
+        # key. The handoff names deployment, which never starts.
+        $phaseDir = Split-Path -Parent $outFile
+        $phaseName = Split-Path -Leaf $phaseDir
+        $taskDir = Split-Path -Parent $phaseDir
+        $taskName = Split-Path -Leaf $taskDir
+        $ts = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+        $events = @(
+            ('{"event":"heartbeat","timestamp":"' + $ts + '"}'),
+            ('{"event":"session_end","task_id":"' + $taskName + '","specialist":"' + $phaseName + '","timestamp":"' + $ts + '","outcome":"success","notes":"Handoff to deployment"}')
+        )
+        [System.IO.File]::AppendAllText((Join-Path $taskDir "pipeline.log.jsonl"), (($events -join "`n") + "`n"), $enc)
+        if ($outFile) { [System.IO.File]::WriteAllText($outFile, "Approved. Handoff created for deployment.", $enc) }
+        exit 0
+    }
     { $_ -in @("halfadvance", "fulladvance") } {
         # Mimic the specialist's crucible.ps1 -Init in the task's pipeline log. halfadvance is
         # the run Codex killed mid-advance: the phase ended, the next one never started.
@@ -206,7 +254,7 @@ function Invoke-TestGit {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $output = & git -C $Directory @GitArgs 2>$null
+        $output = Invoke-ExternalCommand -AsLines { & git -C $Directory @GitArgs 2>$null }
         $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previous
@@ -604,10 +652,10 @@ try {
         $shipDir = Join-Path $proj ".crucible/powershell"
         New-Item -ItemType Directory -Path $shipDir -Force | Out-Null
         $copied = Join-Path $shipDir "launch-codex-specialist.ps1"
-        Copy-Item -LiteralPath $LAUNCHER -Destination $copied -Force
-        # Item 188: ship the config resolver alongside the launcher in this minimal bundle.
-        New-Item -ItemType Directory -Path (Join-Path $shipDir "lib") -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib/config-helpers.ps1") -Destination (Join-Path $shipDir "lib/config-helpers.ps1")
+        # Item 247: command binding reads sibling entrypoints, so copy both dependency
+        # classes rather than keeping a partial list of the launcher's libraries.
+        Copy-Item -Path (Join-Path $REPO_ROOT "powershell/*.ps1") -Destination $shipDir -Force
+        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "powershell/lib") -Destination (Join-Path $shipDir "lib") -Recurse -Force
         $originalPath = $env:PATH
         $originalMode = $env:CODEX_FAKE_MODE
         try {
@@ -837,13 +885,36 @@ try {
         $promptRef = if ($tx -match "read and follow all instructions in ([^\r\n]+)") { $Matches[1].Trim() } else { "" }
         $promptResolves = (-not [string]::IsNullOrWhiteSpace($promptRef)) -and [System.IO.Path]::IsPathRooted($promptRef) -and (Test-Path -LiteralPath $promptRef)
         Assert-Result -Name "prompt path is absolute and exists" -Condition $promptResolves -FailureMessage "prompt path '$promptRef' must be absolute and exist. Transcript:`n$tx"
-        $rootRef = if ($tx -match '-Init -TaskId C-979 -ProjectRoot "([^"]+)"') { $Matches[1] } else { "" }
+        $rootRef = if ($tx -match "-Init -TaskId 'C-979' -ProjectRoot '([^']+)'") { $Matches[1] } else { "" }
         $rootResolves = (-not [string]::IsNullOrWhiteSpace($rootRef)) -and (Test-Path -LiteralPath (Join-Path $rootRef ".crucible/session/C-979"))
         Assert-Result -Name "crucible line passes the project root" -Condition $rootResolves -FailureMessage "Crucible line must pass -ProjectRoot naming the adopter root. Transcript:`n$tx"
-        $scriptRef = if ($tx -match 'pwsh -File "([^"]+)" -Init') { $Matches[1] } else { "" }
+        $scriptRef = if ($tx -match "pwsh -NoProfile -ExecutionPolicy Bypass -File '([^']+)' -Init") { $Matches[1] } else { "" }
         Assert-Result -Name "crucible script path is absolute" -Condition ([System.IO.Path]::IsPathRooted($scriptRef)) -FailureMessage "crucible.ps1 path '$scriptRef' must be absolute. Transcript:`n$tx"
     }
 
+
+    # Review of 9b0bb92 (item 247): the bootstrap line was interpolated, so a project root
+    # with a dollar sign reached the specialist as a PowerShell string that expands it.
+    $results += Run-Test -Name "Bootstrap advance line carries a dollar-sign root as a literal" -Body {
+        $projectRoot = Join-Path $tempRoot "proj cash`$root"
+        $promptDir = Join-Path $projectRoot ".crucible/session/C-980/implementation"
+        New-Item -ItemType Directory -Path $promptDir -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $promptDir "prompt.md"), "phase prompt")
+        $res = Invoke-Launcher -Mode "echostdin" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-980", "-Phase", "implementation", "-Model", "gpt-6-sol", "-ProjectRoot", $projectRoot)
+        $transcript = Join-Path $promptDir "codex-transcript.txt"
+        $tx = if (Test-Path -LiteralPath $transcript) { Get-Content -LiteralPath $transcript -Raw } else { "" }
+        $line = @($tx -split "`r?`n" | Where-Object { $_ -match "-Init -TaskId 'C-980'" }) | Select-Object -First 1
+        $resolvedRoot = (Resolve-Path -LiteralPath $projectRoot).Path
+        Assert-Result -Name "dollar root passed as a literal" -Condition ($null -ne $line -and $line.Contains("-ProjectRoot '" + $resolvedRoot + "' -Quiet")) -FailureMessage ("line: " + $line + "`nTranscript:`n" + $tx)
+        Assert-Result -Name "dollar root script path is a literal" -Condition ($null -ne $line -and $line.Contains("pwsh -NoProfile -ExecutionPolicy Bypass -File '" + (Join-Path $resolvedRoot ".crucible")) -and $line.Contains("crucible.ps1' -Init")) -FailureMessage ("line: " + $line)
+        if ($null -ne $line) {
+            $scriptBlockText = '& { $args } ' + $line.Trim().Substring("pwsh ".Length)
+            $argv = @(Invoke-ExternalCommand -AsLines { & ([scriptblock]::Create($scriptBlockText)) })
+            $rootAt = [Array]::IndexOf($argv, "-ProjectRoot")
+            Assert-Result -Name "PowerShell reads the root verbatim" -Condition ($rootAt -ge 0 -and $argv[$rootAt + 1] -ceq $resolvedRoot) -FailureMessage ($argv -join " | ")
+        }
+    }
 
     # Item 188: dispatch and completion detection must share the configured session root.
     $results += Run-Test -Name "Custom session bootstrap prompt and task logs" -Body {
@@ -932,7 +1003,7 @@ try {
         Assert-Result -Name "not reported as success" -Condition (-not ($res.Output -match "STATUS=SUCCESS")) -FailureMessage "must not report SUCCESS. Output:`n$($res.Output)"
         Assert-Result -Name "exit 3" -Condition ($res.ExitCode -eq 3) -FailureMessage "expected exit 3, got $($res.ExitCode). Output:`n$($res.Output)"
         Assert-Result -Name "names the missing phase" -Condition ($res.Output -match "never started deployment") -FailureMessage "expected the missing phase named. Output:`n$($res.Output)"
-        Assert-Result -Name "gives the recovery command" -Condition ($res.Output -match "-Init -TaskId C-977 -ProjectRoot") -FailureMessage "expected the -Init recovery command. Output:`n$($res.Output)"
+        Assert-Result -Name "gives the recovery command" -Condition ($res.Output -match "pwsh -NoProfile -ExecutionPolicy Bypass -File '[^']*crucible\.ps1' -Init -TaskId 'C-977' -ProjectRoot") -FailureMessage "expected the shell-neutral -Init recovery command. Output:`n$($res.Output)"
     }
 
     foreach ($case in @(
@@ -1009,6 +1080,82 @@ try {
             "-TaskId", "C-973", "-Phase", "verification", "-Model", "gpt-6-sol",
             "-PromptText", "REVIEW", "-ProjectRoot", $handoffRoot)
         Assert-Result -Name "handoff written stays success" -Condition ($res3.Output -match "STATUS=SUCCESS") -FailureMessage "a run that ended its phase must be SUCCESS. Output:`n$($res3.Output)"
+    }
+
+    # Item 246: every outcome is one record, written to stdout and to the status file by one
+    # emitter, so the two agree line for line. RUNNING is printed when codex starts.
+    $start246 = '{"event":"session_start","task_id":"C-246","phase":"implementation","timestamp":"2020-01-01T00:00:00Z"}'
+    foreach ($case in @(
+        @{ Name = "success"; Mode = "success"; Phase = "verification"; Status = "SUCCESS"; Exit = 0; Extra = @() },
+        @{ Name = "infra"; Mode = "infra"; Phase = "verification"; Status = "LAUNCH_FAILED"; Exit = 1; Extra = @() },
+        @{ Name = "schema"; Mode = "badverdict"; Phase = "verification"; Status = "LAUNCH_FAILED"; Exit = 1; Extra = @("-ReviewSchema") },
+        @{ Name = "usagelimit"; Mode = "usagelimit"; Phase = "implementation"; Status = "USAGE_LIMIT"; Exit = 5; Extra = @() },
+        @{ Name = "halfadvance"; Mode = "halfadvance"; Phase = "verification"; Status = "ADVANCE_INCOMPLETE"; Exit = 3; Extra = @() },
+        @{ Name = "nohandoff"; Mode = "success"; Phase = "implementation"; Status = "NO_HANDOFF"; Exit = 4; Extra = @(); Seed = $start246 },
+        @{ Name = "oldlogfields"; Mode = "oldlogfields"; Phase = "verification"; Status = "ADVANCE_INCOMPLETE"; Exit = 3; Extra = @() }
+    )) {
+        $results += Run-Test -Name ("stdout and the status file carry one record: " + $case.Name + " (item 246)") -Body {
+            $projectRoot = Join-Path $tempRoot ("proj-246-" + $case.Name)
+            $taskDir = Join-Path $projectRoot ".crucible/session/C-246"
+            New-Item -ItemType Directory -Path $taskDir -Force | Out-Null
+            if ($case.ContainsKey("Seed")) {
+                [System.IO.File]::WriteAllText((Join-Path $taskDir "pipeline.log.jsonl"), ($case.Seed + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+            }
+            $res = Invoke-Launcher -Mode $case.Mode -BinDir $binDir -LauncherArgs (@(
+                "-TaskId", "C-246", "-Phase", $case.Phase, "-Model", "gpt-6-sol", "-Effort", "low",
+                "-PromptText", "WORK", "-ProjectRoot", $projectRoot) + $case.Extra)
+            $outLines = @($res.Output -split "\r?\n")
+            $statusIdx = @(for ($n = 0; $n -lt $outLines.Count; $n++) { if ($outLines[$n] -match "^\[CODEX SPECIALIST\] STATUS=") { $n } })
+            Assert-Result -Name "246 $($case.Name) exit code" -Condition ($res.ExitCode -eq $case.Exit) -FailureMessage "expected exit $($case.Exit), got $($res.ExitCode). Output:`n$($res.Output)"
+            Assert-Result -Name "246 $($case.Name) outcome is the last stdout status" -Condition ($statusIdx.Count -ge 1 -and $outLines[$statusIdx[-1]] -ceq ("[CODEX SPECIALIST] STATUS=" + $case.Status)) -FailureMessage "expected STATUS=$($case.Status) last. Output:`n$($res.Output)"
+            $block = @("STATUS=" + $case.Status)
+            for ($n = $statusIdx[-1] + 1; $n -lt $outLines.Count -and $outLines[$n] -match "^  \S"; $n++) { $block += $outLines[$n].Substring(2) }
+            $statusFile = Join-Path $taskDir ($case.Phase + "/codex-launch-status.txt")
+            $fileLines = @([System.IO.File]::ReadAllText($statusFile) -split "`n")
+            Assert-Result -Name "246 $($case.Name) status file ends with one newline" -Condition ($fileLines[-1] -eq "" -and $fileLines[-2] -ne "") -FailureMessage "status file must end in exactly one newline: $($fileLines -join '|')"
+            $fileLines = @($fileLines[0..($fileLines.Count - 2)])
+            Assert-Result -Name "246 $($case.Name) stdout and file agree line for line" -Condition (($block -join "`n") -ceq ($fileLines -join "`n")) -FailureMessage ("stdout block:`n" + ($block -join "`n") + "`nstatus file:`n" + ($fileLines -join "`n"))
+            Assert-Result -Name "246 $($case.Name) record names the transcript" -Condition (@($fileLines -match "^transcript: .*[\\/]C-246[\\/]$($case.Phase)[\\/]codex-transcript\.txt$").Count -eq 1) -FailureMessage "status file must name the transcript: $($fileLines -join '|')"
+            Assert-Result -Name "246 $($case.Name) RUNNING printed when codex starts" -Condition ($statusIdx.Count -eq 2 -and $outLines[$statusIdx[0]] -ceq "[CODEX SPECIALIST] STATUS=RUNNING") -FailureMessage "expected STATUS=RUNNING, then the outcome, on stdout. Output:`n$($res.Output)"
+        }
+    }
+
+    # Item 246 review: a quota stop is evident from the transcript, so a pipeline log the
+    # launcher cannot read must not turn it into LAUNCH_FAILED and lose the reset time.
+    $results += Run-Test -Name "A usage-limit stop survives an unreadable pipeline log (item 246)" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-246-unreadable-log"
+        $taskDir = Join-Path $projectRoot ".crucible/session/C-246"
+        # A directory where the log file belongs: Test-Path holds and every read fails.
+        New-Item -ItemType Directory -Path (Join-Path $taskDir "pipeline.log.jsonl") -Force | Out-Null
+        $res = Invoke-Launcher -Mode "usagelimit" -BinDir $binDir -LauncherArgs @(
+            "-TaskId", "C-246", "-Phase", "implementation", "-Model", "gpt-6-sol", "-Effort", "low",
+            "-PromptText", "WORK", "-ProjectRoot", $projectRoot)
+        Assert-Result -Name "unreadable log keeps exit 5" -Condition ($res.ExitCode -eq 5) -FailureMessage "expected exit 5, got $($res.ExitCode). Output:`n$($res.Output)"
+        $fileText = [System.IO.File]::ReadAllText((Join-Path $taskDir "implementation/codex-launch-status.txt"))
+        $fileLines = @($fileText -split "`n")
+        Assert-Result -Name "unreadable log keeps USAGE_LIMIT and the reset time" -Condition ($fileLines[0] -eq "STATUS=USAGE_LIMIT" -and ($fileLines -contains "resets: 11:37 PM") -and ($fileLines -contains "retry_not_before: 11:38 PM")) -FailureMessage "status file: $fileText"
+        Assert-Result -Name "unreadable log is named" -Condition (@($fileLines -match "^evidence not read: pipeline log: ").Count -eq 1) -FailureMessage "status file: $fileText"
+        Assert-Result -Name "unreadable log stdout outcome" -Condition ($res.Output -match "\[CODEX SPECIALIST\] STATUS=USAGE_LIMIT") -FailureMessage $res.Output
+    }
+
+    # Item 246 review: an exception that stops codex from running must still end in a STATUS,
+    # not leave RUNNING as the last word. A codex function that throws is the injected fault.
+    $results += Run-Test -Name "An exception running codex reports LAUNCH_FAILED, not RUNNING (item 246)" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-246-invoke-throws"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $wrapper = Join-Path $tempRoot "launch-codex-throws.ps1"
+        [IO.File]::WriteAllText($wrapper, ('function global:codex { throw "injected codex fault" }' + "`n& '" + $LAUNCHER.Replace("'", "''") + "' @args`nexit `$LASTEXITCODE`n"))
+        $res = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $wrapper -TaskId C-246 -Phase verification -Model gpt-6-sol -Effort low -PromptText WORK -ProjectRoot $projectRoot
+        }
+        $statusFile = Join-Path $projectRoot ".crucible/session/C-246/verification/codex-launch-status.txt"
+        $fileText = if (Test-Path -LiteralPath $statusFile) { [System.IO.File]::ReadAllText($statusFile) } else { "<missing>" }
+        $fileLines = @($fileText -split "`n")
+        Assert-Result -Name "invoke fault final status" -Condition ($fileLines[0] -eq "STATUS=LAUNCH_FAILED") -FailureMessage "status file: $fileText`nOutput:`n$($res.Output)"
+        Assert-Result -Name "invoke fault reason" -Condition ($fileLines -contains "reason: codex invocation failed: injected codex fault") -FailureMessage "status file: $fileText"
+        Assert-Result -Name "invoke fault exit 1" -Condition ($res.ExitCode -eq 1) -FailureMessage "expected exit 1, got $($res.ExitCode). Output:`n$($res.Output)"
+        $statusLines = @(($res.Output -split "\r?\n") -match "^\[CODEX SPECIALIST\] STATUS=")
+        Assert-Result -Name "invoke fault stdout outcome" -Condition ($statusLines.Count -eq 2 -and $statusLines[-1] -eq "[CODEX SPECIALIST] STATUS=LAUNCH_FAILED") -FailureMessage $res.Output
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {

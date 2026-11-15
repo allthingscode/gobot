@@ -7,6 +7,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+# Exit 1 reports validation findings; exit 2 reports an internal failure.
+trap {
+    [Console]::Error.WriteLine("validate-handoff.ps1 crashed: " + $_.Exception.Message)
+    exit 2
+}
 $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
 . $crucibleLibPath
 . (Join-Path (Join-Path $PSScriptRoot "lib") "no-code-closure.ps1")
@@ -123,14 +128,7 @@ foreach ($field in $requiredFields) {
     }
 }
 
-$resolvedProjectRoot = $null
-$repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-if ($null -ne $repoRootVar) {
-    $resolvedProjectRoot = $repoRootVar.Value
-}
-if ([string]::IsNullOrEmpty($resolvedProjectRoot)) {
-    $resolvedProjectRoot = (Get-Location).Path
-}
+$resolvedProjectRoot = Resolve-ConfigProjectRoot
 
 $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $resolvedProjectRoot
 $isRework = Test-DeploymentReworkReentry -Handoff $handoff -SessionDir $sessionDir

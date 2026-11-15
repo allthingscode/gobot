@@ -91,6 +91,40 @@ function New-TestContext {
 }
 $tempRoot = New-TestFixtureRoot -NameHint "crucible-gates-handoff-test"
 try {
+    foreach ($case in @(
+        @{ Field = 'priority'; Value = 'high' }, @{ Field = 'priority'; Value = 'P4' },
+        @{ Field = 'priority'; Value = '""' }, @{ Field = 'budget_tier'; Value = 'bad-tier' },
+        @{ Field = 'budget_tier'; Value = '""' }
+    )) {
+        $results += Run-Test -Name ("Rereview255 bootstrap refuses " + $case.Field + '=' + $case.Value) -Body {
+            $ctx = New-TestContext -TempRoot (Join-Path $tempRoot ('rereview-' + $results.Count)) -TaskId 'B-255'
+            $active = Join-Path $ctx.BacklogDir 'bugs/active'
+            New-Item -ItemType Directory -Force -Path $active | Out-Null
+            $path = Join-Path $active 'B-255.md'
+            Set-Content -LiteralPath $path -Value ("---`n" + $case.Field + ': ' + $case.Value + "`n---") -Encoding UTF8
+            $message = ''
+            try { Resolve-CrucibleInputHandoff -Context $ctx } catch { $message = $_.Exception.Message }
+            Assert-Result 'bootstrap error names field and spec' ($message.Contains($case.Field) -and $message.Contains($path)) $message
+            Assert-Result 'invalid input writes no handoff' (@(Get-ChildItem -LiteralPath $ctx.HandoffDir -Filter '*.json').Count -eq 0) 'handoff created'
+        }
+    }
+    $results += Run-Test -Name "Item255 bootstrap uses the first budget tier" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "item255-budget") -TaskId "B-255"
+        $active = Join-Path $ctx.BacklogDir "bugs/active"
+        New-Item -ItemType Directory -Force -Path $active | Out-Null
+        Set-Content -LiteralPath (Join-Path $active "B-255.md") -Value "---`nbudget_tier: medium`nbudget_tier: high`n---" -Encoding UTF8
+        Resolve-CrucibleInputHandoff -Context $ctx
+        $handoff = Get-Content -LiteralPath $ctx.LatestHandoff.FullName -Raw | ConvertFrom-Json
+        Assert-Result "first tier wins" ($handoff.budget_tier -eq "medium") "bootstrap selected the later tier"
+        $missing = New-TestContext -TempRoot (Join-Path $tempRoot "item255-missing-budget") -TaskId "B-256"
+        $missingDir = Join-Path $missing.BacklogDir "bugs/active"
+        New-Item -ItemType Directory -Force -Path $missingDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $missingDir "B-256.md") -Value "---`ntype: bug`n---" -Encoding UTF8
+        Resolve-CrucibleInputHandoff -Context $missing
+        $handoff = Get-Content -LiteralPath $missing.LatestHandoff.FullName -Raw | ConvertFrom-Json
+        Assert-Result "missing bootstrap tier defaults low" ($handoff.budget_tier -eq "low") "bootstrap lost the low default"
+    }
+
     $results += Run-Test -Name "Resolve-CrucibleInputHandoff accepts context and populates latest handoff" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "contract") -TaskId "F-001"
         $handoffPath = Join-Path $ctx.HandoffDir "F-001-20260526T120000Z.json"
@@ -181,7 +215,7 @@ Resolve-CrucibleInputHandoff -Context `$ctx
         $previous = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $output = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $output = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previous
@@ -191,7 +225,7 @@ Resolve-CrucibleInputHandoff -Context `$ctx
         Assert-Result -Name "exits 1" -Condition ($exitCode -eq 1) -FailureMessage "expected exit 1, got $exitCode. Output:`n$outputText"
         Assert-Result -Name "names the missing spec" -Condition ($outputText -match "no backlog spec found for TaskId: R-033") -FailureMessage "missing spec wording. Output:`n$outputText"
         Assert-Result -Name "names where it looked" -Condition ($outputText -match [regex]::Escape("R-033_*.md") -and $outputText -match [regex]::Escape("R-033.md") -and $outputText -match [regex]::Escape((Join-Path $ctx.BacklogDir "features/active"))) -FailureMessage "missing search locations. Output:`n$outputText"
-        Assert-Result -Name "says -Init bootstraps once the spec exists" -Condition ($outputText -match "rerun crucible\.ps1 -Init -TaskId R-033") -FailureMessage "missing -Init guidance. Output:`n$outputText"
+        Assert-Result -Name "says -Init bootstraps once the spec exists" -Condition ($outputText -match "rerun crucible\.ps1 -Init -TaskId 'R-033' -ProjectRoot '\{project_root\}'") -FailureMessage "missing -Init guidance. Output:`n$outputText"
         Assert-Result -Name "writes no handoff" -Condition (@(Get-ChildItem -Path $ctx.HandoffDir -Filter "R-033-*" -ErrorAction SilentlyContinue).Count -eq 0) -FailureMessage "a handoff was written without a spec"
     }
 
@@ -252,7 +286,7 @@ Resolve-CrucibleInputHandoff -Context `$ctx
             prompt_version = "1.0.0"; session_cycle_id = "cycle-x"
         }
         $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-        $out = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
+        $out = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
 `$Quiet = `$true
 . '$libPath'
 `$ctx = @{
@@ -264,7 +298,7 @@ Resolve-CrucibleInputHandoff -Context `$ctx
 }
 Read-CrucibleHandoffContext -Context `$ctx
 Write-Host 'READ_COMPLETED'
-"@ 2>&1
+"@ 2>&1 }
         $code = $LASTEXITCODE
         $text = $out -join "`n"
         Assert-Result -Name "mismatch exits 2" -Condition ($code -eq 2 -and -not ($text -match 'READ_COMPLETED')) -FailureMessage ("expected exit 2 before the handoff is used, got " + $code + ". Output: " + $text)
@@ -289,7 +323,7 @@ Write-Host 'READ_COMPLETED'
             New-Item -ItemType Directory -Path (Split-Path -Parent $misplaced) -Force | Out-Null
             Write-TestHandoff -Path $misplaced -Values ($values + @{ task_id = $payloadTask })
             $libPath = $CRUCIBLE_LIB.Replace("'", "''")
-            $out = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
+            $out = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -Command @"
 `$Quiet = `$true
 . '$libPath'
 `$ctx = @{
@@ -304,7 +338,7 @@ Write-Host 'READ_COMPLETED'
 Restore-MisplacedHandoff -Context `$ctx
 Read-CrucibleHandoffContext -Context `$ctx
 Write-Host ('READ_COMPLETED ' + `$ctx.Handoff.task_id + ' ' + `$ctx.LatestHandoff.Name)
-"@ 2>&1
+"@ 2>&1 }
             $code = $LASTEXITCODE
             $text = $out -join "`n"
             Assert-Result -Name "misplaced file moved" -Condition (-not (Test-Path -LiteralPath $misplaced)) -FailureMessage "the misplaced handoff was not recovered"
@@ -382,7 +416,7 @@ Invoke-CircuitBreakerGates -Context `$ctx
         $previous = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previous
@@ -415,9 +449,9 @@ Invoke-CircuitBreakerGates -Context `$ctx
         }
 
         $script:InvalidTransitionResult = $null
-        $outputLines = @(& {
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & {
             $script:InvalidTransitionResult = Resolve-CrucibleTransition -Context $ctx
-        } 6>&1)
+        } 6>&1 })
         $transitionResult = $script:InvalidTransitionResult
         $script:InvalidTransitionResult = $null
         $outputText = ($outputLines | ForEach-Object { [string]$_ }) -join "`n"
@@ -533,7 +567,7 @@ Invoke-HandoffPreflightValidation -Context `$ctx
         $previous = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1
+            $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 }
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previous
@@ -544,6 +578,106 @@ Invoke-HandoffPreflightValidation -Context `$ctx
         Assert-Result -Name "preflight wedge sentinel" -Condition ($outputText -match "\[STOP\] HUMAN INTERVENTION REQUIRED") -FailureMessage "missing wedge sentinel. Output:`n$outputText"
         Assert-Result -Name "preflight wedge code" -Condition ($outputText -match [regex]::Escape("(invalid_field)")) -FailureMessage "missing invalid_field wedge code. Output:`n$outputText"
         Assert-Result -Name "preflight wedge recovery" -Condition ($outputText -match "(?m)^RECOVERY:\s+\S") -FailureMessage "missing recovery line. Output:`n$outputText"
+    }
+
+    # Item 374: the preflight validator runs in a child process, so its Console.Error
+    # diagnostic reaches the parent's message. The caller uses Stop, StrictMode and an
+    # outer catch; a refusal must still be an exit it cannot catch.
+    function Invoke-PreflightCase {
+        param([string]$Name, [string]$Validator, [string]$SourcePhase = 'grooming', [string]$TargetPhase = 'implementation')
+        $caseRoot = Join-Path $tempRoot ("preflight-374-" + $Name)
+        New-Item -ItemType Directory -Path (Join-Path $caseRoot 'powershell'), (Join-Path $caseRoot 'session/handoffs'), (Join-Path $caseRoot '.crucible') -Force | Out-Null
+        git -C $caseRoot init --quiet | Out-Null
+        git -C $caseRoot config user.name 'Test' | Out-Null
+        git -C $caseRoot config user.email 'test@example.com' | Out-Null
+        git -C $caseRoot config core.autocrlf false | Out-Null
+        git -C $caseRoot config commit.gpgSign false | Out-Null
+        [IO.File]::WriteAllText((Join-Path $caseRoot '.crucible/README.md'), "fixture`n", [Text.UTF8Encoding]::new($false))
+        git -C $caseRoot add -A | Out-Null
+        git -C $caseRoot commit -m 'init' --quiet | Out-Null
+        [IO.File]::WriteAllText((Join-Path $caseRoot 'powershell/validate-handoff.ps1'), $Validator, [Text.UTF8Encoding]::new($false))
+        $handoffPath = Join-Path $caseRoot 'session/handoffs/F-374-20260526T120000Z.json'
+        Write-TestHandoff -Path $handoffPath -Values @{
+            task_id = 'F-374'; source_phase = $SourcePhase; target_phase = $TargetPhase
+            cumulative_handoff_count = 1; handoff_retry_count = 0; review_strike_count = 0; rebase_count = 0
+            budget_tier = 'low'; reason = 'preflight'; artifacts = @(); file_affinity = @(); prompt_version = '1.0.0'
+        }
+        $runner = Join-Path $caseRoot 'run-preflight.ps1'
+        $template = @'
+$ErrorActionPreference = 'Stop'
+$PSStyle.OutputRendering = 'PlainText'
+$Quiet = $true
+. '__LIB__'
+Set-StrictMode -Version Latest
+$caseRoot = '__ROOT__'
+$handoffPath = Join-Path $caseRoot 'session/handoffs/F-374-20260526T120000Z.json'
+$ctx = @{
+    RepoRoot = $caseRoot; CrucibleRoot = '.crucible'; FrameworkPowerShell = (Join-Path $caseRoot 'powershell')
+    SessionDir = (Join-Path $caseRoot 'session'); HandoffDir = (Join-Path $caseRoot 'session/handoffs')
+    LogFile = (Join-Path $caseRoot 'session/F-374/pipeline.log.jsonl')
+    CircuitBreakerHistoryFile = (Join-Path $caseRoot 'session/global/circuit_breakers.jsonl')
+    TaskId = 'F-374'; Init = $true; Quiet = $true
+    LatestHandoff = (Get-Item -LiteralPath $handoffPath)
+    Handoff = (Get-Content -LiteralPath $handoffPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+}
+try {
+    Invoke-HandoffPreflightValidation -Context $ctx
+    Write-Host 'PREFLIGHT_CONTINUED'
+} catch {
+    Write-Host ('CALLER_CAUGHT: ' + $_.Exception.Message)
+    exit 0
+}
+exit 0
+'@
+        $text = $template.Replace('__LIB__', $CRUCIBLE_LIB.Replace("'", "''")).Replace('__ROOT__', $caseRoot.Replace("'", "''"))
+        [IO.File]::WriteAllText($runner, $text, [Text.UTF8Encoding]::new($false))
+        $stderr = Join-Path $caseRoot 'stderr.txt'
+        $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner 2>$stderr }
+        $logPath = Join-Path $caseRoot 'session/F-374/pipeline.log.jsonl'
+        return [pscustomobject]@{
+            ExitCode = $res.ExitCode
+            Output = (@($res.Output) -join "`n")
+            Stderr = [IO.File]::ReadAllText($stderr)
+            Events = @(if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath | Where-Object { $_.Trim() } | ConvertFrom-Json })
+        }
+    }
+
+    $results += Run-Test -Name "Handoff preflight carries a validator Console.Error crash into its refusal under caller Stop" -Body {
+        $run = Invoke-PreflightCase -Name 'crash' -Validator @'
+param([string]$HandoffFile, [string]$SchemaPath)
+[Console]::Error.WriteLine('PREFLIGHT_CONSOLE_DIAGNOSTIC_374')
+exit 2
+'@
+        $evidence = "exit=$($run.ExitCode)`n$($run.Output)`n$($run.Stderr)"
+        Assert-Result -Name "crash refusal is not caught" -Condition ($run.Output -notmatch 'CALLER_CAUGHT|PREFLIGHT_CONTINUED') -FailureMessage $evidence
+        Assert-Result -Name "crash refusal exits 2" -Condition ($run.ExitCode -eq 2) -FailureMessage $evidence
+        $crashLines = @($run.Stderr -split "`r?`n" | Where-Object { $_ -match 'validate-handoff\.ps1 crashed or failed internally \(exit 2\)' })
+        Assert-Result -Name "parent crash message carries the child Console.Error diagnostic" -Condition (@($crashLines | Where-Object { $_ -match 'PREFLIGHT_CONSOLE_DIAGNOSTIC_374' }).Count -eq 1) -FailureMessage $evidence
+        Assert-Result -Name "crash logs no preflight finding" -Condition (@($run.Events | Where-Object { $_.event -eq 'preflight_failed' }).Count -eq 0) -FailureMessage $evidence
+    }
+
+    $results += Run-Test -Name "Handoff preflight separates validator stderr from its JSON findings" -Body {
+        $finding = Invoke-PreflightCase -Name 'finding' -Validator @'
+param([string]$HandoffFile, [string]$SchemaPath)
+[Console]::Error.WriteLine('PREFLIGHT_FINDING_NOTE_374')
+Write-Output '{"ok":false,"reason_code":"invalid_field","message":"Handoff contains an invalid field."}'
+exit 1
+'@
+        $evidence = "exit=$($finding.ExitCode)`n$($finding.Output)`n$($finding.Stderr)"
+        Assert-Result -Name "finding refusal exits 2 uncaught" -Condition ($finding.ExitCode -eq 2 -and $finding.Output -notmatch 'CALLER_CAUGHT|PREFLIGHT_CONTINUED') -FailureMessage $evidence
+        Assert-Result -Name "JSON finding still parses beside stderr" -Condition (@($finding.Events | Where-Object { $_.event -eq 'preflight_failed' -and $_.outcome -eq 'invalid_field' -and $_.notes -match 'Handoff contains an invalid field' }).Count -eq 1) -FailureMessage $evidence
+        Assert-Result -Name "finding diagnostic stays on stderr" -Condition ($finding.Stderr -match 'PREFLIGHT_FINDING_NOTE_374') -FailureMessage $evidence
+
+        # No JSON at all: the child's diagnostic is the only account of the failure, and
+        # mentioning commit_hash must not defer a deployment handoff to merge verification.
+        $unparsed = Invoke-PreflightCase -Name 'unparsed' -SourcePhase 'deployment' -TargetPhase 'done' -Validator @'
+param([string]$HandoffFile, [string]$SchemaPath)
+[Console]::Error.WriteLine('PREFLIGHT_UNPARSED_374 commit_hash')
+exit 1
+'@
+        $evidence = "exit=$($unparsed.ExitCode)`n$($unparsed.Output)`n$($unparsed.Stderr)"
+        Assert-Result -Name "unparsed finding refuses uncaught" -Condition ($unparsed.ExitCode -eq 2 -and $unparsed.Output -notmatch 'CALLER_CAUGHT|PREFLIGHT_CONTINUED') -FailureMessage $evidence
+        Assert-Result -Name "unparsed finding message carries the child diagnostic" -Condition (@($unparsed.Events | Where-Object { $_.event -eq 'preflight_failed' -and $_.notes -match 'Preflight validation failed: PREFLIGHT_UNPARSED_374' }).Count -eq 1) -FailureMessage $evidence
     }
 
     $results += Run-Test -Name "D31: missing optional counters defaulted without StrictMode crash" -Body {

@@ -45,7 +45,7 @@ $results += Run-Test "deployment->implementation with rebase_count>=1 validates 
         New-DeploymentReworkHandoff -Path $hf -RebaseCount 1
         Push-Location $root
         try {
-            $out = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $validateScript -HandoffFile $hf 2>&1
+            $out = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $validateScript -HandoffFile $hf 2>&1 }
             $code = $LASTEXITCODE
         } finally { Pop-Location }
         Assert-Result "valid-exit" ($code -eq 0) "expected exit 0 (valid), got $code. Output: $out"
@@ -62,7 +62,7 @@ $results += Run-Test "deployment->implementation with rebase_count=0 and no gate
         New-DeploymentReworkHandoff -Path $hf -RebaseCount 0
         Push-Location $root
         try {
-            $out = & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $validateScript -HandoffFile $hf 2>&1
+            $out = Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -ExecutionPolicy Bypass -File $validateScript -HandoffFile $hf 2>&1 }
             $code = $LASTEXITCODE
         } finally { Pop-Location }
         Assert-Result "invalid-exit" ($code -eq 1) "expected exit 1 (invalid), got $code. Output: $out"

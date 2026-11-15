@@ -35,7 +35,7 @@ function Invoke-Clear {
     $prevPref = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $output = & (Get-PwshCommand) @argList 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) @argList 2>&1 }
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $prevPref

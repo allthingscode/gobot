@@ -72,41 +72,23 @@ param(
     [string]$ProjectRoot = ""
 )
 
+# I11: configuration helpers remain reusable; this command owns refusal.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
+. (Join-Path $PSScriptRoot "lib/project-root.ps1")
+. (Join-Path $PSScriptRoot "lib/codex-launch-outcome.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 $ErrorActionPreference = "Stop"
-
-# Infrastructure-failure markers. If any appears in Codex stdout/stderr, the run is a LAUNCH
-# FAILURE (broken runtime / auth), never a specialist verdict.
-$script:InfraMarkers = @(
-    "orchestrator_helper_launch_failed",
-    "program not found",
-    "codex-windows-sandbox-setup",
-    "not logged in",
-    "please run codex login",
-    "unauthorized",
-    "error sending request",
-    "command not found"
-)
 
 function Resolve-ProjectRoot {
     param([string]$Candidate, [string]$ScriptDir)
-    if (-not [string]::IsNullOrWhiteSpace($Candidate)) {
-        if (-not (Test-Path -LiteralPath $Candidate)) {
-            throw "ProjectRoot path does not exist: $Candidate"
-        }
-        return (Resolve-Path -LiteralPath $Candidate).Path
-    }
-    # Derive the project root from THIS script's location, never the caller's cwd. The
-    # launcher ships to adopters at <root>/.crucible/powershell/ and lives in the framework
-    # repo at <root>/powershell/, so $PSScriptRoot names the target repo unambiguously no
-    # matter where the orchestrator invoked us from. Defaulting to cwd silently dispatched a
-    # phase against the wrong repo when the orchestrator ran from a different checkout.
-    $parent = Split-Path -Path $ScriptDir -Parent
-    if ((Split-Path -Path $parent -Leaf) -eq ".crucible") {
-        $parent = Split-Path -Path $parent -Parent
-    }
-    return (Resolve-Path -LiteralPath $parent).Path
+    # Framework launches deliberately derive from this script even without adopter markers.
+    return Resolve-CrucibleProjectRoot -ProjectRoot $Candidate -ScriptRoot $ScriptDir -RequireProject:$false
 }
 
 function Get-RoleForPhase {
@@ -126,8 +108,7 @@ function New-BootstrapPrompt {
         [string]$RoleLabel,
         [string]$TaskIdValue,
         [string]$PromptPath,
-        [string]$CrucibleScriptPath,
-        [string]$ProjectRootValue,
+        [string]$AdvanceCommand,
         [bool]$RequireJsonVerdict
     )
     $lines = @(
@@ -139,7 +120,7 @@ function New-BootstrapPrompt {
         "complete. You are not alone in the codebase; do not revert unrelated edits.",
         "",
         "After writing handoff JSON, run:",
-        "  pwsh -File `"$CrucibleScriptPath`" -Init -TaskId $TaskIdValue -ProjectRoot `"$ProjectRootValue`" -Quiet",
+        ("  " + $AdvanceCommand),
         "That command can run for several minutes (an approved review re-runs the full project",
         "checks) and prints nothing under -Quiet. Wait until the process itself has exited before",
         "you end your session; ending early kills it and leaves the next phase unprepared.",
@@ -160,7 +141,7 @@ if (-not (Test-Path -LiteralPath $platformLib)) {
 if (Test-Path -LiteralPath $platformLib) {
     . $platformLib
 }
-if (-not (Get-Command "Invoke-Git" -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Invoke-Git)) {
     function Invoke-Git {
         [CmdletBinding()]
         param(
@@ -178,7 +159,7 @@ if (-not (Get-Command "Invoke-Git" -ErrorAction SilentlyContinue)) {
             }
         }
         $allArgs = @()
-        if (-not [string]::IsNullOrWhiteSpace($Directory)) { $allArgs += @("-C", $Directory) }
+        if (-not [string]::IsNullOrWhiteSpace($Directory)) { $allArgs += @("-C", (Resolve-FilesystemPath -Path $Directory)) }
         if ($flattenedArgs.Count -gt 0) { $allArgs += $flattenedArgs }
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
@@ -191,118 +172,6 @@ if (-not (Get-Command "Invoke-Git" -ErrorAction SilentlyContinue)) {
         $lines = [string[]]@($rawOutput | ForEach-Object { [string]$_ })
         return [PSCustomObject]@{ ExitCode = $exitCode; Lines = $lines; Raw = ($lines -join "`n") }
     }
-}
-
-function Test-InfraFailure {
-    param([string]$Text)
-    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
-    $lower = $Text.ToLowerInvariant()
-    foreach ($marker in $script:InfraMarkers) {
-        if ($lower.Contains($marker)) { return $marker }
-    }
-    return $null
-}
-
-# Returns $null, or an object whose ResetTime is the "try again at <time>" text (empty when the
-# message gives none) when the tail of a failed run's output is Codex's account usage-limit
-# error. That is a quota stop, not a runtime fault, and re-running -Preflight cannot clear it.
-# Only the tail is scanned: the agent's own tool output earlier in the transcript can quote the
-# phrase. The real message spells "You've" with a typographic apostrophe. Item 203.
-function Get-UsageLimitInfo {
-    param([string]$Text)
-    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
-    $tail = if ($Text.Length -gt 2000) { $Text.Substring($Text.Length - 2000) } else { $Text }
-    if ($tail -notmatch "You[$([char]0x2019)']ve hit your usage limit") { return $null }
-    $resetTime = ""
-    if ($tail -match "(?m)try again at (.+?)\.?\s*$") { $resetTime = $Matches[1].Trim() }
-    # Retries wait one full minute past the projected reset, so the limit has certainly lifted.
-    # Only a plain clock time is computed; any other shape leaves RetryNotBefore empty and the
-    # advice falls back to "one minute after the stated reset".
-    $retryNotBefore = ""
-    $parsed = [datetime]::MinValue
-    $clockFormats = [string[]]@("h:mm tt", "hh:mm tt", "h:mm:ss tt", "H:mm", "HH:mm")
-    if ($resetTime -ne "" -and [datetime]::TryParseExact($resetTime, $clockFormats, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AllowWhiteSpaces, [ref]$parsed)) {
-        $retryNotBefore = $parsed.AddMinutes(1).ToString("h:mm tt", [System.Globalization.CultureInfo]::InvariantCulture)
-    }
-    return [PSCustomObject]@{ ResetTime = $resetTime; RetryNotBefore = $retryNotBefore }
-}
-
-# Returns the phase a handoff named when the specialist's crucible.ps1 -Init ended this phase
-# but never started that one, else $null. A Codex session that ends its turn while -Init is
-# still running kills it mid-advance: the session_end is logged, the next phase's prompt is not.
-function Get-IncompleteAdvanceTarget {
-    param([string]$LogPath, [string]$TaskIdValue, [string]$PhaseName, [datetime]$SinceUtc)
-    if (-not (Test-Path -LiteralPath $LogPath)) { return $null }
-    $phases = @("research", "grooming", "implementation", "verification", "deployment")
-    $events = @()
-    foreach ($line in @(Get-Content -LiteralPath $LogPath -Encoding UTF8)) {
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        try { $entry = $line | ConvertFrom-Json } catch { continue }
-        if ($null -eq $entry -or [string]$entry.task_id -ne $TaskIdValue) { continue }
-        # pwsh 7 converts ISO strings to DateTime on parse; Windows PowerShell 5.1 does not.
-        $stamp = $entry.timestamp
-        if ($stamp -is [datetime]) {
-            $ts = $stamp.ToUniversalTime()
-        } else {
-            $ts = [datetime]::MinValue
-            $styles = [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
-            if (-not [datetime]::TryParse([string]$stamp, [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$ts)) { continue }
-        }
-        if ($ts -lt $SinceUtc) { continue }
-        $events += $entry
-    }
-    # Item 209: a terminal event has no handoff target and older logs omit outcome.
-    if ($events.Count -gt 0 -and $events[-1].event -eq "session_end" -and
-        $events[-1].PSObject.Properties["notes"] -and $events[-1].notes -eq "Pipeline complete") { return $null }
-    $endIndex = -1
-    for ($i = $events.Count - 1; $i -ge 0; $i--) {
-        if ($events[$i].event -eq "session_end" -and $events[$i].phase -eq $PhaseName -and $events[$i].PSObject.Properties["outcome"] -and $events[$i].outcome -eq "success") {
-            $endIndex = $i
-            break
-        }
-    }
-    if ($endIndex -lt 0) { return $null }
-    if (-not $events[$endIndex].PSObject.Properties["notes"]) { return $null }
-    if ([string]$events[$endIndex].notes -notmatch "^Handoff to (\S+)") { return $null }
-    $target = $Matches[1]
-    if ($phases -notcontains $target) { return $null }
-    for ($j = $endIndex + 1; $j -lt $events.Count; $j++) {
-        if ($events[$j].event -eq "session_start" -and $events[$j].phase -eq $target) { return $null }
-    }
-    return $target
-}
-
-# Grooming, implementation and verification must end with a handoff, logged by
-# crucible.ps1 -Init as a successful session_end. Research may end at the Research
-# Gate and deployment at the Human Gate. Without a phase session_start, this check
-# cannot judge the run. Item 177.
-function Test-PhaseEndedWithoutHandoff {
-    param([string]$LogPath, [string]$TaskIdValue, [string]$PhaseName, [datetime]$SinceUtc)
-    if (@("grooming", "implementation", "verification") -notcontains $PhaseName) { return $false }
-    if (-not (Test-Path -LiteralPath $LogPath)) { return $false }
-    $started = $false
-    foreach ($line in @(Get-Content -LiteralPath $LogPath -Encoding UTF8)) {
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        try { $entry = $line | ConvertFrom-Json } catch { continue }
-        if ($null -eq $entry -or [string]$entry.task_id -ne $TaskIdValue) { continue }
-        $entryPhase = if ($entry.PSObject.Properties["phase"]) { [string]$entry.phase } else { [string]$entry.specialist }
-        # Item 209: pipeline completion also ends the phase when logged under crucible.
-        $pipelineComplete = $entry.event -eq "session_end" -and $entry.PSObject.Properties["notes"] -and $entry.notes -eq "Pipeline complete"
-        if ($entryPhase -ne $PhaseName -and -not $pipelineComplete) { continue }
-        if ($entry.event -eq "session_start") { $started = $true; continue }
-        if ($entry.event -ne "session_end" -or (-not $pipelineComplete -and
-            (-not $entry.PSObject.Properties["outcome"] -or $entry.outcome -ne "success"))) { continue }
-        $stamp = $entry.timestamp
-        if ($stamp -is [datetime]) {
-            $ts = $stamp.ToUniversalTime()
-        } else {
-            $ts = [datetime]::MinValue
-            $styles = [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal
-            if (-not [datetime]::TryParse([string]$stamp, [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$ts)) { continue }
-        }
-        if ($ts -ge $SinceUtc) { return $false }
-    }
-    return $started
 }
 
 function Test-GitWorkTree {
@@ -390,7 +259,7 @@ function Invoke-CodexExec {
             if (-not [string]::IsNullOrWhiteSpace($transcriptDir) -and -not (Test-Path -LiteralPath $transcriptDir)) {
                 New-Item -ItemType Directory -Path $transcriptDir -Force | Out-Null
             }
-            [System.IO.File]::WriteAllText($TranscriptPath, $output, (New-Object System.Text.UTF8Encoding($false)))
+            [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $TranscriptPath), $output, (New-Object System.Text.UTF8Encoding($false)))
         } catch {
             Write-Warning ("Could not write Codex transcript to " + $TranscriptPath + ": " + $_.Exception.Message)
         }
@@ -398,16 +267,19 @@ function Invoke-CodexExec {
     return [PSCustomObject]@{ ExitCode = $exitCode; Output = $output }
 }
 
-$REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoot
+try { $REPO_ROOT = Resolve-ProjectRoot -Candidate $ProjectRoot -ScriptDir $PSScriptRoot }
+catch { [Console]::Error.WriteLine("[CODEX] Error: " + $_.Exception.Message); exit 2 }
 
 # -CrucibleRoot is joined onto the repo root, so relativize absolute paths within
 # that root and reject paths outside it before filesystem operations.
-if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
-    $resolvedCrucibleRoot = $CrucibleRoot
-    try { $resolvedCrucibleRoot = (Resolve-Path -LiteralPath $CrucibleRoot -ErrorAction Stop).Path } catch { }
-    $repoPrefix = $REPO_ROOT.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
-    if ($resolvedCrucibleRoot.StartsWith($repoPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        $CrucibleRoot = $resolvedCrucibleRoot.Substring($repoPrefix.Length)
+if ((Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $CrucibleRoot) -ceq $CrucibleRoot) {
+    try { $resolvedCrucibleRoot = Resolve-FilesystemPath -Path $CrucibleRoot }
+    catch { Write-Host ("[CODEX] Error: " + $_.Exception.Message) -ForegroundColor Red; exit 2 }
+    try { $resolvedCrucibleRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $CrucibleRoot -ErrorAction Stop)) } catch { }
+    $relativeCrucibleRoot = $null
+    try { $relativeCrucibleRoot = Get-PathRelativeToDirectory -Path $resolvedCrucibleRoot -Directory $REPO_ROOT } catch { }
+    if (-not [string]::IsNullOrEmpty($relativeCrucibleRoot)) {
+        $CrucibleRoot = $relativeCrucibleRoot
     } else {
         Write-Host ("[CODEX] Error: -CrucibleRoot must be relative to the repo root (e.g. '.crucible'), not an absolute path outside it: " + $CrucibleRoot) -ForegroundColor Red
         exit 2
@@ -415,7 +287,7 @@ if ([System.IO.Path]::IsPathRooted($CrucibleRoot)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Model)) {
-    Write-Host "[CODEX] Error: -Model is required (use the [RECOMMENDED LEVEL] pair from crucible.ps1 -Init -Target codex: its model as -Model, its effort as -Effort)." -ForegroundColor Red
+    Write-Host ("[CODEX] Error: -Model is required (use the [RECOMMENDED LEVEL] pair from " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true; Target = "codex" }) -Reference) + ": its model as -Model, its effort as -Effort).") -ForegroundColor Red
     exit 2
 }
 
@@ -467,8 +339,9 @@ if (-not [string]::IsNullOrWhiteSpace($PromptFile)) {
         Write-Host ("[CODEX] Error: -PromptFile path does not exist: " + $PromptFile) -ForegroundColor Red
         exit 2
     }
-    $resolvedPromptFile = (Resolve-Path -LiteralPath $PromptFile).Path
-    $fileContent = [System.IO.File]::ReadAllText($resolvedPromptFile)
+    try {$resolvedPromptFile = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $PromptFile)) }
+    catch { Write-Host ("[CODEX] Error: " + $_.Exception.Message) -ForegroundColor Red; exit 2 }
+    $fileContent = [System.IO.File]::ReadAllText((Resolve-FilesystemPath -Path $resolvedPromptFile))
     if ([string]::IsNullOrWhiteSpace($fileContent)) {
         Write-Host ("[CODEX] Error: -PromptFile is empty: " + $PromptFile) -ForegroundColor Red
         exit 2
@@ -503,7 +376,7 @@ if (-not [string]::IsNullOrWhiteSpace($PromptFile) -and [string]::IsNullOrWhiteS
     }
 }
 
-$crucibleDir = Join-Path $REPO_ROOT $CrucibleRoot
+$crucibleDir = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $CrucibleRoot
 # Item 188: prompts, launch artifacts and completion detection use the same session root.
 $sessionRoot = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
 $rootSource = if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { "derived from script location" } else { "from -ProjectRoot" }
@@ -518,7 +391,7 @@ if ([string]::IsNullOrWhiteSpace($PromptText)) {
     if (-not (Test-Path -LiteralPath $bootstrapPromptPath)) {
         Write-Host ("[CODEX] Error: phase prompt not found: " + $bootstrapPromptPath) -ForegroundColor Red
         Write-Host ("  project root: " + $REPO_ROOT + "  (" + $rootSource + ")")
-        Write-Host ("Run crucible.ps1 -Init -TaskId " + $TaskId + " -ProjectRoot <adopter root> first, and pass that same -ProjectRoot here.") -ForegroundColor Yellow
+        Write-Host ("Run " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = "<adopter root>" }) -CrucibleRoot $CrucibleRoot) + " first, and pass that same -ProjectRoot here.") -ForegroundColor Yellow
         exit 2
     }
 }
@@ -530,7 +403,8 @@ if ([string]::IsNullOrWhiteSpace($WorkingDir)) {
         Write-Host ("[CODEX] Error: -WorkingDir path does not exist: " + $WorkingDir) -ForegroundColor Red
         exit 2
     }
-    $WorkingDir = (Resolve-Path -LiteralPath $WorkingDir).Path
+    try {$WorkingDir = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $WorkingDir)) }
+    catch { Write-Host ("[CODEX] Error: " + $_.Exception.Message) -ForegroundColor Red; exit 2 }
 }
 
 if ($Phase -eq "deployment") {
@@ -600,21 +474,6 @@ $transcriptPath = Join-Path $sessionDir "codex-transcript.txt"
 $statusPath = Join-Path $sessionDir "codex-launch-status.txt"
 if (Test-Path -LiteralPath $lastMsgPath) { Remove-Item -LiteralPath $lastMsgPath -Force }
 
-# A host shell can lose stdout while the launcher and child keep running, so the
-# status file is the durable STATUS copy. RUNNING names this process to distinguish
-# a live launch from a dead one. Item 167.
-function Write-LaunchStatus {
-    param([string]$Status, [string[]]$Detail = @())
-    $stamp = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
-    $lines = @(("STATUS=" + $Status), ("launcher_pid: " + $PID), ("updated: " + $stamp)) + $Detail
-    try {
-        if (-not (Test-Path -LiteralPath $sessionDir)) { New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null }
-        [System.IO.File]::WriteAllText($statusPath, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
-    } catch {
-        Write-Warning ("Could not write launch status to " + $statusPath + ": " + $_.Exception.Message)
-    }
-}
-
 $useSchema = $false
 if ($ReviewSchema) {
     if (-not (Test-Path -LiteralPath $schemaPath)) {
@@ -625,19 +484,21 @@ if ($ReviewSchema) {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($bootstrapPromptPath)) {
+    # Built, not interpolated: a root such as C:/cash$root must reach the specialist as
+    # written, in the script path and in -ProjectRoot alike. Item 247.
+    $advanceCommand = New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $REPO_ROOT; Quiet = $true }) -CrucibleRoot $crucibleDir
     $PromptText = New-BootstrapPrompt -RoleLabel $Role -TaskIdValue $TaskId -PromptPath $bootstrapPromptPath `
-        -CrucibleScriptPath (Join-Path $crucibleDir (Join-Path "powershell" "crucible.ps1")) `
-        -ProjectRootValue $REPO_ROOT -RequireJsonVerdict $useSchema
+        -AdvanceCommand $advanceCommand -RequireJsonVerdict $useSchema
 }
 
 $codexArgs = @(
     "-s", "danger-full-access",
     "--skip-git-repo-check",
-    "-C", $WorkingDir,
+    "-C", (Resolve-FilesystemPath -Path $WorkingDir),
     "-m", $Model,
-    "--output-last-message", $lastMsgPath
+    "--output-last-message", (Resolve-FilesystemPath -Path $lastMsgPath)
 )
-if ($useSchema) { $codexArgs += @("--output-schema", $schemaPath) }
+if ($useSchema) { $codexArgs += @("--output-schema", (Resolve-FilesystemPath -Path $schemaPath)) }
 if (-not [string]::IsNullOrWhiteSpace($Effort)) {
     $codexArgs += @("-c", ("model_reasoning_effort=`"" + $Effort + "`""))
 }
@@ -657,142 +518,74 @@ if ($useSchema) { Write-Host "  review verdict schema: enforced" }
 # Event timestamps carry whole seconds; back off one so an event in the launch second counts.
 $launchStartUtc = [datetime]::UtcNow.AddSeconds(-1)
 $statusEffort = if ([string]::IsNullOrWhiteSpace($Effort)) { "Codex's own default effort" } else { $Effort + " effort" }
-Write-LaunchStatus -Status "RUNNING" -Detail @("level: " + $Model + " at " + $statusEffort)
-$result = Invoke-CodexExec -CodexArgs $codexArgs -Prompt $PromptText -TranscriptPath $transcriptPath
-
-if (-not (Test-Path -LiteralPath $sessionDir)) {
-    New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
+# An ad hoc run has no task to advance, so it has no recovery command.
+$recoveryCommand = if ([string]::IsNullOrWhiteSpace($TaskId)) { "" } else {
+    New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport ShellNeutral -Parameters ([ordered]@{ Init = $true; TaskId = $TaskId; ProjectRoot = $REPO_ROOT }) -CrucibleRoot $crucibleDir
 }
+Write-CodexLaunchStatus -StatusPath $statusPath -Record (Get-CodexLaunchOutcome -Evidence @{ Running = $true; Level = ($Model + " at " + $statusEffort) })
 
-if (Test-GitWorkTree -Directory $WorkingDir) {
-    $leftFingerprint = Get-TreeFingerprint -Directory $WorkingDir
-    if ($null -ne $leftFingerprint) {
-        $recordStamp = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
-        $recordLines = @(("working_dir: " + $WorkingDir), ("fingerprint: " + $leftFingerprint), ("recorded: " + $recordStamp))
-        try {
-            [System.IO.File]::WriteAllText($treeRecordPath, (($recordLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
-        } catch {
-            Write-Warning ("Could not record the tree this run left at " + $treeRecordPath + ": " + $_.Exception.Message)
-        }
+# From here to the exit, every outcome is decided by Get-CodexLaunchOutcome and written by
+# Write-CodexLaunchStatus (lib/codex-launch-outcome.ps1), and nothing may throw past them:
+# a failure to run codex or to read a piece of evidence is evidence too. Item 246.
+$evidence = @{
+    ExitCode        = $null
+    Output          = ""
+    LastMessage     = ""
+    UseSchema       = $useSchema
+    Adhoc           = $usingAdhocSession
+    Phase           = $Phase
+    LogEvents       = @()
+    SinceUtc        = $launchStartUtc
+    TranscriptPath  = $transcriptPath
+    LastMessagePath = $lastMsgPath
+    RecoveryCommand = $recoveryCommand
+    InvokeError     = ""
+    ReadErrors      = @{}
+}
+try {
+    try {
+        $result = Invoke-CodexExec -CodexArgs $codexArgs -Prompt $PromptText -TranscriptPath $transcriptPath
+        $evidence.ExitCode = $result.ExitCode
+        $evidence.Output = [string]$result.Output
+    } catch {
+        $evidence.InvokeError = $_.Exception.Message
     }
-}
 
-# --- Classification: SUCCESS vs LAUNCH_FAILED ---
-# A codex exec run that exits 0 AND captures a final message succeeded: codex's own auth/runtime
-# failures exit non-zero and write no last-message. The infra-marker scan is therefore consulted
-# only to ENRICH the reason on an already-failed run (exit != 0), never as an independent trigger
-# over a 0-exit run. Broad markers ("unauthorized", "command not found", "program not found")
-# occur routinely in the agent's own captured tool output (test names, log lines, source it read)
-# and scanning a full transcript would false-positive a successful phase as LAUNCH_FAILED.
-$lastMsg = ""
-if (Test-Path -LiteralPath $lastMsgPath) {
-    $lastMsg = (Get-Content -LiteralPath $lastMsgPath -Raw -ErrorAction SilentlyContinue)
-    if ($null -eq $lastMsg) { $lastMsg = "" }
-}
-
-$failReason = ""
-$usageLimit = $null
-if ($result.ExitCode -eq 127) {
-    $failReason = "codex not found on PATH"
-} elseif ($result.ExitCode -ne 0) {
-    $usageLimit = Get-UsageLimitInfo -Text $result.Output
-    $marker = Test-InfraFailure -Text $result.Output
-    if ($null -ne $usageLimit) {
-        $failReason = "account usage limit"
-    } elseif ($null -ne $marker) {
-        $failReason = "infrastructure failure (exit $($result.ExitCode), marker: $marker)"
-    } else {
-        $failReason = "non-zero exit code ($($result.ExitCode))"
-    }
-} elseif ($useSchema) {
-    $verdictOk = $false
-    if (-not [string]::IsNullOrWhiteSpace($lastMsg)) {
-        try {
-            $parsed = $lastMsg | ConvertFrom-Json
-            if ($null -ne $parsed -and $parsed.PSObject.Properties["verdict"]) {
-                $v = [string]$parsed.verdict
-                if ($v -eq "APPROVED" -or $v -eq "CHANGES_REQUESTED") { $verdictOk = $true }
+    # The tree record only lets a re-dispatch continue this run's work; failing to write it must
+    # not cost the run its STATUS.
+    try {
+        if (Test-GitWorkTree -Directory $WorkingDir) {
+            $leftFingerprint = Get-TreeFingerprint -Directory $WorkingDir
+            if ($null -ne $leftFingerprint) {
+                if (-not (Test-Path -LiteralPath $sessionDir)) { New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null }
+                $recordStamp = [datetime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+                $recordLines = @(("working_dir: " + $WorkingDir), ("fingerprint: " + $leftFingerprint), ("recorded: " + $recordStamp))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $treeRecordPath), (($recordLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
             }
+        }
+    } catch {
+        Write-Warning ("Could not record the tree this run left at " + $treeRecordPath + ": " + $_.Exception.Message)
+    }
+
+    try {
+        if (Test-Path -LiteralPath $lastMsgPath) {
+            $lastMsg = Get-Content -LiteralPath $lastMsgPath -Raw -Encoding UTF8 -ErrorAction Stop
+            if ($null -ne $lastMsg) { $evidence.LastMessage = [string]$lastMsg }
+        }
+    } catch {
+        $evidence.ReadErrors["last message"] = $_.Exception.Message
+    }
+    if (-not $usingAdhocSession) {
+        try {
+            $evidence.LogEvents = Read-CodexLaunchLogEvents -LogPath (Join-Path $sessionRoot (Join-Path $TaskId "pipeline.log.jsonl")) -TaskIdValue $TaskId
         } catch {
-            $verdictOk = $false
+            $evidence.ReadErrors["pipeline log"] = $_.Exception.Message
         }
     }
-    if (-not $verdictOk) {
-        $failReason = "final message is not a valid review verdict (verdict not APPROVED/CHANGES_REQUESTED)"
-    }
+    $outcome = Get-CodexLaunchOutcome -Evidence $evidence
+} catch {
+    $outcome = New-CodexLaunchUnclassifiedRecord -Evidence $evidence -Reason $_.Exception.Message
 }
-
-$advanceTarget = $null
-$noHandoff = $false
-if ([string]::IsNullOrWhiteSpace($failReason) -and -not $usingAdhocSession) {
-    $pipelineLog = Join-Path $sessionRoot (Join-Path $TaskId "pipeline.log.jsonl")
-    $advanceTarget = Get-IncompleteAdvanceTarget -LogPath $pipelineLog -TaskIdValue $TaskId -PhaseName $Phase -SinceUtc $launchStartUtc
-    if ($null -eq $advanceTarget) {
-        $noHandoff = Test-PhaseEndedWithoutHandoff -LogPath $pipelineLog -TaskIdValue $TaskId -PhaseName $Phase -SinceUtc $launchStartUtc
-    }
-}
-
-Write-Host ""
-if ($null -ne $usageLimit) {
-    $resetText = if ([string]::IsNullOrWhiteSpace($usageLimit.ResetTime)) { "not stated in the message (see the transcript)" } else { $usageLimit.ResetTime }
-    $retryText = if ([string]::IsNullOrWhiteSpace($usageLimit.RetryNotBefore)) { "one minute after the stated reset" } else { $usageLimit.RetryNotBefore }
-    Write-LaunchStatus -Status "USAGE_LIMIT" -Detail @(("exit code: " + $result.ExitCode), ("resets: " + $resetText), ("retry_not_before: " + $retryText))
-    Write-Host "[CODEX SPECIALIST] STATUS=USAGE_LIMIT" -ForegroundColor Yellow
-    Write-Host ("  resets: " + $resetText)
-    Write-Host ("  retry_not_before: " + $retryText)
-    Write-Host ("  exit code: " + $result.ExitCode)
-    Write-Host ("  transcript: " + $transcriptPath)
-    Write-Host ""
-    Write-Host "  The Codex account hit its usage limit. This is NOT a runtime fault and NOT a review"
-    Write-Host "  verdict; -Preflight and a runtime fix will not help. Stop, tell the human the reset time,"
-    Write-Host ("  and do not relaunch or rerun before " + $retryText + " (at least one full minute past the reset).")
-    Write-Host "  After that, re-dispatch this phase: any uncommitted work the run left in the working"
-    Write-Host "  tree is kept and can be continued."
-    exit 5
-} elseif ($null -ne $advanceTarget) {
-    Write-LaunchStatus -Status "ADVANCE_INCOMPLETE" -Detail @(("exit code: " + $result.ExitCode), ("next phase never started: " + $advanceTarget))
-    Write-Host "[CODEX SPECIALIST] STATUS=ADVANCE_INCOMPLETE" -ForegroundColor Yellow
-    Write-Host ("  exit code: " + $result.ExitCode)
-    Write-Host ("  last message: " + $lastMsgPath)
-    Write-Host ("  transcript: " + $transcriptPath)
-    Write-Host ""
-    Write-Host ("  Crucible ended the " + $Phase + " phase but never started " + $advanceTarget + ":")
-    Write-Host "  the specialist's crucible.ps1 -Init was cut off before it finished."
-    Write-Host "  The handoff is intact. Finish the advance, then dispatch the next phase:"
-    Write-Host ("    pwsh -File `"" + (Join-Path $crucibleDir (Join-Path "powershell" "crucible.ps1")) + "`" -Init -TaskId " + $TaskId + " -ProjectRoot `"" + $REPO_ROOT + "`"")
-    exit 3
-} elseif ($noHandoff) {
-    Write-LaunchStatus -Status "NO_HANDOFF" -Detail @(("exit code: " + $result.ExitCode), ("phase ended without a handoff: " + $Phase))
-    Write-Host "[CODEX SPECIALIST] STATUS=NO_HANDOFF" -ForegroundColor Yellow
-    Write-Host ("  exit code: " + $result.ExitCode)
-    Write-Host ("  last message: " + $lastMsgPath)
-    Write-Host ("  transcript: " + $transcriptPath)
-    Write-Host ""
-    Write-Host ("  The run ended but Crucible logged no completed " + $Phase + " phase: no handoff was")
-    Write-Host "  processed. Read the last message: the specialist may have stopped to ask a question,"
-    Write-Host "  escalated to the human (see backlog/blocked/), or quit early. This is not a verdict."
-    Write-Host "  After the human decides, re-dispatch this phase on the same working directory: the"
-    Write-Host "  uncommitted work this run left is recognised and continued."
-    exit 4
-} elseif ([string]::IsNullOrWhiteSpace($failReason)) {
-    Write-LaunchStatus -Status "SUCCESS" -Detail @("exit code: " + $result.ExitCode)
-    Write-Host "[CODEX SPECIALIST] STATUS=SUCCESS" -ForegroundColor Green
-    Write-Host ("  exit code: " + $result.ExitCode)
-    Write-Host ("  last message: " + $lastMsgPath)
-    Write-Host ("  transcript: " + $transcriptPath)
-    Write-Host ""
-    Write-Host "  The Codex run completed. Now verify the handoff JSON + task.md checkpoints"
-    Write-Host "  per the orchestrator SOP before trusting any verdict."
-    exit 0
-} else {
-    Write-LaunchStatus -Status "LAUNCH_FAILED" -Detail @(("exit code: " + $result.ExitCode), ("reason: " + $failReason))
-    Write-Host "[CODEX SPECIALIST] STATUS=LAUNCH_FAILED" -ForegroundColor Red
-    Write-Host ("  reason: " + $failReason)
-    Write-Host ("  exit code: " + $result.ExitCode)
-    Write-Host ("  transcript: " + $transcriptPath)
-    Write-Host ""
-    Write-Host "  This is an INFRASTRUCTURE failure, NOT a review verdict. Do not record it as"
-    Write-Host "  CHANGES_REQUESTED. Re-run launch-codex-specialist.ps1 -Preflight, fix the"
-    Write-Host "  runtime/auth, then re-dispatch; or escalate to the human."
-    exit 1
-}
+Write-CodexLaunchStatus -StatusPath $statusPath -Record $outcome
+if ($outcome.ExitCode -eq 0) { exit 0 }
+exit $outcome.ExitCode

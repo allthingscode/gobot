@@ -29,7 +29,9 @@ $tempRoot = New-TestFixtureRoot -NameHint "research-gate-test"
 try {
     $results += Run-Test -Name "records approval and generates a gate-filing prompt listing approved items" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "approve")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "Gate approved" -Approved "C-350","C-351" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         Assert-Result "gate-filing written" (Test-Path -LiteralPath $p.GateFiling) "gate-filing.md was not generated"
         $body = Get-Content -LiteralPath $p.GateFiling -Raw
         Assert-Result "names approved C-350" ($body -match "C-350") "approved item C-350 not listed"
@@ -43,7 +45,9 @@ try {
     $results += Run-Test -Name "records an approved upstream referral without asking to file it" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "upstream")
         $ref = "U-044-01: preserve the first session-state write"
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "I approve both" -Approved "B-043" -ApprovedUpstream $ref -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $record = Get-ChildItem -LiteralPath (Join-Path $p.Root ".crucible/session/global/research_gate") -Filter "$($p.TaskId)-*.json" | Select-Object -First 1
         $decision = Get-Content -LiteralPath $record.FullName -Raw | ConvertFrom-Json
         Assert-Result "referral recorded" (@($decision.approved_upstream) -contains $ref) (Get-Content -LiteralPath $record.FullName -Raw)
@@ -53,23 +57,27 @@ try {
         Assert-Result "referral not in handoff IDs" (-not ($body -match '-HumanApproved[^\n]*U-044-01')) "the referral must not be passed as a backlog ID"
 
         $p2 = New-GateProject -Root (Join-Path $tempRoot "upstream-only")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p2.TaskId -Reason "route upstream" -ApprovedUpstream $ref -ProjectRoot $p2.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $body2 = Get-Content -LiteralPath $p2.GateFiling -Raw
         Assert-Result "upstream-only decision files no stubs" ($body2 -match 'No stubs to file') "an upstream-only decision must not ask for stubs"
     }
 
     $results += Run-Test -Name "a non-ID in -Approved is still refused" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "non-id")
-        $refused = $false
-        try { & $SCRIPT -TaskId $p.TaskId -Reason "x" -Approved "U-044-01" -ProjectRoot $p.Root | Out-Null } catch { $refused = $_.Exception.Message -match 'is not a backlog item ID' }
-        Assert-Result "non-ID refused" $refused "U-044-01 must not be accepted as a backlog ID"
+        $pwshCmd = Get-PwshCommand
+        $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $SCRIPT -TaskId $p.TaskId -Reason x -Approved U-044-01 -ProjectRoot $p.Root 2>&1 }
+        Assert-Result "non-ID refused" ($res.ExitCode -ne 0 -and $res.Output -match 'is not a backlog item ID') $res.Output
     }
 
     # Item 229: filing instructions must follow the adopter's backlog path.
     $results += Run-Test -Name "approved stub instructions use the configured backlog directory" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "custom-backlog")
         "paths:`n  backlog: tickets`n  session: .crucible/session`n" | Set-Content -LiteralPath (Join-Path $p.Root ".crucible/config.yaml") -Encoding UTF8
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $body = Get-Content -LiteralPath $p.GateFiling -Raw
         $backlog = Join-Path $p.Root "tickets"
         Assert-Result "configured stub directory" ($body.Contains($backlog + '/{bugs,chores,features}/active/')) "filing instructions must name the resolved tickets directory"
@@ -79,15 +87,15 @@ try {
     # TODO item 208: background pwsh launches re-split multi-word -PromptText values.
     $results += Run-Test -Name "printed Codex dispatch uses a file-sourced one-line pointer" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "dispatch with spaces")
-        $output = (& $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -ProjectRoot $p.Root 6>&1 | Out-String)
+        $output = (Invoke-ExternalCommand -AsLines { & $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -ProjectRoot $p.Root 6>&1 } | Out-String)
         $codex = @($output -split "`r?`n" | Where-Object { $_ -match '^    Codex:' })
         Assert-Result "one Codex command" ($codex.Count -eq 1) "expected one printed Codex command"
         Assert-Result "no PromptText" ($codex[0] -notmatch '-PromptText') "printed Codex command must not use -PromptText"
         $pointerPath = Join-Path (Split-Path $p.GateFiling) "gate-filing-pointer.md"
-        Assert-Result "quoted PromptFile path" ($codex[0].Contains('-PromptFile "' + $pointerPath + '"')) "expected quoted pointer file path"
+        Assert-Result "quoted PromptFile path" ($codex[0].Contains("-PromptFile '" + $pointerPath + "'")) "expected quoted pointer file path"
         # Item 219: a Codex level includes both model and effort.
         Assert-Result "model and effort in dispatch" ($codex[0] -match '-Model <model> -Effort <effort>') "expected both halves of the Codex level"
-        Assert-Result "task-scoped dispatch" ($codex[0] -match '-TaskId R-021 -Phase research') "expected TaskId and Phase"
+        Assert-Result "task-scoped dispatch" ($codex[0] -match "-TaskId 'R-021' -Phase 'research'") "expected TaskId and Phase"
         Assert-Result "pointer written" (Test-Path -LiteralPath $pointerPath) "missing pointer file"
         $pointer = [IO.File]::ReadAllText($pointerPath)
         $expected = "Researcher: $($p.TaskId) - read and follow all instructions in $($p.GateFiling)"
@@ -99,7 +107,9 @@ try {
 
     $results += Run-Test -Name "writes a structural decision record with the approved list" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "record")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "ok" -Approved "C-350" -Deferred "C-352" -Rejected "C-999" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $gateDir = Join-Path $p.Root ".crucible/session/global/research_gate"
         $rec = @(Get-ChildItem -LiteralPath $gateDir -Filter "$($p.TaskId)-*.json")
         Assert-Result "one decision record" ($rec.Count -eq 1) "expected exactly one decision record"
@@ -110,9 +120,26 @@ try {
         Assert-Result "rejected recorded" ($obj.rejected -contains "C-999") "rejected list missing C-999"
     }
 
+    # Review of 5d1b869 (item 247): the printed commands were built first and refused a reason
+    # they could not double-quote, so an ordinary human reason was never recorded.
+    $results += Run-Test -Name "a reason with a dollar sign and quotes is recorded and printed as a literal" -Body {
+        $p = New-GateProject -Root (Join-Path $tempRoot "dollar-reason")
+        $reason = 'Approve C-350; costs $5 and it''s "cheap"'
+        $output = (Invoke-ExternalCommand -AsLines { & $SCRIPT -TaskId $p.TaskId -Reason $reason -Approved "C-350" -ProjectRoot $p.Root 6>&1 } | Out-String)
+        $gateDir = Join-Path $p.Root ".crucible/session/global/research_gate"
+        $rec = @(Get-ChildItem -LiteralPath $gateDir -Filter "$($p.TaskId)-*.json" -ErrorAction SilentlyContinue)
+        Assert-Result "decision recorded" ($rec.Count -eq 1) $output
+        $obj = if ($rec.Count -eq 1) { Get-Content -LiteralPath $rec[0].FullName -Raw | ConvertFrom-Json } else { $null }
+        Assert-Result "reason recorded verbatim" ($null -ne $obj -and $obj.reason -ceq $reason) $output
+        $body = if (Test-Path -LiteralPath $p.GateFiling) { Get-Content -LiteralPath $p.GateFiling -Raw } else { "" }
+        Assert-Result "handoff command carries the reason as a literal" ($body.Contains("-Reason 'Approve C-350; costs `$5 and it''s `"cheap`"'")) $body
+    }
+
     $results += Run-Test -Name "all-deferred decision files no stubs but still records and hands off" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "defer")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "not now" -Deferred "C-350","C-351" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $body = Get-Content -LiteralPath $p.GateFiling -Raw
         Assert-Result "no-stub path" ($body -match "No stubs to file") "should take the no-stubs branch"
         Assert-Result "still hands off" ($body -match "new-handoff\.ps1") "should still write a handoff"
@@ -135,7 +162,9 @@ try {
         foreach ($case in @(@{ Name = "approved"; Args = @{ Approved = @("C-350") } }, @{ Name = "deferred"; Args = @{ Deferred = @("C-350") } })) {
             $p = New-GateProject -Root (Join-Path $tempRoot ("status-" + $case.Name))
             $gateArgs = $case.Args
+            $global:LASTEXITCODE = 0
             & $SCRIPT -TaskId $p.TaskId -Reason "ok" -ProjectRoot $p.Root @gateArgs | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
             $body = Get-Content -LiteralPath $p.GateFiling -Raw
             $sentences = @(($body -replace "\s+", " ") -split "(?<=[.:;])\s+")
             foreach ($status in $terminal) {
@@ -148,7 +177,9 @@ try {
 
     $results += Run-Test -Name "generated gate-filing.md is ASCII and BOM-free" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "encoding")
+        $global:LASTEXITCODE = 0
         & $SCRIPT -TaskId $p.TaskId -Reason "clean" -Approved "C-350" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
         $bytes = [System.IO.File]::ReadAllBytes($p.GateFiling)
         $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
         Assert-Result "no BOM" (-not $hasBom) "gate-filing.md must be BOM-free"
@@ -169,24 +200,122 @@ try {
         Assert-Result "no dollar sign" ($body -notmatch '\$') ("gate-filing.md holds an unexpanded variable: " + $body)
         Assert-Result "names the findings artifact" ($body -match '`\.crucible/research/R-021_Quality_Audit_20260715\.md`') "gate-filing.md should name the findings artifact in backticks"
         Assert-Result "names the backlog path" ($body.Contains('`' + (Join-Path $p.Root '.crucible/backlog') + '/{bugs,chores,features}/active/`')) "gate-filing.md should name the backlog directory in backticks"
-        Assert-Result "handoff IDs singly quoted" ($body -match '-HumanApproved "C-350","C-351"') "handoff command should quote each ID once"
+        Assert-Result "handoff IDs singly quoted" ($body -match "-HumanApproved 'C-350','C-351'") "handoff command should quote each ID once"
         Assert-Result "no suspicious-content sentinel" ($body -notmatch 'SuspiciousContent') "the handoff command must not pass -SuspiciousContent"
         Assert-Result "stubs filed as Stub" ($body -match 'status: "Stub"' -and $body -notmatch 'status: "Ready"') "stubs must be filed with status Stub for the Stub-Only Close-Out"
     }
 
+    $launcherCases = @{ WindowsPowerShell = 0 }
+    $stepLineCount = 3
+    $legacy = if (Test-PlatformIsWindows) { Get-Command powershell.exe -ErrorAction SilentlyContinue } else { $null }
+    # Item 291: Steps 3 and 4 are run by the Researcher in whichever shell it has; Codex's is
+    # often Bash, where the direct & '<script>' form is a syntax error. Inert copies of the
+    # real param blocks write what they bound, so no handoff, backlog or agent CLI runs.
+    $results += Run-Test -Name "gate-filing Steps 3 and 4 run unchanged under Bash, pwsh and a Windows PowerShell launcher" -Body {
+        $utf8 = New-Object System.Text.UTF8Encoding($false)
+        $p = New-GateProject -Root (Join-Path $tempRoot "gate O'Brien `$HOME")
+        $bundle = Join-Path $p.Root ".crucible/powershell"
+        $null = New-Item -ItemType Directory -Path $bundle -Force
+        $capture = @'
+
+$captured = @(foreach ($name in @($PSBoundParameters.Keys | Sort-Object)) {
+    $value = $PSBoundParameters[$name]
+    if ($value -is [array]) { $name + "=[" + (@($value) -join "|") + "]#" + @($value).Count } else { $name + "=" + $value }
+})
+$captured += ("host7plus=" + ($PSVersionTable.PSVersion.Major -ge 7))
+[IO.File]::WriteAllText((Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) ("capture-" + (Split-Path -Leaf $PSCommandPath) + ".txt")), ($captured -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+'@
+        foreach ($name in @("new-handoff.ps1", "validate-backlog.ps1", "crucible.ps1")) {
+            $tokens = $null; $errors = $null
+            $declaring = if ($name -eq "new-handoff.ps1") { "powershell/lib/new-handoff-core.ps1" } else { "powershell/" + $name }
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $REPO_ROOT $declaring), [ref]$tokens, [ref]$errors)
+            [IO.File]::WriteAllText((Join-Path $bundle $name), ($ast.ParamBlock.Extent.Text + $capture), $utf8)
+        }
+        $reason = 'Approve C-350; costs $5 and it''s "cheap" `tick \\share' + [char]0x2019 + 's'
+        $global:LASTEXITCODE = 0
+        & $SCRIPT -TaskId $p.TaskId -Reason $reason -Approved "C-350","C-351" -Deferred "C-352,C-353" -Rejected "C-999" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
+        $body = [IO.File]::ReadAllText($p.GateFiling)
+        $steps = $body.Substring($body.IndexOf("## Step 3"))
+        $lines = @($steps -split "`n" | Where-Object { $_ -match '^    \S' -and $_ -notmatch '^    #' } | ForEach-Object { $_.Substring(4) })
+        Assert-Result "$stepLineCount executable lines in Steps 3 and 4" ($lines.Count -eq $stepLineCount) ($lines -join "`n")
+
+        $expected = @(
+            ("capture-new-handoff.ps1.txt", (@("HumanApproved=[C-350|C-351]#2", "HumanDeferred=[C-352|C-353]#2", "HumanRejected=[C-999]#1", ("Reason=" + $reason), "Source=research", "StubSpecsCreated=[C-350|C-351]#2", "Target=grooming", ("TaskId=" + $p.TaskId), "host7plus=True") -join "`n")),
+            ("capture-validate-backlog.ps1.txt", (@(("ProjectRoot=" + $p.Root), "host7plus=True") -join "`n")),
+            ("capture-crucible.ps1.txt", (@("Init=True", ("ProjectRoot=" + $p.Root), "Quiet=True", ("TaskId=" + $p.TaskId), "host7plus=True") -join "`n"))
+        )
+        $bash = Get-TestBash
+        $cdBash = "cd -- '" + $p.Root.Replace("'", "'\''") + "' || exit 9"
+        $cdPs = "Set-Location -LiteralPath '" + $p.Root.Replace("'", "''") + "'"
+        for ($i = 0; $i -lt $stepLineCount; $i++) {
+            $shells = @(
+                @{ Name = "Bash"; Ext = "sh"; Text = ($cdBash + "`n" + $lines[$i] + "`n"); Bom = $false },
+                @{ Name = "pwsh"; Ext = "ps1"; Text = ($cdPs + "`n" + $lines[$i] + "`n"); Bom = $false }
+            )
+            if ($null -ne $legacy) { $shells += @{ Name = "Windows PowerShell"; Ext = "ps1"; Text = ($cdPs + "`n" + $lines[$i] + "`n"); Bom = $true } }
+            foreach ($shell in $shells) {
+                $capturePath = Join-Path $p.Root $expected[$i][0]
+                if (Test-Path -LiteralPath $capturePath) { Remove-Item -LiteralPath $capturePath -Force }
+                $driver = Join-Path $tempRoot ("step-line-" + $i + "." + $shell.Ext)
+                [IO.File]::WriteAllText($driver, $shell.Text, (New-Object System.Text.UTF8Encoding($shell.Bom)))
+                $run = switch ($shell.Name) {
+                    "Bash" { Invoke-ExternalCommand { & $bash $driver } }
+                    "pwsh" { Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $driver } }
+                    default { Invoke-ExternalCommand { & $legacy.Source -NoProfile -ExecutionPolicy Bypass -File $driver } }
+                }
+                $actual = if (Test-Path -LiteralPath $capturePath) { [IO.File]::ReadAllText($capturePath) } else { "(nothing captured)" }
+                $want = $utf8.GetBytes($expected[$i][1])
+                Assert-Result ($shell.Name + " runs line " + ($i + 1) + " and delivers every value byte for byte") ($run.ExitCode -eq 0 -and (Test-Path -LiteralPath $capturePath) -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($capturePath)) -ceq [Convert]::ToBase64String($want)) ($lines[$i] + "`n=> exit " + $run.ExitCode + ": " + $run.Output + "`ncaptured: " + $actual)
+                if ($shell.Name -eq "Windows PowerShell") { $launcherCases.WindowsPowerShell++ }
+            }
+        }
+
+        foreach ($line in $lines) {
+            Assert-Result "each line starts pwsh rather than the agent shell's own host" ($line.StartsWith("pwsh -NoProfile -ExecutionPolicy Bypass -File ")) $line
+        }
+        $runnerPath = Join-Path (Split-Path -Parent $p.GateFiling) "gate-handoff.ps1"
+        $runner = @([IO.File]::ReadAllText($runnerPath) -split "`n")
+        Assert-Result "the reading copy is the command the runner holds" ($steps.Contains("    # " + $runner[2] + "`n")) ($runner -join "`n")
+
+        # A refused handoff stops the Researcher before Step 4.
+        [IO.File]::WriteAllText((Join-Path $bundle "new-handoff.ps1"), ((Get-Content -LiteralPath (Join-Path $bundle "new-handoff.ps1") -Raw) + "`nexit 2`n"), $utf8)
+        $driver = Join-Path $tempRoot "step-refused.sh"
+        [IO.File]::WriteAllText($driver, ($cdBash + "`n" + $lines[0] + "`n"), $utf8)
+        $run = Invoke-ExternalCommand { & $bash $driver }
+        Assert-Result "the runner exits with new-handoff's refusal code" ($run.ExitCode -eq 2) ("exit " + $run.ExitCode + ": " + $run.Output)
+    }
+
+    $results += Run-Test -Name 'Windows PowerShell launcher coverage matches the platform' -Body {
+        $expectedCases = if (Test-PlatformIsWindows) { $stepLineCount } else { 0 }
+        $probeResult = if ($null -eq $legacy) { 'not found ($null)' } else { $legacy.Source }
+        Assert-Result 'every Windows launcher case executes on Windows only' ($launcherCases.WindowsPowerShell -eq $expectedCases) ("Expected $expectedCases Windows PowerShell launcher cases, executed $($launcherCases.WindowsPowerShell); powershell.exe probe: $probeResult")
+        if (-not (Test-PlatformIsWindows)) {
+            Skip-Test -Reason 'Windows PowerShell launcher checks require Windows; the powershell.exe probe is disabled on this platform.'
+        }
+    }
+
+    $results += Run-Test -Name "a handoff command the builder cannot write leaves a runner that exits nonzero" -Body {
+        $p = New-GateProject -Root (Join-Path $tempRoot "unavailable-handoff")
+        $global:LASTEXITCODE = 0
+        & $SCRIPT -TaskId $p.TaskId -Reason "line one`nline two" -Approved "C-350" -ProjectRoot $p.Root | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Research gate fixture refused (exit $LASTEXITCODE)." }
+        $runnerPath = Join-Path (Split-Path -Parent $p.GateFiling) "gate-handoff.ps1"
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runnerPath }
+        Assert-Result "unavailable handoff runner exits 2 and says why" ($run.ExitCode -eq 2 -and $run.Output -match 'command unavailable' -and $run.Output -match 'newline') ("exit " + $run.ExitCode + ": " + $run.Output)
+    }
+
     $results += Run-Test -Name "a value that is not a backlog ID is refused (item 174)" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "bad-id")
-        $threw = $false
-        try { & $SCRIPT -TaskId $p.TaskId -Reason "x" -Approved "C-350","B034" -ProjectRoot $p.Root 2>$null } catch { $threw = ($_.Exception.Message -match "'B034' is not a backlog item ID") }
-        Assert-Result "refuses B034" $threw "expected a refusal naming B034"
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $SCRIPT -TaskId $p.TaskId -Reason x -Approved 'C-350,B034' -ProjectRoot $p.Root 2>&1 }
+        Assert-Result "refuses B034" ($run.ExitCode -ne 0 -and $run.Output -match "'B034' is not a backlog item ID") $run.Output
         Assert-Result "writes no gate-filing" (-not (Test-Path -LiteralPath $p.GateFiling)) "a refused gate must not write gate-filing.md"
     }
 
     $results += Run-Test -Name "empty decision is refused" -Body {
         $p = New-GateProject -Root (Join-Path $tempRoot "empty")
-        $threw = $false
-        try { & $SCRIPT -TaskId $p.TaskId -Reason "x" -ProjectRoot $p.Root 2>$null } catch { $threw = $true }
-        Assert-Result "throws on empty decision" $threw "expected an error when no items are approved/deferred/rejected"
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $SCRIPT -TaskId $p.TaskId -Reason x -ProjectRoot $p.Root 2>&1 }
+        Assert-Result "exits on empty decision" ($run.ExitCode -ne 0 -and $run.Output -match 'decision cannot be empty') $run.Output
     }
 
     $results += Run-Test -Name "missing research session directory is refused" -Body {
@@ -194,9 +323,8 @@ try {
         $crucible = Join-Path $root ".crucible"
         New-Item -ItemType Directory -Path (Join-Path $crucible "backlog") -Force | Out-Null
         "paths:`n  backlog: `".crucible/backlog`"`n  session: `".crucible/session`"" | Set-Content -LiteralPath (Join-Path $crucible "config.yaml") -Encoding UTF8
-        $threw = $false
-        try { & $SCRIPT -TaskId "R-099" -Reason "x" -Approved "C-1" -ProjectRoot $root 2>$null } catch { $threw = $true }
-        Assert-Result "throws without research session" $threw "expected an error when the research session dir is absent"
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $SCRIPT -TaskId R-099 -Reason x -Approved C-1 -ProjectRoot $root 2>&1 }
+        Assert-Result "exits without research session" ($run.ExitCode -ne 0 -and $run.Output -match 'No research session directory') $run.Output
     }
 
 } finally {
@@ -205,10 +333,4 @@ try {
     }
 }
 
-$failures = @($results | Where-Object { -not $_ }).Count
-if ($failures -gt 0) {
-    Write-Host ("`n{0} test(s) failed." -f $failures) -ForegroundColor Red
-    exit 1
-}
-Write-Host "`nALL TESTS PASSED" -ForegroundColor Green
-exit 0
+Write-TestFileSummary -Results $results

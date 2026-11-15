@@ -52,6 +52,8 @@ Triggered by hand, not by Crucible. Paste the trigger from [registry.md](registr
 
 ---
 
+[specialist-workspace.md](specialist-workspace.md) owns shared file-tool and write-path mechanics; role SOPs link it before their procedures.
+
 ## Anatomy of a phase
 
 Each pipeline phase is described by up to four files, by concern. When you edit, change
@@ -60,6 +62,6 @@ the one that matches your intent:
 - **Persona** (`../personas/<role>.md`) - WHO the agent is: mandate, voice, boundaries.
 - **SOP** (`sops/<phase>.md`) - HOW the phase runs: the procedure and its gates.
 - **Prompt** (`../prompts/<phase>_prompt.md`) - the runtime template `crucible.ps1`
-  assembles and hands to the specialist. Edit here to change what the agent actually receives.
+  assembles and hands to the specialist: task facts and mandatory SOP links. Workflow edits belong in the SOP, not in the prompt or a generated agent brief.
 - **Reference** (`../docs/<phase>-reference.md`, where present) - human-readable
   explanation; not loaded at runtime.

@@ -186,6 +186,58 @@ exit 0
     }
 }
 
+# Bind switches in the target so losing a colon value cannot pass as token parity.
+foreach ($case in @(
+    @{ Name = 'colon-bound switch'; Call = '& $shim -ProjectRoot $root -Quiet:$true'; Expected = 'Quiet=True;Init=True' },
+    @{ Name = 'hashtable-splatted switch'; Call = '$splat = @{ Quiet = $true; Init = $false }; & $shim -ProjectRoot $root @splat'; Expected = 'Quiet=True;Init=False' },
+    @{ Name = 'pwsh -File colon switch'; Call = ''; Expected = 'Quiet=False;Init=False' },
+    @{ Name = 'duplicate parameter'; Call = '$splat = @{ Quiet = $true }; & $shim -ProjectRoot $root @splat -Q:$false'; Expected = '' }
+)) {
+    $results += Run-Test -Name ("switch forwarding: " + $case.Name) -Body {
+        $fixture = New-ShimFixture
+        try {
+            $target = @'
+[CmdletBinding()]
+param([string]$ProjectRoot, [switch]$Quiet, [switch]$Init = $true)
+[Console]::Out.WriteLine("Quiet=$Quiet;Init=$Init")
+exit 0
+'@
+            [IO.File]::WriteAllText((Join-Path $fixture 'powershell/crucible.ps1'), $target)
+            if ($case.Name -eq 'pwsh -File colon switch') {
+                $r = Invoke-Shim -FixtureRoot $fixture -ArgumentTail '-Init:$false'
+            } else {
+                $caller = Join-Path $fixture 'caller.ps1'
+                $text = @'
+param([string]$root)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$shim = Join-Path $root 'powershell/factory.ps1'
+try {
+    CALL
+    Write-Host ('CALLER_LASTEXITCODE=' + $LASTEXITCODE)
+} catch {
+    Write-Host ('CALLER_CAUGHT: ' + $_.Exception.Message)
+    exit 0
+}
+exit $LASTEXITCODE
+'@.Replace('    CALL', ('    ' + $case.Call))
+                [IO.File]::WriteAllText($caller, $text)
+                $stderr = Join-Path $fixture 'stderr.txt'
+                $res = Invoke-ExternalCommand { & $shell -NoProfile -File $caller -root $fixture 2>$stderr }
+                $r = @{ ExitCode = $res.ExitCode; StdOut = (@($res.Output) -join "`n"); StdErr = [IO.File]::ReadAllText($stderr) }
+            }
+            $evidence = "exit=$($r.ExitCode)`n$($r.StdOut)`n$($r.StdErr)"
+            if ($case.Name -eq 'duplicate parameter') {
+                Assert-Result 'duplicate refuses before target execution' ($r.ExitCode -eq 1 -and $r.StdOut -notmatch 'Quiet=|CALLER_CAUGHT' -and $r.StdErr -match "Quiet.*specified more than once") $evidence
+            } else {
+                Assert-Result 'switch values reach crucible.ps1' ($r.ExitCode -eq 0 -and $r.StdOut.Contains($case.Expected)) $evidence
+            }
+        } finally {
+            Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 if ($results -contains $false) {
     exit 1
 } else {

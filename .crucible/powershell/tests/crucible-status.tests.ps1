@@ -81,6 +81,21 @@ $tempRoot = New-TestFixtureRoot -NameHint "crucible-status-test"
 $projectRoot = Join-Path $tempRoot "project"
 
 try {
+    $results += Run-Test -Name "Item255 status reads indented dependencies through the shared owner" -Body {
+        $root = Join-Path $tempRoot "item255-deps"
+        Write-StatusFixture -ProjectRoot $root
+        $active = Join-Path $root ".crucible/backlog/features/active"
+        New-Item -ItemType Directory -Force -Path $active | Out-Null
+        Set-Content -LiteralPath (Join-Path $active "F-001.md") -Value "---`n  depends_on: [F-002, F-003]`n---" -Encoding UTF8
+        Push-Location $root
+        try {
+            $r = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $STATUS_SCRIPT -ExportJSON }
+        } finally { Pop-Location }
+        $report = ($r.Output -join "`n") | ConvertFrom-Json
+        $task = @($report.tasks | Where-Object Task -eq "F-001")[0]
+        Assert-Result "indented deps shown" ($task.Dependencies -eq "F-002, F-003") ($r.Output -join "`n")
+    }
+
     Write-StatusFixture -ProjectRoot $projectRoot
     New-Item -ItemType Directory -Force -Path (Join-Path $projectRoot '.crucible/backlog/features/active') | Out-Null
     [IO.File]::WriteAllText((Join-Path $projectRoot '.crucible/backlog/features/active/F-001.md'), "---`ndepends_on: [F-002]`n---`n", [Text.UTF8Encoding]::new($false))

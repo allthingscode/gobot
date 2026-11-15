@@ -6,16 +6,23 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
+. (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 
 # Anchor paths to the project root (where .crucible/ lives).
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $REPO_ROOT = (Get-Location).Path
+    $REPO_ROOT = Resolve-ConfigProjectRoot
 } else {
     if (-not (Test-Path -LiteralPath $ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red
         exit 1
     }
-    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $REPO_ROOT = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 }
 $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
 if (-not (Test-Path -LiteralPath $crucibleLibPath)) {
@@ -108,18 +115,13 @@ function Get-VerificationTools {
 
     $shells = @("pwsh", "powershell", "powershell.exe", "cmd", "cmd.exe", "sh", "bash")
     $tools = New-Object System.Collections.Generic.List[string]
-    foreach ($m in [regex]::Matches($ConfigText, '(?m)^\s*command:\s*(.+?)\s*$')) {
-        $cmd = $m.Groups[1].Value.Trim()
-        if ($cmd.Length -ge 2) {
-            if (($cmd.StartsWith('"') -and $cmd.EndsWith('"')) -or ($cmd.StartsWith("'") -and $cmd.EndsWith("'"))) {
-                $cmd = $cmd.Substring(1, $cmd.Length - 2).Trim()
-            }
-        }
+    # The runner's own reader, so a folded command names its tool and a command: key
+    # outside the checks block names none. Item 245.
+    $checks = @(Get-VerificationChecks -Content $ConfigText -Mode quick) + @(Get-VerificationChecks -Content $ConfigText -Mode full)
+    foreach ($check in $checks) {
+        $cmd = ([string]$check.Command).Trim()
         if ([string]::IsNullOrWhiteSpace($cmd)) { continue }
         if ($cmd -match 'replace-with|REPLACE_WITH') { continue }
-        # YAML block-scalar indicator (command: >- / |- etc.); the real command
-        # is on the following indented lines, not this one. Skip it.
-        if ($cmd -match '^[>|][+-]?[0-9]*$') { continue }
         $first = ($cmd -split '\s+')[0]
         if ([string]::IsNullOrWhiteSpace($first)) { continue }
         # Manual leaf extraction: [IO.Path]::GetFileName throws on illegal path
@@ -278,28 +280,39 @@ if ($frameworkMode) {
         $configText = ""
     }
 
-    $crucibleRootValue = ""
-    if ($configText -match '(?m)^crucible_root:\s*["'']?([^"''\r\n]+)["'']?\s*$') {
-        $crucibleRootValue = $matches[1].Trim()
-    }
+    $crucibleRootValue = $null
+    $configParseError = ""
+    try { $crucibleRootValue = Get-ConfiguredCrucibleRootValue -ProjectRoot $REPO_ROOT -NoDefault } catch { $configParseError = $_.Exception.Message }
     if ([string]::IsNullOrWhiteSpace($configText)) {
         Add-DoctorResult -Check "config.parse" -Status "fail" -Severity "critical" `
             -Details ("Found .crucible/config.yaml but could not read it: " + $adopterConfigPath) `
             -Remediation "Ensure .crucible/config.yaml is readable UTF-8."
+    } elseif ($configParseError) {
+        Add-DoctorResult -Check "config.parse" -Status "fail" -Severity "critical" `
+            -Details $configParseError -Remediation "Correct the crucible_root value in config.yaml."
     } elseif ([string]::IsNullOrWhiteSpace($crucibleRootValue)) {
         Add-DoctorResult -Check "config.parse" -Status "fail" -Severity "critical" `
             -Details "config.yaml is present but has no 'crucible_root:' key." `
-            -Remediation "Add 'crucible_root: \".crucible\"' (or your bundle path) to config.yaml."
+            -Remediation 'Add ''crucible_root: ".crucible"'' (or your bundle path) to config.yaml.'
     } else {
         Add-DoctorResult -Check "config.parse" -Status "pass" -Severity "critical" `
             -Details ("config.yaml parsed; crucible_root = '" + $crucibleRootValue + "'.")
     }
 
+    # Advisory, like validate-config.ps1: an uncommitted edit is the normal state between
+    # editing and committing, and run-isolated-checks.ps1 refuses it at run time. Item 254.
+    $configCommit = Get-ConfigCommitState -ProjectRoot $REPO_ROOT
+    if ($configCommit.Status -eq "committed") {
+        Add-DoctorResult -Check "config.committed" -Status "pass" -Severity "advisory" `
+            -Details ".crucible/config.yaml matches HEAD, so the configured checks run from the committed file."
+    } else {
+        Add-DoctorResult -Check "config.committed" -Status "warn" -Severity "advisory" `
+            -Details ($configCommit.Detail + " run-isolated-checks.ps1 refuses to run the checks until it is committed.") `
+            -Remediation $configCommit.Remedy
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($crucibleRootValue)) {
-        $resolvedBundle = $crucibleRootValue
-        if (-not [System.IO.Path]::IsPathRooted($resolvedBundle)) {
-            $resolvedBundle = Join-Path $REPO_ROOT $crucibleRootValue
-        }
+        $resolvedBundle = Resolve-CrucibleBundleRoot -ProjectRoot $REPO_ROOT -CrucibleRoot $crucibleRootValue
         if (Test-Path -LiteralPath $resolvedBundle -PathType Container) {
             Add-DoctorResult -Check "bundle.root" -Status "pass" -Severity "critical" `
                 -Details ("Bundle directory exists at " + $resolvedBundle + ".")
@@ -387,10 +400,7 @@ if ($frameworkMode) {
             $hooksRel = $gitHooks.Output.Trim()
         }
     }
-    $adopterHook = $hooksRel
-    if (-not [System.IO.Path]::IsPathRooted($adopterHook)) {
-        $adopterHook = Join-Path $REPO_ROOT $hooksRel
-    }
+    $adopterHook = Resolve-PathFromRoot -Root $REPO_ROOT -Path $hooksRel
     $adopterHook = Join-Path $adopterHook "pre-commit"
     if (-not (Test-Path -LiteralPath $adopterHook)) {
         Add-DoctorResult -Check "hooks.pre-commit" -Status "warn" -Severity "advisory" `
@@ -449,10 +459,12 @@ if ($frameworkMode) {
             }
         }
         if ($frameworkSource) {
-            $gitMainResult = git -C $frameworkSource rev-parse --verify --quiet main
+            $frameworkSource = Resolve-FilesystemPath -Path $frameworkSource
+            $frameworkBranch = Get-ConfiguredPrimaryBranch -ProjectRoot $frameworkSource
+            $gitMainResult = git -C (Resolve-FilesystemPath -Path $frameworkSource) rev-parse --verify --quiet $frameworkBranch
             $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitMainResult) { ($gitMainResult | Out-String).Trim() } else { "" }
             if (-not ($frameworkHead -match '^[0-9a-f]{40}$')) {
-                $gitHeadResult = git -C $frameworkSource rev-parse HEAD 2>$null
+                $gitHeadResult = git -C (Resolve-FilesystemPath -Path $frameworkSource) rev-parse HEAD 2>$null
                 $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitHeadResult) { ($gitHeadResult | Out-String).Trim() } else { "" }
             }
             if ($frameworkHead -match '^[0-9a-f]{40}$') {
@@ -460,11 +472,11 @@ if ($frameworkMode) {
                     Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
                         -Details ("Bundle is up-to-date with framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")
                 } else {
-                    $null = git -C $frameworkSource merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
+                    $null = git -C (Resolve-FilesystemPath -Path $frameworkSource) merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
                     if ($LASTEXITCODE -eq 0) {
                         Add-DoctorResult -Check "bundle.staleness" -Status "warn" -Severity "advisory" `
                             -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") lags framework HEAD (" + $frameworkHead.Substring(0, 7) + ").") `
-                            -Remediation ("Run 'update-bundle.ps1 -FrameworkSource " + $frameworkSource + "' to bring it current.")
+                            -Remediation ("Run " + (New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Transport PowerShell -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource) + " to bring it current.")
                     } else {
                         Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
                             -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") is not stale relative to framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")
@@ -489,7 +501,7 @@ if (-not $codexCmd) {
         -Remediation "Install the Codex CLI and run 'codex login' only if you use Codex as a pipeline specialist."
 } else {
     Add-DoctorResult -Check "codex.cli" -Status "pass" -Severity "advisory" `
-        -Details ("Found codex at " + $codexCmd.Source + "; verify the runtime with 'launch-codex-specialist.ps1 -Preflight -Model <codex-model>' before dispatching.")
+        -Details ("Found codex at " + $codexCmd.Source + "; verify the runtime with '" + (New-CrucibleCommand -Script "powershell/launch-codex-specialist.ps1" -Parameters ([ordered]@{ Preflight = $true; Model = "<codex-model>" }) -Reference) + "' before dispatching.")
 }
 
 # Check (adopter, advisory): the generated Claude agent definitions match the configured
@@ -511,7 +523,7 @@ if ($adopterMode) {
             $driftText = ($agentDrift | ForEach-Object { $_.Name + " (" + $_.Status + ")" }) -join ", "
             Add-DoctorResult -Check "claude.agents" -Status "warn" -Severity "advisory" `
                 -Details ("Claude agent definitions drifted from config.yaml: " + $driftText + ".") `
-                -Remediation ("Run: pwsh -File " + $script:CLAUDE_AGENT_REGENERATE)
+                -Remediation ("Run: " + (Get-ClaudeAgentRegenerateCommand -ProjectRoot $REPO_ROOT))
         }
     } catch {
         Add-DoctorResult -Check "claude.agents" -Status "warn" -Severity "advisory" `
@@ -601,4 +613,5 @@ if ($exitCode -eq 0) {
 }
 
 Pop-Location
-exit $exitCode
+if ($exitCode -ne 0) { exit $exitCode }
+exit 0

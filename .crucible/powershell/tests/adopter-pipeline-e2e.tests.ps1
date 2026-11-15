@@ -71,6 +71,11 @@ function New-AdopterProject {
     $cfg = $cfg.Replace("replace-with-project-full-test-command", "echo full")
     $cfg = $cfg.Replace("Replace with project-specific engineering rules.", "Rules updated.")
     $cfg | Out-File -LiteralPath $configPath -Encoding UTF8
+    # The checks runner refuses an uncommitted config.yaml (item 254), so commit it with the
+    # bundle as docs/git-policy.md says an adopter does. Committing the config alone splits
+    # the untracked .crucible/ entry into the bundle files the integrity breaker reports.
+    git -C $projectRoot add .crucible
+    git -C $projectRoot commit -m "commit the Crucible bundle and checks" --quiet
 
     # Active spec for the task (present so the router can resolve it).
     $specPath = Join-Path $projectRoot (".crucible/backlog/features/active/" + $TaskId + "_" + $slug + ".md")
@@ -168,7 +173,7 @@ function New-DeploymentGateFixture {
 
     Push-Location $projectRoot
     try {
-        $head = (git rev-parse HEAD).Trim()
+        $head = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
         $hCmd = Invoke-ExternalCommand {
             & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $NEWHANDOFF_SCRIPT `
                 -TaskId "F-900" -Source "deployment" -Target "done" `
@@ -250,7 +255,7 @@ try {
         $env:CRUCIBLE_CYCLE_ID = $cycle
         $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "t-nh-derive") -Cycle $cycle
         $bundleNewHandoff = Join-Path $projectRoot ".crucible/powershell/new-handoff.ps1"
-        $head = (git -C $projectRoot rev-parse HEAD).Trim()
+        $head = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim()
 
         # cwd is deliberately an UNRELATED directory with no .crucible/. If root fell back to
         # cwd, new-handoff would throw the invalid-project error and exit non-zero.
@@ -335,7 +340,7 @@ try {
         $cycle = "cycle-e2e-reason"
         $env:CRUCIBLE_CYCLE_ID = $cycle
         $projectRoot = New-DeploymentGateFixture -Root (Join-Path $tempRoot "reason") -Cycle $cycle
-        $baseSha = (git -C $projectRoot rev-parse HEAD).Trim()
+        $baseSha = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim()
         git -C $projectRoot branch task/F-900
         $gateDir = Join-Path $projectRoot ".crucible/session/global/gate_decisions"
         New-Item -ItemType Directory -Path $gateDir -Force | Out-Null
@@ -368,7 +373,7 @@ try {
                 git -C $projectRoot show-ref --verify --quiet refs/heads/task/F-900
                 Assert-Result -Name "$entryPath leaves task branch intact" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "task branch removed"
                 Assert-Result -Name "$entryPath leaves primary branch intact" `
-                    -Condition ((git -C $projectRoot rev-parse master).Trim() -eq $baseSha -and $text -notmatch '\[MERGE\]') `
+                    -Condition ((Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse master }).Trim() -eq $baseSha -and $text -notmatch '\[MERGE\]') `
                     -FailureMessage "refused decision attempted a merge"
             }
         }
@@ -447,6 +452,11 @@ try {
         $configPath = Join-Path $projectRoot ".crucible/config.yaml"
         $cfg = (Get-Content $configPath -Raw) + "`npaths:`n  session: .crucible/custom session`n"
         [System.IO.File]::WriteAllText($configPath, $cfg, [System.Text.UTF8Encoding]::new($false))
+        # Runtime paths belong to the adopter, as in the custom-paths test below; the checks
+        # runner reads only a committed config.yaml (item 254).
+        [System.IO.File]::AppendAllText((Join-Path $projectRoot ".gitignore"), "`n/.crucible/custom session/`n", [System.Text.UTF8Encoding]::new($false))
+        git -C $projectRoot add .gitignore .crucible/config.yaml
+        git -C $projectRoot commit -m "configure the session path" --quiet
         $session = Join-Path $projectRoot ".crucible/custom session"
         Move-Item -LiteralPath (Join-Path $projectRoot ".crucible/session") -Destination $session
         New-Item -ItemType Directory -Path (Join-Path $session "F-900") -Force | Out-Null
@@ -511,7 +521,7 @@ try {
             }
         }
         Complete-PhaseChecklist -ProjectRoot $projectRoot -TaskId $task -Phase "deployment"
-        $head = (git -C $projectRoot rev-parse HEAD).Trim()
+        $head = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim()
         Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source "deployment" -Target "done" -Cycle $cycle -Count 4 -Extra @{ commit_hash = $head; artifacts = $artifacts } | Out-Null
         $accept = Invoke-ExternalCommand {
             & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet -GateOutcome accepted -GateReason "checked custom paths and accepted work"
@@ -541,7 +551,7 @@ try {
 
         git -C $projectRoot rev-parse --verify --quiet "refs/heads/task/$task" *> $null
         Assert-Result -Name "task branch created" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "expected -Init to create task/$task"
-        $wt = @(git -C $projectRoot worktree list --porcelain | Where-Object { $_ -like "worktree *" } | ForEach-Object { $_.Substring(9) } | Where-Object { $_ -match [regex]::Escape($task) })
+        $wt = @(Invoke-ExternalCommand -AsLines { git -C $projectRoot worktree list --porcelain } | Where-Object { $_ -like "worktree *" } | ForEach-Object { $_.Substring(9) } | Where-Object { $_ -match [regex]::Escape($task) })
         Assert-Result -Name "task worktree created" -Condition ($wt.Count -eq 1) -FailureMessage ("expected one worktree for " + $task + ", got: " + ($wt -join ", "))
         Remove-Item -LiteralPath $wt[0] -Recurse -Force
 

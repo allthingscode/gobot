@@ -50,8 +50,8 @@ function Register-TaskId {
     if (Test-Path -LiteralPath $backlogFile) {
         $content = Get-Content -LiteralPath $backlogFile -Raw -Encoding UTF8
     }
-    if ($content -notmatch [regex]::Escape($TaskId)) {
-        $content += "`n- $TaskId"
+    if ($content -notmatch ('(?m)^\|\s*' + [regex]::Escape($TaskId) + '\s*\|')) {
+        $content += "`n| $TaskId | Ready | Test |"
         $content | Set-Content -LiteralPath $backlogFile -Encoding UTF8
     }
 }
@@ -61,17 +61,24 @@ function Invoke-Generator {
     if ($InputArgs.ContainsKey("TaskId") -and -not $NoRegister) {
         Register-TaskId $InputArgs.TaskId
     }
+    $savedError = [Console]::Error
+    $diagnostics = [IO.StringWriter]::new()
     try {
-        $output = & $generator @InputArgs 2>&1
+        [Console]::SetError($diagnostics)
+        $global:LASTEXITCODE = 0
+        $output = Invoke-ExternalCommand -AsLines { & $generator @InputArgs 2>&1 }
         return @{
-            ExitCode = 0
-            Output   = ($output -join "`n")
+            ExitCode = $global:LASTEXITCODE
+            Output   = ($output -join "`n") + $diagnostics.ToString()
         }
     } catch {
         return @{
             ExitCode = 1
             Output   = $_.Exception.Message
         }
+    } finally {
+        [Console]::SetError($savedError)
+        $diagnostics.Dispose()
     }
 }
 
@@ -481,7 +488,7 @@ budget_tier: "low"
         if ($null -eq $obj.stub_specs_created -or $obj.stub_specs_created.Count -eq 0 -or $obj.stub_specs_created[0] -ne "backlog/features/active/F-001_Stub.md") {
             throw "Expected stub_specs_created to contain mock spec, got: $($obj.stub_specs_created)"
         }
-        $validationResult = & "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $path -SchemaPath $schemaPath 2>&1
+        $validationResult = Invoke-ExternalCommand -AsLines { & "$REPO_ROOT/powershell/validate-handoff.ps1" -HandoffFile $path -SchemaPath $schemaPath 2>&1 }
         $validationJson = $validationResult | Where-Object { $_ -match '^\{' } | Select-Object -First 1
         if (-not $validationJson) { throw "Validator produced no JSON output" }
         $validated = $validationJson | ConvertFrom-Json
@@ -680,6 +687,50 @@ budget_tier: "low"
         }
         if ((ConvertTo-NormalizedOutput $result.Output) -notmatch "not found in the bundle") {
             throw "Expected backlog search failure message, got: $($result.Output)"
+        }
+    }
+
+    Invoke-Test -Name "fails when TaskId is only a prefix of another BACKLOG.md row" -Script {
+        $taskId = New-TestTaskId "PREFIX-ONLY"
+        Register-TaskId ($taskId + "0")
+        $result = Invoke-Generator -InputArgs @{
+            TaskId = $taskId
+            Source = "grooming"
+            Target = "implementation"
+            Reason = "only a look-alike row exists"
+            SchemaPath = $schemaPath
+        } -NoRegister
+        if ($result.ExitCode -eq 0) {
+            throw "Expected refusal for an ID that is only a prefix of another row, but succeeded"
+        }
+        if ((ConvertTo-NormalizedOutput $result.Output) -notmatch ("no exact row for " + (ConvertTo-NormalizedOutput $taskId) + " A row must start with")) {
+            throw "Expected the missing exact row and remedy, got: $($result.Output)"
+        }
+    }
+
+    Invoke-Test -Name "missing exact row refuses with exit 2, not a catchable throw" -Script {
+        $taskId = New-TestTaskId "EXIT-TWO"
+        Register-TaskId ($taskId + "0")
+        $script = Join-Path $tempRoot "exit-two-runner.ps1"
+        @(
+            "param(`$Generator, `$TaskId, `$SchemaPath, `$Root)",
+            "`$ErrorActionPreference = 'Stop'",
+            "try {",
+            "    `$global:LASTEXITCODE = 0",
+            "    & `$Generator -TaskId `$TaskId -Source grooming -Target implementation -Reason x -SchemaPath `$SchemaPath -ProjectRoot `$Root 2>&1 | Out-Null",
+            "    Write-Output ('CALLER_LASTEXIT=' + `$LASTEXITCODE)",
+            "} catch { Write-Output ('CALLER_CAUGHT=' + `$_.Exception.Message) }"
+        ) | Set-Content -LiteralPath $script -Encoding UTF8
+        $inProc = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -File $script $generator $taskId $schemaPath $tempRoot 2>&1 }
+        $text = $inProc -join "`n"
+        if ($text -match "CALLER_CAUGHT" -or $text -notmatch "CALLER_LASTEXIT=2") {
+            throw "Expected an in-process caller to see exit 2 without a catch, got: $text"
+        }
+        $child = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -File $generator -TaskId $taskId -Source grooming -Target implementation -Reason x -SchemaPath $schemaPath -ProjectRoot $tempRoot
+        }
+        if ($child.ExitCode -ne 2) {
+            throw "Expected exit code exactly 2, got $($child.ExitCode): $($child.Output)"
         }
     }
 
@@ -1003,13 +1054,13 @@ budget_tier: "low"
             $backlogDir = Join-Path $gitRepoDir ".crucible/backlog"
             New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
             $backlogFile = Join-Path $backlogDir "BACKLOG.md"
-            "- $taskId" | Set-Content -LiteralPath $backlogFile -Encoding UTF8
+            "| $taskId | Ready | Test |" | Set-Content -LiteralPath $backlogFile -Encoding UTF8
             
             Set-Content -LiteralPath "dummy.txt" -Value "hello"
             & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
             & git commit -m "initial commit" --quiet
             
-            $expectedHead = (& git rev-parse HEAD).Trim()
+            $expectedHead = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
             
             $result = Invoke-Generator -InputArgs @{
                 TaskId = $taskId
@@ -1080,18 +1131,18 @@ budget_tier: "low"
 
             $backlogDir = Join-Path $gitRepoDir ".crucible/backlog"
             New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
-            "- $taskId" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+            "| $taskId | Ready | Test |" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
 
             Set-Content -LiteralPath "dummy.txt" -Value "hello"
             & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
             & git commit -m "initial commit" --quiet
-            $masterHead = (& git rev-parse HEAD).Trim()
+            $masterHead = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
 
             & git checkout -b "task/$taskId" --quiet
             Set-Content -LiteralPath "feature.txt" -Value "work"
             & git add feature.txt
             & git commit -m "task work" --quiet
-            $taskTip = (& git rev-parse HEAD).Trim()
+            $taskTip = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
             & git checkout master --quiet
 
             $sessionHandoffDir = Join-Path $gitRepoDir ".crucible/session/handoffs"
@@ -1201,12 +1252,12 @@ budget_tier: "low"
             ) | Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
             $backlogDir = Join-Path $gitRepoDir ".crucible/backlog"
             New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
-            "- $taskId" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+            "| $taskId | Ready | Test |" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
 
             Set-Content -LiteralPath "dummy.txt" -Value "hello"
             & git add dummy.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
             & git commit -m "initial commit" --quiet
-            $fullSha = (& git rev-parse HEAD).Trim()
+            $fullSha = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
             $shortSha = $fullSha.Substring(0, 8)
             $sessionHandoffDir = Join-Path $gitRepoDir ".crucible/session/handoffs"
 
@@ -1266,6 +1317,10 @@ budget_tier: "low"
         foreach ($doc in $docs) {
             if (-not (Test-Path -LiteralPath $doc)) {
                 throw "Deployment doc not found: $doc"
+            }
+            if ($doc -like '*deployment_prompt.md') {
+                $pointer = Get-Content -LiteralPath $doc -Raw -Encoding UTF8
+                if (-not $pointer.Contains('/sops/deployment.md#step-7')) { throw 'Missing commit hash owner pointer' }
             }
             $mentions = 0
             $lines = @(Get-Content -LiteralPath $doc -Encoding UTF8)

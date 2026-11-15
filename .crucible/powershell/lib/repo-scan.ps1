@@ -37,7 +37,7 @@ function Get-RepoScannableFile {
     if (-not (Test-Path -LiteralPath $RepoRoot -PathType Container)) {
         throw ("Get-RepoScannableFile: RepoRoot '" + $RepoRoot + "' is not a directory.")
     }
-    $rootFull = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $rootFull = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $RepoRoot))
 
     $listed = Invoke-Git @("ls-files", "--cached", "--others", "--exclude-standard") -Directory $rootFull
     if ($listed.ExitCode -ne 0) {
@@ -93,6 +93,22 @@ function Get-RepoScannableFile {
         # emptiness check above, so it cannot be the thing that empties the list quietly.
         Test-Path -LiteralPath $_.FullName -PathType Leaf
     })
+}
+
+# Enumeration and reading are separate moments. A file removed between them is in the state
+# the Test-Path filter above already drops, so it reads as $null and the caller skips it. Only
+# not-found with the path confirmed gone qualifies; any other read failure still throws, so
+# an unreadable source cannot pass a check unread. Item 358.
+function Read-RepoScannableFileText {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$File)
+
+    try {
+        return [System.IO.File]::ReadAllText($File.FullName)
+    } catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] {
+        if (Test-Path -LiteralPath $File.FullName) { throw }
+        return $null
+    }
 }
 
 function Get-NormalizedScanPrefix {

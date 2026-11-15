@@ -106,6 +106,10 @@ try {
     $results += Run-Test -Name "The Operator prompt and SOP do not ask for an -Init rerun at session start" -Body {
         foreach ($rel in @("prompts/deployment_prompt.md", "sops/deployment.md")) {
             $text = Get-Content -LiteralPath (Join-Path $REPO_ROOT $rel) -Raw -Encoding UTF8
+            if ($rel -like 'prompts/*') {
+                Assert-Result -Name "$rel links dependency owner" -Condition ($text.Contains('/sops/deployment.md#step-1')) -FailureMessage 'Missing dependency pointer'
+                $text += Get-Content (Join-Path $REPO_ROOT 'sops/deployment.md') -Raw -Encoding UTF8
+            }
             Assert-Result -Name "$rel forbids the rerun" -Condition ($text -match '(?im)^(?=[^\r\n]*(?:do not|must not|never))(?=[^\r\n]*(?:re-run|rerun|repeat))(?=[^\r\n]*-Init)(?=[^\r\n]*session start)[^\r\n]+\r?$') -FailureMessage "$rel should say not to re-run -Init at session start"
         }
     }

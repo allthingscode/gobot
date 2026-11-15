@@ -4,6 +4,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 2
+}
 $errors = @()
 $warnings = @()
 
@@ -26,9 +30,16 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
     exit 2
 }
 
-$ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+$ConfigPath = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ConfigPath))
 $content = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
 $entries = @(Get-ConfigEntries -Content $content)
+
+# A warning, not an error: validating an edit before committing it is the normal loop.
+# The checks runner is the enforcement point and refuses the same state. Item 254.
+$commitState = Get-ConfigCommitState -ProjectRoot (Split-Path -Parent (Split-Path -Parent $ConfigPath)) -ConfigPath $ConfigPath
+if ($commitState.Status -ne "committed") {
+    $warnings += ("run-isolated-checks.ps1 refuses this config until it is committed: " + $commitState.Message)
+}
 
 # A key that is present but unreadable is reported as such. Treating it as absent is
 # what let a malformed value pass validation and then read as its default at runtime.
@@ -81,12 +92,7 @@ $crucibleRootPath = Test-RequiredValue -Path @("crucible_root") -Name "crucible_
 
 if (-not [string]::IsNullOrWhiteSpace($crucibleRootPath)) {
     $isRooted = [System.IO.Path]::IsPathRooted($crucibleRootPath) -or $crucibleRootPath -match '^([A-Za-z]:|[\\/])'
-    $resolvedCrucibleRoot = $crucibleRootPath
-    if (-not $isRooted) {
-        $configDir = Split-Path -Parent $ConfigPath
-        $projRoot = Split-Path -Parent $configDir
-        $resolvedCrucibleRoot = Join-Path $projRoot $crucibleRootPath
-    }
+    $resolvedCrucibleRoot = Resolve-CrucibleBundleRoot -ProjectRoot (Split-Path -Parent (Split-Path -Parent $ConfigPath)) -CrucibleRoot $crucibleRootPath
 
     if ($isRooted) {
         $errors += "crucible_root must be a relative path inside the project (e.g. .crucible, .crucible-bundle, tools/crucible)."
@@ -97,7 +103,7 @@ if (-not [string]::IsNullOrWhiteSpace($crucibleRootPath)) {
     if (-not (Test-Path -LiteralPath $resolvedCrucibleRoot)) {
         $errors += "crucible_root path does not exist: $crucibleRootPath"
     } else {
-        $resolvedPath = (Resolve-Path -LiteralPath $resolvedCrucibleRoot).Path
+        $resolvedPath = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $resolvedCrucibleRoot))
         $docsPath = Join-Path $resolvedPath "docs"
         $promptsPath = Join-Path $resolvedPath "prompts"
         $personasPath = Join-Path $resolvedPath "personas"
@@ -176,10 +182,10 @@ if ($null -ne $reviewNode) {
     foreach ($field in @("ci_timeout_minutes", "ci_queued_grace_minutes")) {
         $result = Read-Value -Path @("review", $field)
         if ($result.Ok -and $null -ne $result.Value) {
-            if ($result.Value -notmatch '^[0-9]+$') {
-                $errors += "review." + $field + " must be a positive whole number of minutes (got '" + $result.Value + "')."
-            } elseif ([double]$result.Value -le 0) {
-                $errors += "review." + $field + " must be a positive whole number of minutes (got '" + $result.Value + "')."
+            try {
+                $null = ConvertFrom-ReviewMinutes -Value $result.Value -Key $field
+            } catch {
+                $errors += $_.Exception.Message
             }
         }
     }
@@ -226,17 +232,18 @@ foreach ($tier in @("fast", "high-capability")) {
 $null = Test-RequiredSection -Path @("verification", "quick") -Name "verification.quick"
 $null = Test-RequiredSection -Path @("verification", "full") -Name "verification.full"
 
-# The verification entries are a list of maps, so command: is not reachable as a
-# mapping key path; it is looked for anywhere inside the verification block instead.
-$verificationNode = Find-Node -Path @("verification")
-$hasVerificationCommand = $false
-if ($null -ne $verificationNode) {
-    for ($i = $verificationNode.SpanStart; $i -lt $verificationNode.SpanEnd; $i++) {
-        if ($entries[$i].Key -eq "command" -and -not [string]::IsNullOrWhiteSpace($entries[$i].Value)) {
-            $hasVerificationCommand = $true
-        }
+# The checks are read by the runner's own reader, so a value validated here is the value
+# run-isolated-checks.ps1 runs. Item 245.
+$verificationChecks = @()
+foreach ($mode in @("quick", "full")) {
+    $modeChecks = @(Get-VerificationChecks -Content $content -Mode $mode)
+    if (@($modeChecks | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Command) }).Count -eq 0) {
+        $errors += "Missing or invalid config field: verification.$mode has zero checks"
     }
+    $verificationChecks += $modeChecks
 }
+$errors += @(Get-VerificationCheckIdentityErrors -Content $content)
+$hasVerificationCommand = @($verificationChecks | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Command) }).Count -gt 0
 if (-not $hasVerificationCommand) {
     $errors += "Missing or invalid config field: verification command"
 }
@@ -247,17 +254,16 @@ if ($content -match "replace-with-project-") {
 
 # Host-gated checks use the small string schema consumed by run-isolated-checks.ps1.
 # Keep accepted condition forms and option names closed so typos cannot silently skip work.
-$hostGateMatches = [regex]::Matches($content, '(?m)^\s{6}host_gate:\s*(.*?)\s*$')
-foreach ($match in $hostGateMatches) {
-    $condition = (ConvertFrom-ConfigScalar $match.Groups[1].Value)
-    if ($condition -notmatch '^(cgo|os=(windows|linux|macos)|command=[A-Za-z0-9_.+-]+|env=[A-Za-z_][A-Za-z0-9_]*)$') {
-        $errors += "verification host_gate must be cgo, os=windows|linux|macos, command=<name>, or env=<name> (got '$condition')."
+foreach ($check in $verificationChecks) {
+    if ($null -ne $check.HostGate) {
+        $condition = [string]$check.HostGate
+        if ($condition -notmatch '^(cgo|os=(windows|linux|macos)|command=[A-Za-z0-9_.+-]+|env=[A-Za-z_][A-Za-z0-9_]*)$') {
+            $errors += "verification host_gate must be cgo, os=windows|linux|macos, command=<name>, or env=<name> (got '$condition')."
+        }
     }
-}
-$altMatches = [regex]::Matches($content, '(?m)^\s{6}alternative_runner:\s*(.*?)\s*$')
-foreach ($match in $altMatches) {
-    $runner = ConvertFrom-ConfigScalar $match.Groups[1].Value
-    if ([string]::IsNullOrWhiteSpace($runner)) { $errors += "verification alternative_runner must be a non-empty command." }
+    if ($null -ne $check.AlternativeRunner -and [string]::IsNullOrWhiteSpace([string]$check.AlternativeRunner)) {
+        $errors += "verification alternative_runner must be a non-empty command."
+    }
 }
 
 if ($content -match "Replace with project-specific engineering rules") {

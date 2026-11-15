@@ -1,7 +1,11 @@
 # Declare the moved setup's wrapper dependency without relying on sibling load order. TODO item 197.
 # Requires: Get-ConfiguredPrimaryBranch and Write-Quiet (loaded by crucible-lib.ps1).
-if (-not (Get-Command Invoke-GitChecked -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Invoke-GitChecked)) {
     . (Join-Path $PSScriptRoot "git.ps1")
+}
+
+if (-not (Test-Path -LiteralPath Function:Resolve-PathFromRoot)) {
+    . (Join-Path $PSScriptRoot "config-helpers.ps1")
 }
 
 function Normalize-RepoRelativePath {
@@ -143,7 +147,7 @@ function Resolve-ImplementationWorktreePath {
         [string]$WorkspacesDir = $workspacesDir
     )
 
-    return Join-Path $WorkspacesDir ("implementation-" + $TaskId)
+    return Resolve-FilesystemPath -Path (Join-Path $WorkspacesDir ("implementation-" + $TaskId))
 }
 
 # Relative core.hooksPath resolves against the worktree root, so run its branch's hooks.
@@ -161,10 +165,10 @@ function Initialize-ImplementationWorktreeHooks {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        if ((git -C $WorktreePath config --get extensions.worktreeConfig 2>$null) -eq "true") {
-            $override = git -C $WorktreePath config --worktree --get core.hooksPath 2>$null
+        if ((git -C (Resolve-FilesystemPath -Path $WorktreePath) config --get extensions.worktreeConfig 2>$null) -eq "true") {
+            $override = git -C (Resolve-FilesystemPath -Path $WorktreePath) config --worktree --get core.hooksPath 2>$null
             if (-not [string]::IsNullOrWhiteSpace($override)) {
-                git -C $WorktreePath config --worktree --unset core.hooksPath 2>$null
+                git -C (Resolve-FilesystemPath -Path $WorktreePath) config --worktree --unset core.hooksPath 2>$null
             }
         }
 
@@ -173,10 +177,10 @@ function Initialize-ImplementationWorktreeHooks {
             $onWindows = (Get-Variable IsWindows -ValueOnly -ErrorAction SilentlyContinue) -ne $false
         }
         if (-not $onWindows) {
-            $hooksPath = git -C $WorktreePath config --get core.hooksPath 2>$null
+            $hooksPath = git -C (Resolve-FilesystemPath -Path $WorktreePath) config --get core.hooksPath 2>$null
             if (-not [string]::IsNullOrWhiteSpace($hooksPath)) {
                 $hooksDir = $hooksPath.Trim()
-                if (-not [System.IO.Path]::IsPathRooted($hooksDir)) { $hooksDir = Join-Path $WorktreePath $hooksDir }
+                $hooksDir = Resolve-PathFromRoot -Root $WorktreePath -Path $hooksDir
                 if (Test-Path -LiteralPath $hooksDir -PathType Container) {
                     Get-ChildItem -LiteralPath $hooksDir -File | ForEach-Object { & chmod "+x" $_.FullName }
                 }
@@ -193,6 +197,8 @@ function Initialize-ImplementationWorktree {
         [Parameter(Mandatory=$true)][string]$WorktreePath,
         [Parameter(Mandatory=$true)][string]$TaskId
     )
+
+    $WorktreePath = Resolve-FilesystemPath -Path $WorktreePath
 
     # Prune stale worktrees first
     Invoke-GitChecked { git worktree prune }
@@ -225,7 +231,7 @@ function Initialize-ImplementationWorktree {
 # these are work the checks may have tested but nothing will merge. Item 221.
 function Get-WorktreeUncommittedPaths {
     param([Parameter(Mandatory=$true)][string]$WorktreePath)
-    $lines = @(git -C $WorktreePath status --porcelain 2>$null)
+    $lines = @(git -C (Resolve-FilesystemPath -Path $WorktreePath) status --porcelain 2>$null)
     if ($LASTEXITCODE -ne 0) {
         throw ("git status failed in " + $WorktreePath)
     }
@@ -249,17 +255,8 @@ function Remove-ImplementationWorktree {
     if (-not (Test-Path $wtPath)) { return $true }
 
     # Never --force: uncommitted work was not merged, and deleting it is unrecoverable. Item 221.
-    $uncommitted = @()
-    try {
-        $uncommitted = @(Get-WorktreeUncommittedPaths -WorktreePath $wtPath)
-    } catch {
-        Write-Host "[HUMAN GATE] Could not read the state of $wtPath ($($_.Exception.Message)); left it and task/$TaskId in place." -ForegroundColor Yellow
-        return $false
-    }
-    if ($uncommitted.Count -gt 0) {
-        Write-Host "[HUMAN GATE] Worktree at $wtPath has uncommitted changes that were not merged; left it and task/$TaskId in place:" -ForegroundColor Yellow
-        foreach ($line in $uncommitted) { Write-Host "  $line" -ForegroundColor Yellow }
-        Write-Host "  Keep them by committing them for a new task, or discard them, then run: git worktree remove `"$wtPath`"; git branch -d task/$TaskId" -ForegroundColor Yellow
+    if (-not (Test-GitDiscardSafe -Directory $wtPath -Operation "implementation worktree cleanup" -IncludeUntracked)) {
+        Write-Host "[HUMAN GATE] Worktree at $wtPath has uncommitted changes that were not merged; left it and task/$TaskId in place." -ForegroundColor Yellow
         return $false
     }
 
@@ -303,15 +300,15 @@ function Get-ImplementationChangedFiles {
 
     # Use the configured primary and fail closed if its committed diff is unreadable. Item 225.
     $baseRef = Get-ConfiguredPrimaryBranch -ProjectRoot $WorktreePath
-    $committed = @(git -C $WorktreePath diff --name-only "$baseRef...HEAD" 2>$null)
+    $committed = @(git -C (Resolve-FilesystemPath -Path $WorktreePath) diff --name-only "$baseRef...HEAD" 2>$null)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not read committed diff against '$baseRef' in '$WorktreePath'."
     }
     $changed = @($committed)
 
-    $changed += @(git -C $WorktreePath diff --name-only --cached 2>$null)
-    $changed += @(git -C $WorktreePath diff --name-only 2>$null)
-    $changed += @(git -C $WorktreePath ls-files --others --exclude-standard 2>$null)
+    $changed += @(git -C (Resolve-FilesystemPath -Path $WorktreePath) diff --name-only --cached 2>$null)
+    $changed += @(git -C (Resolve-FilesystemPath -Path $WorktreePath) diff --name-only 2>$null)
+    $changed += @(git -C (Resolve-FilesystemPath -Path $WorktreePath) ls-files --others --exclude-standard 2>$null)
 
     return @($changed |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |

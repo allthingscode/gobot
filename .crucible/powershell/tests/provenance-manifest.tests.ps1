@@ -133,6 +133,126 @@ try {
         Assert-Result -Name "source_commit round-trips" -Condition ($roundTrip.source_commit -eq $commit) -FailureMessage "source_commit lost on round-trip"
         Assert-Result -Name "hash round-trips" -Condition ($roundTrip.files."docs/guide.md".hash -eq $provenance.files."docs/guide.md".hash) -FailureMessage "hash lost on round-trip"
     }
+    $results += Run-Test 'Provenance reads a bundle in one git object batch' {
+        $framework = Join-Path $tempRoot 'batch-framework'
+        $null = New-FrameworkFixture -Root $framework
+        foreach ($i in 1..40) { Write-Utf8File (Join-Path $framework "docs/file $i.md") "file $i`n" }
+        [IO.File]::WriteAllText((Join-Path $framework 'docs/empty.md'), '')
+        Write-Utf8File (Join-Path $framework 'docs/large.md') (('payload ' * 20000) + "`n")
+        $commit = Invoke-GitCommit -Repo $framework -Message 'batch paths'
+        $trace = Join-Path $tempRoot 'provenance-trace.jsonl'
+        $savedTrace = $env:GIT_TRACE2_EVENT
+        try {
+            $env:GIT_TRACE2_EVENT = $trace.Replace('\', '/')
+            $provenance = New-ProvenanceManifest -FrameworkRoot $framework -Commit $commit
+        } finally { $env:GIT_TRACE2_EVENT = $savedTrace }
+        $commands = @(Get-Content -LiteralPath $trace | ForEach-Object { ConvertFrom-Json $_ } | Where-Object { $_.event -eq 'cmd_name' } | ForEach-Object { $_.name })
+        Assert-Result 'provenance has no per-file git show processes' (@($commands | Where-Object { $_ -eq 'show' }).Count -eq 0) ($commands -join ',')
+        Assert-Result 'provenance uses exactly one object reader' (@($commands | Where-Object { $_ -eq 'cat-file' }).Count -eq 1) ($commands -join ',')
+        Assert-Result 'batch retains every file with spaces in its name' (@($provenance.files.PSObject.Properties.Name | Where-Object { $_ -like 'docs/file *' }).Count -eq 40) 'Batch dropped a path.'
+        Assert-Result 'empty blob remains present' ($provenance.files.'docs/empty.md'.hash -eq (Get-NormalizedSha256 -Content '')) 'Empty blob was treated as absent.'
+        Assert-Result 'large blob remains complete' ($provenance.files.'docs/large.md'.hash -eq (Get-NormalizedSha256 -Content (('payload ' * 20000) + "`n"))) 'Batch framing truncated a large blob.'
+    }
+    $results += Run-Test 'Batch decoding preserves normalized content and custom regions' {
+        $framework = Join-Path $tempRoot 'batch-decoding'
+        $null = New-FrameworkFixture -Root $framework
+        Write-Utf8File (Join-Path $framework '.gitattributes') '* -text'
+        $content = "first`r`n# >>> CRUCIBLE-CUSTOM`r`nlocal $([char]0x00e9)`r`n# <<< CRUCIBLE-CUSTOM`r`nlast`r`n`r`n"
+        Write-Utf8File (Join-Path $framework 'docs/bom.md') ([string][char]0xfeff + $content)
+        $commit = Invoke-GitCommit -Repo $framework -Message 'decode'
+        $hashes = Get-GitFileNormalizedHashes -Repo $framework -Commit $commit -Paths @('docs/bom.md', 'absent', 'docs/guide.md')
+        Assert-Result 'batch hash matches previous UTF8 and BOM decoding' ($hashes['docs/bom.md'].Hash -eq (Get-GitFileNormalizedHash -Repo $framework -Commit $commit -Path 'docs/bom.md')) 'Hash changed on batch decoding.'
+        Assert-Result 'batch base hash removes custom region content' ($hashes['docs/bom.md'].BaseHash -eq (Get-NormalizedSha256 -Content (Get-ContentWithoutCustomRegions -Content $content))) 'Custom content entered the base hash.'
+        Assert-Result 'missing object keeps null hashes and does not desynchronize next reply' ($null -eq $hashes['absent'].Hash -and $null -eq $hashes['absent'].BaseHash -and $hashes['docs/guide.md'].Hash -eq (Get-NormalizedSha256 -Content 'guide baseline')) 'Missing object changed the batch framing.'
+        $empty = Get-GitFileContents -Repo $framework -Commit $commit -Paths @()
+        Assert-Result 'empty batch remains empty' ($empty.Count -eq 0) 'Unexpected batch entries.'
+    }
+    $results += Run-Test 'Batch non-blobs remain absent without losing the next blob' {
+        $framework = Join-Path $tempRoot 'batch-nonblobs'
+        $commit = New-FrameworkFixture -Root $framework
+        git -C $framework update-index --add --cacheinfo "160000,$commit,linked"
+        $commit = Invoke-GitCommit -Repo $framework -Message 'gitlink'
+        $contents = Get-GitFileContents -Repo $framework -Commit $commit -Paths @('docs', 'linked', 'docs/guide.md')
+        Assert-Result 'trees and gitlinks have null contents' ($null -eq $contents['docs'] -and $null -eq $contents['linked']) 'Non-blob object became file content.'
+        Assert-Result 'blob after non-blobs retains its framing' ($contents['docs/guide.md'].Trim() -ceq 'guide baseline') 'Reply framing lost after non-blob.'
+    }
+    $results += Run-Test 'Batch requests use LF independently of writer defaults' {
+        $startDefinition = (Get-Command Start-GitFileContentProcess).ScriptBlock
+        $writer = [IO.StringWriter]::new()
+        $writer.NewLine = "`r`n"
+        function Start-GitFileContentProcess {
+            param($StartInfo)
+            $bytes = [Text.Encoding]::UTF8.GetBytes("deadbeef blob 3`nabc`n")
+            $fake = [pscustomobject]@{
+                StandardInput = $writer
+                StandardOutput = [pscustomobject]@{ BaseStream = [IO.MemoryStream]::new($bytes) }
+                StandardError = [IO.StringReader]::new('')
+                HasExited = $true
+                ExitCode = 0
+            }
+            $fake | Add-Member ScriptMethod WaitForExit {}
+            $fake | Add-Member ScriptMethod Dispose {}
+            return $fake
+        }
+        try {
+            $contents = Get-GitFileContents -Repo $tempRoot -Commit 'HEAD' -Paths @('file')
+            Assert-Result 'batch request contains LF and no CR' ($writer.ToString() -ceq "HEAD:file`n") ([BitConverter]::ToString([Text.Encoding]::UTF8.GetBytes($writer.ToString())))
+            Assert-Result 'fake reply was read by the real batch owner' ($contents['file'] -ceq 'abc') 'Reply not consumed.'
+        } finally { Set-Item Function:Start-GitFileContentProcess $startDefinition }
+    }
+    $results += Run-Test 'Batch pipe failures include git stderr' {
+        $caught = ''
+        try { $null = Get-GitFileContents -Repo (Join-Path $tempRoot 'no-such-repo') -Commit 'HEAD' -Paths @('file') }
+        catch { $caught = $_.Exception.Message }
+        Assert-Result 'failed git batch includes the native diagnostic' ($caught -match 'git cat-file batch failed:' -and $caught -match 'fatal:.*no-such-repo') $caught
+    }
+    $results += Run-Test 'Nonzero batch exits report git stderr once' {
+        $startDefinition = (Get-Command Start-GitFileContentProcess).ScriptBlock
+        function Start-GitFileContentProcess {
+            param($StartInfo)
+            $bytes = [Text.Encoding]::UTF8.GetBytes("deadbeef blob 3`nabc`n")
+            $fake = [pscustomobject]@{
+                StandardInput = [IO.StringWriter]::new()
+                StandardOutput = [pscustomobject]@{ BaseStream = [IO.MemoryStream]::new($bytes) }
+                StandardError = [IO.StringReader]::new('fatal: batch exit diagnostic')
+                HasExited = $true
+                ExitCode = 128
+            }
+            $fake | Add-Member ScriptMethod WaitForExit {}
+            $fake | Add-Member ScriptMethod Dispose {}
+            return $fake
+        }
+        try {
+            $caught = ''
+            try { $null = Get-GitFileContents -Repo $tempRoot -Commit 'HEAD' -Paths @('file') }
+            catch { $caught = $_.Exception.Message }
+            Assert-Result 'nonzero batch exit still refuses with one native diagnostic' ($caught -match 'git cat-file batch failed:' -and [regex]::Matches($caught, 'fatal: batch exit diagnostic').Count -eq 1) $caught
+        } finally { Set-Item Function:Start-GitFileContentProcess $startDefinition }
+    }
+    $results += Run-Test 'Broken batch input pipes retain git stderr' {
+        $startDefinition = (Get-Command Start-GitFileContentProcess).ScriptBlock
+        function Start-GitFileContentProcess {
+            param($StartInfo)
+            $inputPipe = [pscustomobject]@{}
+            $inputPipe | Add-Member ScriptMethod Write { throw [IO.IOException]::new('Broken pipe') }
+            $fake = [pscustomobject]@{
+                StandardInput = $inputPipe
+                StandardOutput = [pscustomobject]@{ BaseStream = [IO.MemoryStream]::new() }
+                StandardError = [IO.StringReader]::new('fatal: batch input diagnostic')
+                HasExited = $true
+                ExitCode = 128
+            }
+            $fake | Add-Member ScriptMethod WaitForExit {}
+            $fake | Add-Member ScriptMethod Dispose {}
+            return $fake
+        }
+        try {
+            $caught = ''
+            try { $null = Get-GitFileContents -Repo $tempRoot -Commit 'HEAD' -Paths @('file') }
+            catch { $caught = $_.Exception.Message }
+            Assert-Result 'broken pipe failure includes git stderr' ($caught -match 'Broken pipe' -and $caught -match 'fatal: batch input diagnostic') $caught
+        } finally { Set-Item Function:Start-GitFileContentProcess $startDefinition }
+    }
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

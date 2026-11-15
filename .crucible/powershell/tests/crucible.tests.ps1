@@ -252,7 +252,7 @@ function New-RemoteLessSampleProject {
     try {
         git add .crucible AGENTS.md CLAUDE.md GEMINI.md
         git commit -m "add crucible scaffold" --quiet
-        $remotes = @(git remote)
+        $remotes = @(Invoke-ExternalCommand -AsLines { git remote })
         if ($remotes.Count -ne 0) {
             throw ("test fixture unexpectedly has git remotes: " + ($remotes -join ", "))
         }
@@ -300,7 +300,7 @@ function Run-CrucibleInitTest {
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $outputLines = @(& $CRUCIBLE_SCRIPT -Init -TaskId $TaskId -ProjectRoot $tempRoot *>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $TaskId -ProjectRoot $tempRoot *>&1 })
         $output = $outputLines -join "`n"
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 1 -and $exitCode -ne 2) {
@@ -346,7 +346,7 @@ function Run-CrucibleChecklistGateTest {
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $outputLines = @(& $CRUCIBLE_SCRIPT -Init -TaskId $TaskId -ProjectRoot $tempRoot *>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $TaskId -ProjectRoot $tempRoot *>&1 })
         $output = $outputLines -join "`n"
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 1 -and $exitCode -ne 2) {
@@ -386,7 +386,7 @@ function Run-ValidateJsonTest {
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $outputLines = @(& $VALIDATE_SCRIPT -HandoffFile $fixturePath -SchemaPath $SCHEMA_PATH *>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & $VALIDATE_SCRIPT -HandoffFile $fixturePath -SchemaPath $SCHEMA_PATH *>&1 })
         $output = $outputLines -join "`n"
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 1 -and $exitCode -ne 2) {
@@ -420,7 +420,7 @@ function Run-NewHandoffJsonTest {
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $outputLines = @(& $NEWHANDOFF_SCRIPT `
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & $NEWHANDOFF_SCRIPT `
             -TaskId $taskId `
             -Source "implementation" `
             -Target "verification" `
@@ -435,7 +435,7 @@ function Run-NewHandoffJsonTest {
             -Artifacts (Join-Path $tempRoot ".crucible/backlog/BACKLOG.md") `
             -FileAffinity "powershell/tests/" `
             -ProjectRoot $tempRoot `
-            -SchemaPath $SCHEMA_PATH *>&1)
+            -SchemaPath $SCHEMA_PATH *>&1 })
         $output = $outputLines -join "`n"
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 1 -and $exitCode -ne 2) {
@@ -578,12 +578,12 @@ try {
         $origLoc = (Get-Location).Path
         try {
             $global:LASTEXITCODE = 0
-            $o1 = @(& $CRUCIBLE_SCRIPT -Init -TaskId $tid -ProjectRoot $tempRoot *>&1)
+            $o1 = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $tid -ProjectRoot $tempRoot *>&1 })
             $e1 = $LASTEXITCODE
             if ($e1 -ne 1 -and $e1 -ne 2) { $e1 = 0 }
             # Re-run WITHOUT completing the checklist: must still block for the same reason.
             $global:LASTEXITCODE = 0
-            $o2 = @(& $CRUCIBLE_SCRIPT -Init -TaskId $tid -ProjectRoot $tempRoot *>&1)
+            $o2 = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $tid -ProjectRoot $tempRoot *>&1 })
             $e2 = $LASTEXITCODE
             if ($e2 -ne 1 -and $e2 -ne 2) { $e2 = 0 }
         } finally {
@@ -708,7 +708,7 @@ try {
         git commit -m "isolated task work" --quiet
         git checkout master --quiet
         git merge task/C-FACTORY-ISOLATED --no-ff -m "merge isolated task work" --quiet
-        $mergedHead = (git rev-parse HEAD).Trim()
+        $mergedHead = (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
     } finally {
         Pop-Location
     }
@@ -735,11 +735,11 @@ try {
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $null = & $CRUCIBLE_SCRIPT -Init -TaskId "C-FACTORY-ISOLATED" -GateOutcome accepted -GateReason "Landed" -ProjectRoot $tempRoot *>&1
+        $null = Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId "C-FACTORY-ISOLATED" -GateOutcome accepted -GateReason "Landed" -ProjectRoot $tempRoot *>&1 }
 
         # 2. Run Crucible again to advance the pipeline (which now bypasses the gate and triggers Done Early Exit)
         $global:LASTEXITCODE = 0
-        $outputLines = @(& $CRUCIBLE_SCRIPT -Init -TaskId "C-FACTORY-ISOLATED" -ProjectRoot $tempRoot *>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId "C-FACTORY-ISOLATED" -ProjectRoot $tempRoot *>&1 })
         $output = $outputLines -join "`n"
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 1 -and $exitCode -ne 2) { $exitCode = 0 }
@@ -777,7 +777,7 @@ try {
     # dev-log gate as the only thing that can block - the point this test is measuring.
     Push-Location $tempRoot
     try {
-        $handoffCleanup.base_commit = (git rev-parse "$mergedHead^1").Trim()
+        $handoffCleanup.base_commit = (Invoke-ExternalCommand -AsLines { git rev-parse "$mergedHead^1" }).Trim()
     } finally {
         Pop-Location
     }
@@ -786,11 +786,11 @@ try {
     $origLocCleanup = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $null = & $CRUCIBLE_SCRIPT -Init -TaskId $cleanupTaskId -GateOutcome accepted -GateReason "Landed" -ProjectRoot $tempRoot *>&1
+        $null = Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $cleanupTaskId -GateOutcome accepted -GateReason "Landed" -ProjectRoot $tempRoot *>&1 }
 
         Remove-Item -LiteralPath $devLogPath -Force
         $global:LASTEXITCODE = 0
-        $cleanupLines = @(& $CRUCIBLE_SCRIPT -Init -TaskId $cleanupTaskId -ProjectRoot $tempRoot *>&1)
+        $cleanupLines = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $cleanupTaskId -ProjectRoot $tempRoot *>&1 })
         $cleanupOutput = $cleanupLines -join "`n"
         $cleanupExit = $LASTEXITCODE
     } finally {
@@ -836,7 +836,7 @@ created_at: "2026-05-08"
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $bootOutputLines = @(& $CRUCIBLE_SCRIPT -Init -TaskId $bootTaskId -ProjectRoot $tempRoot *>&1)
+        $bootOutputLines = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $bootTaskId -ProjectRoot $tempRoot *>&1 })
         $bootOutput = $bootOutputLines -join "`n"
         $bootExitCode = $LASTEXITCODE
         if ($bootExitCode -ne 1 -and $bootExitCode -ne 2) { $bootExitCode = 0 }
@@ -966,7 +966,7 @@ depends_on: ["DEP-OK"]
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $depOutputLinesOk = @(& $CRUCIBLE_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot *>&1)
+        $depOutputLinesOk = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot *>&1 })
         $depOutputOk = $depOutputLinesOk -join "`n"
         $depExitCodeOk = $LASTEXITCODE
         if ($depExitCodeOk -ne 1 -and $depExitCodeOk -ne 2) { $depExitCodeOk = 0 }
@@ -1004,7 +1004,7 @@ depends_on: ["DEP-PEND"]
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $depOutputLinesFail = @(& $CRUCIBLE_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot *>&1)
+        $depOutputLinesFail = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot *>&1 })
         $depOutputFail = $depOutputLinesFail -join "`n"
         $depExitCodeFail = $LASTEXITCODE
         if ($depExitCodeFail -ne 1 -and $depExitCodeFail -ne 2) { $depExitCodeFail = 0 }
@@ -1040,7 +1040,7 @@ depends_on: ["DEP-PEND"]
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $depOutputLinesWarn = @(& $CRUCIBLE_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot *>&1)
+        $depOutputLinesWarn = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Init -TaskId $depTaskId -ProjectRoot $tempRoot *>&1 })
         $depOutputWarn = $depOutputLinesWarn -join "`n"
         $depExitCodeWarn = $LASTEXITCODE
         if ($depExitCodeWarn -ne 1 -and $depExitCodeWarn -ne 2) { $depExitCodeWarn = 0 }
@@ -1062,7 +1062,7 @@ depends_on: ["DEP-PEND"]
     $origLoc = (Get-Location).Path
     try {
         $global:LASTEXITCODE = 0
-        $healthOutputLines = @(& $CRUCIBLE_SCRIPT -Health -Quiet -ProjectRoot $tempRoot *>&1)
+        $healthOutputLines = @(Invoke-ExternalCommand -AsLines { & $CRUCIBLE_SCRIPT -Health -Quiet -ProjectRoot $tempRoot *>&1 })
         $healthOutput = $healthOutputLines -join "`n"
         $healthExitCode = $LASTEXITCODE
         if ($healthExitCode -ne 1 -and $healthExitCode -ne 2) { $healthExitCode = 0 }

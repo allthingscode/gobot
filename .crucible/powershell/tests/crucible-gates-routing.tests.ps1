@@ -104,14 +104,19 @@ param($Root, $Case)
 $ErrorActionPreference = "Stop"
 . (Join-Path $Root "lib/crucible-gates.ps1")
 if ($Case -eq "abandon-archived") { . (Join-Path $Root "lib/status-helpers.ps1") }
-# Stop after the backlog step so no merge, push or session work is needed.
+# This fixture tests missing archive helpers, not git. Item 253 moved the safety
+# check and unwind before archival; model a safe checkout with nothing to unwind.
 function git { $global:LASTEXITCODE = 1 }
-function Invoke-GitChecked { throw "REACHED_AFTER_BACKLOG" }
+function Get-HumanGateRejectUnwind { return @{ CurrentHead = 'base'; ParentList = @(); HeadIsTaskMerge = $false; UnwindTarget = '' } }
+function Test-GitDiscardSafe { return $true }
+function Invoke-GitChecked {}
+function Write-Quiet {}
 try {
     if ($Case -eq "accept") {
         Invoke-HumanGateAcceptRedirect -TaskId "F-197" -Outcome "accepted" -ProjectRoot $Root -PrimaryBranch "master" -LogFile (Join-Path $Root "pipeline.log") -CircuitBreakerHistoryFile (Join-Path $Root "history.jsonl")
     } else {
         Invoke-HumanGateRejectAbandon -TaskId "F-197" -Outcome "abandoned" -ProjectRoot $Root -PrimaryBranch "master"
+        throw "REACHED_AFTER_BACKLOG"
     }
     throw "Gate unexpectedly completed"
 } catch {
@@ -121,8 +126,12 @@ try {
 }
 '@
             [System.IO.File]::WriteAllText($child, $childText, $utf8)
-            $output = @(& $pwshCmd -NoProfile -File $child -Root $root -Case $case 2>&1)
-            Assert-Result "missing-library gate behavior preserved" ($LASTEXITCODE -eq 0) ($output -join "`n")
+            $output = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -File $child -Root $root -Case $case 2>&1 })
+            if ($case -eq "accept") {
+                Assert-Result "missing-library accept refuses unconditionally" ($LASTEXITCODE -ne 0 -and ($output -join "`n") -match 'archive-task helper not found' -and ($output -join "`n") -notmatch 'EXPECTED:') ($output -join "`n")
+            } else {
+                Assert-Result "missing-library advisory behavior preserved" ($LASTEXITCODE -eq 0) ($output -join "`n")
+            }
             Assert-Result "spec stays in its original directory" (Test-Path -LiteralPath $spec) "expected no archival move"
             if ($case -eq "abandon-archived") {
                 Assert-Result "missing-library legacy repair updates frontmatter" ((Get-Content -LiteralPath $spec -Raw) -match 'status: "Abandoned"') "expected Abandoned frontmatter"
@@ -153,11 +162,12 @@ $ErrorActionPreference = "Stop"
 # The task branch exists; the merge reports the case under test.
 function git { $global:LASTEXITCODE = 0 }
 function Invoke-HumanGateMerge { return $MergeResult }
-Invoke-HumanGateAcceptRedirect -TaskId "F-222" -Outcome "accepted" -ProjectRoot $Root -PrimaryBranch "master" -LogFile (Join-Path $Root "pipeline.log") -CircuitBreakerHistoryFile (Join-Path $Root "history.jsonl")
+Invoke-HumanGateAcceptRedirect -TaskId "F-222" -Outcome "accepted" -ProjectRoot $Root -PrimaryBranch "master" -LogFile (Join-Path $Root "pipeline.log") -CircuitBreakerHistoryFile (Join-Path $Root "history.jsonl") `
+    -DecisionRecordPath (Join-Path $Root "F-222-20260101T000000Z.json")
 Write-Host "GATE_COMPLETED"
 '@
             [System.IO.File]::WriteAllText($child, $childText, $utf8)
-            $output = @(& $pwshCmd -NoProfile -File $child -Root $root -Lib (Join-Path $REPO_ROOT "powershell/lib") -MergeResult $mergeCase.Result 2>&1) -join "`n"
+            $output = @(Invoke-ExternalCommand -AsLines { & $pwshCmd -NoProfile -File $child -Root $root -Lib (Join-Path $REPO_ROOT "powershell/lib") -MergeResult $mergeCase.Result 2>&1 }) -join "`n"
             Assert-Result "gate exits with the merge outcome" ($LASTEXITCODE -eq $mergeCase.Exit -and -not $output.Contains("GATE_COMPLETED")) ("expected exit " + $mergeCase.Exit + ", got " + $LASTEXITCODE + ". Output: " + $output)
             Assert-Result "spec stays active" (Test-Path -LiteralPath $spec) ("the spec was archived although the merge returned " + $mergeCase.Result)
             Assert-Result "row is not Production" ((Get-Content -LiteralPath $backlog -Raw) -match '\| In Progress \|') (Get-Content -LiteralPath $backlog -Raw)
@@ -245,12 +255,65 @@ Write-Host "GATE_COMPLETED"
         $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
         $ctx.IsBootstrap = $false
 
-        $logOutput = & { Resolve-CrucibleTransition -Context $ctx } 6>&1
+        $logOutput = Invoke-ExternalCommand -AsLines { & { Resolve-CrucibleTransition -Context $ctx } 6>&1 }
         $logText = $logOutput -join "`n"
 
         Assert-Result -Name "Warning emitted for active task F-102" -Condition ($logText -match "F-102[/\\]grooming[/\\]task\.md") -FailureMessage "expected warning for F-102, got: $logText"
         Assert-Result -Name "No warning for archived task F-103" -Condition ($logText -notmatch "F-103") -FailureMessage "unexpected warning for archived task F-103, got: $logText"
         Assert-Result -Name "No warning for terminal task F-104" -Condition ($logText -notmatch "F-104") -FailureMessage "unexpected warning for terminal task F-104, got: $logText"
+    }
+
+    $results += Run-Test -Name "I8: Groomer exclusion for R-1 keeps R-10's session visible" -Body {
+        $caseRoot = Join-Path $tempRoot "i8-groomer-test"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "R-1"
+        $ownDir = Join-Path $ctx.SessionDir "R-1/grooming"
+        $otherDir = Join-Path $ctx.SessionDir "R-10/grooming"
+        New-Item -ItemType Directory -Path $ownDir, $otherDir -Force | Out-Null
+        "task" | Set-Content -Path (Join-Path $ownDir "task.md") -Encoding UTF8
+        "task" | Set-Content -Path (Join-Path $otherDir "task.md") -Encoding UTF8
+        @"
+| ID | Title | Status |
+|---|---|---|
+| [R-1](features/active/R-1_test.md) | Test 1 | Ready |
+| [R-10](features/active/R-10_test.md) | Test 10 | Ready |
+"@ | Set-Content -Path (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+        $ctx.Handoff = [PSCustomObject]@{ task_id = "R-1"; source_phase = "research"; target_phase = "grooming" }
+        $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
+        $ctx.IsBootstrap = $false
+
+        $logText = (Invoke-ExternalCommand -AsLines { & { Resolve-CrucibleTransition -Context $ctx } 6>&1 }) -join "`n"
+
+        Assert-Result -Name "R-10 session is reported" -Condition ($logText -match "R-10[/\\]grooming[/\\]task\.md") -FailureMessage "R-1 excluded R-10's grooming session. Output: $logText"
+        Assert-Result -Name "R-1 own session is excluded" -Condition ($logText -notmatch "[/\\]R-1[/\\]grooming") -FailureMessage "R-1 reported its own session. Output: $logText"
+    }
+
+    $results += Run-Test -Name "I8: Groomer exclusion with an empty task ID skips only the root session" -Body {
+        $caseRoot = Join-Path $tempRoot "i8-groomer-empty-id"
+        New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+        $ctx = New-TestContext -TempRoot $caseRoot -TaskId ""
+        $rootDir = Join-Path $ctx.SessionDir "grooming"
+        $otherDir = Join-Path $ctx.SessionDir "R-10/grooming"
+        New-Item -ItemType Directory -Path $rootDir, $otherDir -Force | Out-Null
+        "task" | Set-Content -Path (Join-Path $rootDir "task.md") -Encoding UTF8
+        "task" | Set-Content -Path (Join-Path $otherDir "task.md") -Encoding UTF8
+        @"
+| ID | Title | Status |
+|---|---|---|
+| [R-10](features/active/R-10_test.md) | Test 10 | Ready |
+"@ | Set-Content -Path (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
+        $ctx.Handoff = [PSCustomObject]@{ task_id = ""; source_phase = "research"; target_phase = "grooming" }
+        $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
+        $ctx.IsBootstrap = $false
+
+        New-PSDrive -Name Item333 -PSProvider FileSystem -Root $caseRoot | Out-Null
+        try {
+            $ctx.SessionDir = 'Item333:/session'
+            $logText = (Invoke-ExternalCommand -AsLines { & { Resolve-CrucibleTransition -Context $ctx } 6>&1 }) -join "`n"
+        } finally { Remove-PSDrive Item333 }
+
+        Assert-Result -Name "other task session is reported" -Condition ($logText -match "R-10[/\\]grooming[/\\]task\.md") -FailureMessage "expected R-10 reported. Output: $logText"
+        Assert-Result -Name "root session is the current one and is excluded" -Condition ($logText -notmatch "session[/\\]grooming[/\\]task\.md") -FailureMessage "the current root session was reported as concurrent. Output: $logText"
     }
 
     $results += Run-Test -Name "D39b: a long-untouched Groomer session is reported as stale, not as concurrent" -Body {
@@ -292,7 +355,7 @@ Write-Host "GATE_COMPLETED"
         $ctx.NextCrucibleCommand = "$(Get-PwshCommand) crucible.ps1"
         $ctx.IsBootstrap = $false
 
-        $logOutput = & { Resolve-CrucibleTransition -Context $ctx } 6>&1
+        $logOutput = Invoke-ExternalCommand -AsLines { & { Resolve-CrucibleTransition -Context $ctx } 6>&1 }
         $logText = $logOutput -join "`n"
 
         $freshLine = (@($logOutput | Where-Object { "$_" -match "F-202" }) -join "`n")
@@ -424,7 +487,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -570,7 +633,7 @@ try {
         $scriptContent = $scriptTemplate.Replace("__LIB__", $libPath).Replace("__SESSION__", $sessionDir).Replace("__REPO__", $localRepo)
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join ([string][char]10)
 
@@ -674,7 +737,7 @@ Write-Host "AFTER_ARCHIVED: `$(`$resAfter.SpecExistsInArchived)"
         $outputLines = @()
         Push-Location $tempRoot
         try {
-            $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+            $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location
@@ -789,7 +852,7 @@ Complete-CrucibleSourceSession -Context `$ctx
 
         # Run script - it should exit with 2 because task is not finalized
         $exitCode = 0
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -819,7 +882,7 @@ Complete-CrucibleSourceSession -Context `$ctx
         git -C $localRepo push -u origin master 2>$null | Out-Null
 
         # Save origin master head commit hash
-        $beforeOriginHead = (git -C $localRepo rev-parse origin/master).Trim()
+        $beforeOriginHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse origin/master }).Trim()
 
         # Create backlog structure under local_repo, but do NOT create the active spec file (it is missing)
         $backlogDir = Join-Path $localRepo ".crucible/backlog"
@@ -896,7 +959,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -905,7 +968,7 @@ try {
         Assert-Result -Name "D45-1: outputs refusing to push message" -Condition ($output -match "refusing to push" -and $output -match "Auto-finalization failed") -FailureMessage ("expected refusing to push and Auto-finalization failed messages. Got: " + $output)
 
         # Verify push did not happen (origin/master still points to $beforeOriginHead)
-        $afterOriginHead = (git -C $localRepo rev-parse origin/master).Trim()
+        $afterOriginHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse origin/master }).Trim()
         Assert-Result -Name "D45-1: push did not occur" -Condition ($beforeOriginHead -eq $afterOriginHead) -FailureMessage ("expected origin master tip to remain " + $beforeOriginHead + ", but it advanced to " + $afterOriginHead)
     }
 
@@ -931,7 +994,7 @@ try {
         git -C $localRepo push -u origin master 2>$null | Out-Null
 
         # Save origin master head commit hash
-        $beforeOriginHead = (git -C $localRepo rev-parse origin/master).Trim()
+        $beforeOriginHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse origin/master }).Trim()
 
         # Create backlog structure under local_repo
         $backlogDir = Join-Path $localRepo ".crucible/backlog"
@@ -1026,7 +1089,7 @@ try {
 "@
         $scriptContent | Set-Content -LiteralPath $scriptPath -Encoding UTF8
 
-        $outputLines = @(& (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1)
+        $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $scriptPath 2>&1 })
         $exitCode = $LASTEXITCODE
         $output = $outputLines -join "`n"
 
@@ -1035,7 +1098,7 @@ try {
         Assert-Result -Name "D45-2: outputs refusing to push and archival failed messages" -Condition ($output -match "refusing to push" -and $output -match "Archived spec already exists") -FailureMessage ("expected refusing to push and Archived spec already exists messages. Got: " + $output)
 
         # Verify push did not happen (origin/master still points to $beforeOriginHead)
-        $afterOriginHead = (git -C $localRepo rev-parse origin/master).Trim()
+        $afterOriginHead = (Invoke-ExternalCommand -AsLines { git -C $localRepo rev-parse origin/master }).Trim()
         Assert-Result -Name "D45-2: push did not occur" -Condition ($beforeOriginHead -eq $afterOriginHead) -FailureMessage ("expected origin master tip to remain " + $beforeOriginHead + ", but it advanced to " + $afterOriginHead)
     }
 

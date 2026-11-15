@@ -1,16 +1,24 @@
+# A recovery command dot-sources this library through the command builder.
+param()
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Get-BacklogItemPathForTaskProjectRoot below needs Get-ConfiguredPath. crucible-lib.ps1
 # loads config-helpers.ps1 first, so this normally does nothing; it exists so a caller
 # that dot-sources this file on its own gets a working function rather than a missing one.
-if (-not (Get-Command Get-ConfiguredPath -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-ConfiguredPath)) {
     . (Join-Path $PSScriptRoot "config-helpers.ps1")
 }
 
 # TODO item 197: standalone restore callers also need the validator's shell resolver.
-if (-not (Get-Command Get-PwshCommand -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Get-RunningPowerShellCommand)) {
     . (Join-Path $PSScriptRoot "platform.ps1")
+}
+
+# The backlog lock opens the same DeleteOnClose handle, through the same opener. Item 260.
+if (-not (Test-Path -LiteralPath Function:Open-FileLockHandle)) {
+    . (Join-Path $PSScriptRoot "file-lock.ps1")
 }
 
 if (-not (Test-Path variable:script:HeldBacklogLocks)) {
@@ -20,13 +28,14 @@ if (-not (Test-Path variable:script:HeldBacklogLocks)) {
 function Get-BacklogLockFilePath {
     param([Parameter(Mandatory=$true)][string]$BacklogPath)
 
-    $resolved = $BacklogPath
     if (Test-Path -LiteralPath $BacklogPath) {
-        $resolved = (Resolve-Path -LiteralPath $BacklogPath).ProviderPath
+        $resolved = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $BacklogPath))
     } else {
         $parent = Split-Path -Parent $BacklogPath
         if ($parent -and (Test-Path -LiteralPath $parent)) {
-            $resolved = Join-Path (Resolve-Path -LiteralPath $parent).ProviderPath (Split-Path -Leaf $BacklogPath)
+            $resolved = Join-Path (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $parent)) (Split-Path -Leaf $BacklogPath)
+        } else {
+            $resolved = Resolve-FilesystemPath -Path $BacklogPath
         }
     }
     return "$resolved.lock"
@@ -63,23 +72,13 @@ function Invoke-WithBacklogLock {
     # holder's handle is closed by the OS and DeleteOnClose frees the path, so no waiter
     # judges a lock stale and deletes it; that guess let two waiters both enter. Item 224.
     $startTime = [System.DateTime]::UtcNow
-    $fileStream = $null
-    while ($null -eq $fileStream) {
-        try {
-            $fileStream = New-Object System.IO.FileStream(
-                $lockPath,
-                [System.IO.FileMode]::OpenOrCreate,
-                [System.IO.FileAccess]::ReadWrite,
-                [System.IO.FileShare]::None,
-                1,
-                [System.IO.FileOptions]::DeleteOnClose
-            )
-        } catch [System.IO.IOException] {
-            if (([System.DateTime]::UtcNow - $startTime).TotalSeconds -ge $TimeoutSeconds) {
-                throw "Timed out waiting to acquire BACKLOG.md lock at $lockPath (timeout ${TimeoutSeconds}s)"
-            }
-            Start-Sleep -Milliseconds 100
+    # The opener returns no handle only for another holder; a missing directory or bad path
+    # cannot be waited out, so it refuses now, naming the lock.
+    while ($null -eq ($fileStream = Open-FileLockHandle -LockPath $lockPath -Description ("BACKLOG.md lock at " + $lockPath))) {
+        if (([System.DateTime]::UtcNow - $startTime).TotalSeconds -ge $TimeoutSeconds) {
+            throw "Timed out waiting to acquire BACKLOG.md lock at $lockPath (timeout ${TimeoutSeconds}s)"
         }
+        Start-Sleep -Milliseconds 100
     }
 
     $script:HeldBacklogLocks[$normLockPath] = 1
@@ -94,15 +93,58 @@ function Invoke-WithBacklogLock {
 # TODO item 190: keep both legal spec filename forms in one place; callers choose
 # directory order and whether archived subdirectories belong in their search.
 function Get-BacklogSpecFiles {
+    [CmdletBinding(DefaultParameterSetName = "Directory")]
     param(
-        [Parameter(Mandatory = $true)][string]$Task,
-        [Parameter(Mandatory = $true)][string]$Directory,
+        [Parameter(Mandatory = $true, ParameterSetName = "Directory")]
+        [Parameter(Mandatory = $true, ParameterSetName = "Predicate")][string]$Task,
+        [Parameter(Mandatory = $true, ParameterSetName = "Directory")][string]$Directory,
+        [Parameter(Mandatory = $true, ParameterSetName = "Predicate")]
+        [Parameter(Mandatory = $true, ParameterSetName = "Decode")][string]$SpecPath,
+        [Parameter(Mandatory = $true, ParameterSetName = "Decode")][switch]$DecodeId,
         [switch]$Recurse
     )
 
+    if ($PSCmdlet.ParameterSetName -ne "Directory") {
+        $leaf = Split-Path -Leaf $SpecPath
+        # Decode only legal markdown names, retaining exact ID boundaries.
+        $id = if ($leaf -match '^([^_]+)(?:_.*)?\.md$') { $Matches[1] } else { "" }
+        if ($DecodeId) {
+            if ($id -eq "") { throw "Not a backlog spec filename: '$SpecPath'. Expected <id>.md or <id>_<slug>.md." }
+            return $id
+        }
+        return ($id -ne "" -and $id -ieq $Task)
+    }
     foreach ($pattern in @(($Task + "_*.md"), ($Task + ".md"))) {
         Get-ChildItem -LiteralPath $Directory -File -Filter $pattern -Recurse:$Recurse -ErrorAction SilentlyContinue
     }
+}
+
+# Findings use the same exact filename forms as specs. All research-directory readers
+# return every match in ordinal filename order, independent of mtimes. Item 257, I8/I13.
+function Get-ResearchFindingsArtifact {
+    param(
+        [Parameter(Mandatory = $true)][string]$TaskId,
+        [Parameter(Mandatory = $true)][string]$ResearchDirectory
+    )
+
+    $files = @(Get-BacklogSpecFiles -Task $TaskId -Directory $ResearchDirectory)
+    $names = [string[]]@($files | ForEach-Object { $_.Name })
+    [Array]::Sort($names, [StringComparer]::Ordinal)
+    foreach ($name in $names) {
+        $files | Where-Object { $_.Name -ceq $name }
+    }
+}
+
+# The one matcher of a BACKLOG.md or ARCHIVED.md row by task ID: the first cell is the ID
+# or a link whose text is the ID (item 227). Find, edit and delete all ask it. Item 245.
+function Test-BacklogTaskRow {
+    param(
+        [AllowEmptyString()][string]$Line,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$TaskId
+    )
+
+    $escaped = [regex]::Escape($TaskId)
+    return ($Line -match ('^\s*\|\s*(?:' + $escaped + '|\[' + $escaped + '\]\([^|]*\))\s*\|'))
 }
 
 # Resolve a spec from a task id, preferring active over loose over archived.
@@ -144,27 +186,120 @@ function Get-BacklogItemPathForTaskProjectRoot {
     return ""
 }
 
-function Get-BacklogSpecStatus {
+# Delimited metadata starts at the first nonblank line. Legacy specs without
+# delimiters expose only the first 30 lines, ending at any delimiter.
+function Get-SpecFrontmatterLines {
+    param([string]$SpecPath, [switch]$RequireFrontmatter)
+    $lines = @(Get-Content -LiteralPath $SpecPath -Encoding UTF8)
+    $start = 0
+    while ($start -lt $lines.Count -and [string]::IsNullOrWhiteSpace($lines[$start])) { $start++ }
+    $delimited = $start -lt $lines.Count -and $lines[$start].Trim() -eq "---"
+    if ($delimited) { $start++ } else { $start = 0 }
+    $end = $start
+    while ($end -lt $lines.Count -and $lines[$end].Trim() -ne "---") { $end++ }
+    if ($RequireFrontmatter -and (-not $delimited -or $end -eq $lines.Count)) { return }
+    if (-not $delimited) { $end = [Math]::Min($end, 30) }
+    for ($i = $start; $i -lt $end; $i++) { $lines[$i] }
+}
+
+# Scalar frontmatter access shared by the field owners. A path is read literally;
+# a supplied missing path fails rather than looking up a different spec by task ID.
+function Get-SpecFrontmatterField {
     param(
-        [Parameter(Mandatory = $true)][string]$Task,
-        [string]$ProjectRoot = ""
+        [Parameter(Mandatory = $true)][string]$SpecPath,
+        [Parameter(Mandatory = $true)][string]$Field,
+        [switch]$RequireFrontmatter,
+        [switch]$IncludePresence
     )
-
-    # The spec's frontmatter is the artifact; BACKLOG.md is an index rendered from it.
-    # Returns $null when no spec exists at all, which is what lets a caller tell
-    # "no such task" apart from "task exists and its status is blank".
-    $specPath = Get-BacklogItemPathForTaskProjectRoot -Task $Task -ProjectRoot $ProjectRoot
-    if ([string]::IsNullOrWhiteSpace($specPath) -or -not (Test-Path -LiteralPath $specPath)) {
-        return $null
-    }
-
-    foreach ($line in (Get-Content -LiteralPath $specPath -Head 30 -Encoding UTF8)) {
-        if ($line -match '^\s*status:\s*"?([^"#]+?)"?\s*$') {
-            return $matches[1].Trim()
+    foreach ($line in @(Get-SpecFrontmatterLines -SpecPath $SpecPath -RequireFrontmatter:$RequireFrontmatter)) {
+        if ($line -match ('^\s*' + [regex]::Escape($Field) + '\s*:\s*(.*?)\s*$')) {
+            $value = $Matches[1].Trim()
+            if ($value -match '^"([^"]*)"\s*(#.*)?$' -or $value -match "^'([^']*)'\s*(#.*)?$") {
+                $value = $Matches[1]
+            } elseif (-not ($value.StartsWith('"') -or $value.StartsWith("'"))) {
+                $value = ($value -replace '\s+#.*$', '').TrimEnd()
+            }
+            if ($IncludePresence) { return @{ Present = $true; Value = $value } }
+            return $value
         }
     }
-
+    if ($IncludePresence) { return @{ Present = $false; Value = "" } }
     return ""
+}
+
+function Get-BacklogSpecStatus {
+    [CmdletBinding(DefaultParameterSetName = "Task")]
+    param(
+        [Parameter(Mandatory = $true, ParameterSetName = "Task")][string]$Task,
+        [Parameter(Mandatory = $true, ParameterSetName = "Path")][string]$SpecPath,
+        [string]$ProjectRoot = "",
+        [switch]$RequireFrontmatter
+    )
+    if ($PSCmdlet.ParameterSetName -eq "Task") {
+        $SpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $Task -ProjectRoot $ProjectRoot
+        if ([string]::IsNullOrWhiteSpace($SpecPath)) { return $null }
+    }
+    return Get-SpecFrontmatterField -SpecPath $SpecPath -Field "status" -RequireFrontmatter:$RequireFrontmatter
+}
+
+function Get-SpecBudgetTier {
+    [CmdletBinding(DefaultParameterSetName = "Task")]
+    param(
+        [Parameter(Mandatory = $true, ParameterSetName = "Task")][string]$Task,
+        [Parameter(Mandatory = $true, ParameterSetName = "Path")][string]$SpecPath,
+        [switch]$IncludePath,
+        [switch]$Raw,
+        [switch]$Validate,
+        [string]$Default = "",
+        [string]$ProjectRoot = ""
+    )
+    if ($PSCmdlet.ParameterSetName -eq "Task") {
+        $SpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $Task -ProjectRoot $ProjectRoot
+        if ([string]::IsNullOrWhiteSpace($SpecPath)) {
+            if ($IncludePath) { return @{ Tier = ""; Path = "" } }
+            return ""
+        }
+    }
+    $field = Get-SpecFrontmatterField -SpecPath $SpecPath -Field "budget_tier" -IncludePresence
+    $tier = if ($field.Present) { $field.Value } else { $Default }
+    if ($Validate -and $field.Present -and $tier -notin @("low", "medium", "high", "extended")) {
+        throw "Invalid budget_tier in spec '$SpecPath': '$tier'. Allowed values: low, medium, high, extended"
+    }
+    if (-not $Raw) { $tier = $tier.ToLowerInvariant() }
+    if ($IncludePath) { return @{ Tier = $tier; Path = $SpecPath } }
+    return $tier
+}
+
+function Get-SpecIdentity {
+    param([Parameter(Mandatory = $true)][string]$SpecPath, [switch]$RequireFrontmatter, [string]$DefaultPriority = "", [switch]$Validate)
+    $values = @{}
+    foreach ($field in @("item_id", "priority", "type")) {
+        $entry = Get-SpecFrontmatterField -SpecPath $SpecPath -Field $field -RequireFrontmatter:$RequireFrontmatter -IncludePresence
+        $values[$field] = $entry.Value
+        if ($field -eq "priority") {
+            if (-not $entry.Present) { $values.priority = $DefaultPriority }
+            elseif ($Validate -and $entry.Value -notmatch '^P[0-3]$') {
+                throw "Invalid priority in spec '$SpecPath': '$($entry.Value)'. Allowed values: P0, P1, P2, P3"
+            }
+        }
+    }
+    return $values
+}
+
+function Get-SpecDependencies {
+    param([Parameter(Mandatory = $true)][string]$SpecPath)
+    $parsing = $false
+    foreach ($line in @(Get-SpecFrontmatterLines -SpecPath $SpecPath)) {
+        if ($line -match '^\s*depends_on:\s*\[([^\]]*)\]') {
+            $matches[1].Split(',') | ForEach-Object { $_.Trim().Trim('"', "'") } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            return
+        }
+        if ($line -match '^\s*depends_on:') { $parsing = $true; continue }
+        if ($parsing) {
+            if ($line -match '^\s*-\s*["'']?([A-Z][A-Z0-9\-]*[a-z]?)') { $matches[1] }
+            elseif ($line.Trim() -ne "" -and $line -notmatch '^\s*#') { return }
+        }
+    }
 }
 
 function Get-BacklogTaskStatus {
@@ -192,7 +327,6 @@ function Get-BacklogTaskStatus {
         $searched += $name
 
         $statusColumnIndex = -1
-        $escaped = [regex]::Escape($Task)
         foreach ($line in (Get-Content -Path $indexPath -Encoding UTF8)) {
             if ($line -match '^\|\s*ID\s*\|') {
                 $headerCols = ($line -split '\|' | ForEach-Object { $_.Trim() }) | Where-Object { $_ -ne "" }
@@ -201,7 +335,7 @@ function Get-BacklogTaskStatus {
             }
             if ($line -match '^\|\s*[-: ]+\|') { continue }
 
-            if ($line -match "^\|\s*(:?\[$escaped\]\([^)]+\)|$escaped)\s*\|") {
+            if (Test-BacklogTaskRow -Line $line -TaskId $Task) {
                 $rowCols = ($line -split '\|' | ForEach-Object { $_.Trim() }) | Where-Object { $_ -ne "" }
                 $status = if ($statusColumnIndex -ge 0 -and $statusColumnIndex -lt $rowCols.Count) {
                     $rowCols[$statusColumnIndex]
@@ -233,12 +367,7 @@ function Restore-BacklogTask {
         [string]$ProjectRoot = "",
         [string]$ActiveStatus = "In Progress"
     )
-    $resolvedProjectRoot = if (-not [string]::IsNullOrWhiteSpace($ProjectRoot)) {
-        $ProjectRoot
-    } else {
-        $repoRootVar = Get-Variable -Name "REPO_ROOT" -ErrorAction SilentlyContinue
-        if ($null -ne $repoRootVar) { $repoRootVar.Value } else { (Get-Location).Path }
-    }
+    $resolvedProjectRoot = Resolve-ConfigProjectRoot -ProjectRoot $ProjectRoot
 
     $backlogDir = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
     $backlogPath = Join-Path $backlogDir "BACKLOG.md"
@@ -280,10 +409,10 @@ function Restore-BacklogTask {
 
     # Restore frontmatter status
     $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-    if (-not (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath Function:Set-BacklogSpecFrontmatterStatus)) {
         if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
     }
-    if (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue) {
+    if (Test-Path -LiteralPath Function:Set-BacklogSpecFrontmatterStatus) {
         Set-BacklogSpecFrontmatterStatus -Path $activeSpecPath -Status $ActiveStatus
     }
 
@@ -292,15 +421,15 @@ function Restore-BacklogTask {
     $relativeArchived = "$type/archived/$fileName".Replace("\", "/")
 
     Invoke-WithBacklogLock -BacklogPath $backlogPath -ScriptBlock {
-        $rawLines = [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)
+        $rawLines = [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $backlogPath), [System.Text.Encoding]::UTF8)
         $lines = [System.Collections.Generic.List[string]]::new()
         foreach ($line in $rawLines) { [void]$lines.Add($line) }
 
-        # 1. Find and extract row matching TaskId (ignoring Priority Summary table rows)
+        # 1. Find and extract every row whose ID cell is TaskId. A row that only mentions
+        # the ID in another cell belongs to another task and stays. Item 245.
         $matchingIndexes = @()
         for ($i = 0; $i -lt $lines.Count; $i++) {
-            $line = $lines[$i]
-            if ($line -match '^\s*\|' -and $line -notmatch '^\s*\|\s*(\*\*P[0-3]\*\*|Priority)\s*\|' -and $line -match ('\b' + [regex]::Escape($TaskId) + '\b')) {
+            if (Test-BacklogTaskRow -Line $lines[$i] -TaskId $TaskId) {
                 $matchingIndexes += $i
             }
         }
@@ -376,10 +505,10 @@ function Restore-BacklogTask {
         }
 
         $lineArray = [string[]]$lines.ToArray()
-        if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+        if (-not (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn)) {
             if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
         }
-        if (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue) {
+        if (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn) {
             $statusColumn = Get-MarkdownTableStatusColumn -Lines $lineArray -RowIndex $mainIdx
             if ($statusColumn -ge 0) {
                 $cells = [System.Collections.Generic.List[string]]::new()
@@ -393,13 +522,15 @@ function Restore-BacklogTask {
             }
         }
 
-        [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $backlogPath), (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
     }
 
     # Reconcile Priority-Summary and validate
     $validateScript = Join-Path (Split-Path -Parent $PSScriptRoot) "validate-backlog.ps1"
     if (Test-Path $validateScript) {
-        & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $resolvedProjectRoot | Out-Null
+        $global:LASTEXITCODE = 0
+        $validationOutput = & (Get-RunningPowerShellCommand) -NoProfile -ExecutionPolicy Bypass -File $validateScript -FixSummary -ProjectRoot $resolvedProjectRoot 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Backlog validation exited $LASTEXITCODE during restore: $($validationOutput | Out-String)" }
     }
 }
 
@@ -418,22 +549,22 @@ function Set-ArchivedBacklogTaskAbandoned {
         $archivedMatch = Get-BacklogSpecFiles -Task $TaskId -Directory (Join-Path $backlogDir ($dir + "/archived")) | Select-Object -First 1
         if ($null -ne $archivedMatch) {
             $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-            if (-not (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath Function:Set-BacklogSpecFrontmatterStatus)) {
                 if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
             }
-            if (Get-Command "Set-BacklogSpecFrontmatterStatus" -ErrorAction SilentlyContinue) {
+            if (Test-Path -LiteralPath Function:Set-BacklogSpecFrontmatterStatus) {
                 Set-BacklogSpecFrontmatterStatus -Path $archivedMatch.FullName -Status "Abandoned"
             }
             $relativeArchived = "$dir/archived/$($archivedMatch.Name)"
             $archivedLink = $relativeArchived.Replace("\", "/")
-            if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn)) {
                 if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
             }
             # Read, edit and write under one lock so a row another run changes
             # in between is not overwritten. Item 183.
             Invoke-WithBacklogLock -BacklogPath $backlogPath -ScriptBlock {
                 $lines = [System.Collections.Generic.List[string]]::new()
-                foreach ($line in [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)) {
+                foreach ($line in [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $backlogPath), [System.Text.Encoding]::UTF8)) {
                     [void]$lines.Add($line)
                 }
                 $rowIndex = -1
@@ -453,7 +584,7 @@ function Set-ArchivedBacklogTaskAbandoned {
                 if ($statusColumn -ge $cells.Count) { return }
                 $cells[$statusColumn] = "Abandoned"
                 $lines[$rowIndex] = "| " + (($cells.ToArray()) -join " | ") + " |"
-                [System.IO.File]::WriteAllText($backlogPath, (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+                [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $backlogPath), (($lines.ToArray()) -join [Environment]::NewLine) + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
             }
             break
         }
@@ -487,7 +618,7 @@ function Get-TaskFinalizationDetails {
 
     # Load archive-task helper if not loaded
     $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-    if (-not (Get-Command "Get-MarkdownTableStatusColumn" -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath Function:Get-MarkdownTableStatusColumn)) {
         if (Test-Path -LiteralPath $archiveLibPath) {
             . $archiveLibPath
         } else {
@@ -513,11 +644,10 @@ function Get-TaskFinalizationDetails {
 
     # Item 227: match only the complete ID cell, not prefix IDs or other columns.
     # 2. Parse BACKLOG.md to find status of TaskId (ignoring Priority Summary table rows)
-    $lines = [System.IO.File]::ReadAllLines($backlogPath, [System.Text.Encoding]::UTF8)
+    $lines = [System.IO.File]::ReadAllLines((Resolve-FilesystemPath -Path $backlogPath), [System.Text.Encoding]::UTF8)
     $taskRowIndex = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i]
-        if ($line -match '^\s*\|' -and $line -notmatch '^\s*\|\s*(\*\*P[0-3]\*\*|Priority)\s*\|' -and $line -match ('^\s*\|\s*(?:' + [regex]::Escape($TaskId) + '|\[' + [regex]::Escape($TaskId) + '\]\([^|]*\))\s*\|')) {
+        if (Test-BacklogTaskRow -Line $lines[$i] -TaskId $TaskId) {
             $taskRowIndex = $i
             break
         }
@@ -548,10 +678,7 @@ function Get-TaskFinalizationDetails {
     $specToRead = if ($result.SpecExistsInArchived) { $result.SpecPathInArchived } else { $result.SpecPathInActive }
     $specStatus = ""
     if (-not [string]::IsNullOrEmpty($specToRead) -and (Test-Path -LiteralPath $specToRead)) {
-        $fmStr = [string](Get-Content -LiteralPath $specToRead -Head 15 -Encoding UTF8)
-        if ($fmStr -match 'status:\s*["'']?([^"''\s\r\n]+)"?') {
-            $specStatus = $matches[1]
-        }
+        $specStatus = Get-BacklogSpecStatus -SpecPath $specToRead
     }
 
     $result.SpecStatusMatches = ($specStatus -ieq $result.BacklogStatus)
@@ -572,9 +699,19 @@ function Invoke-HumanGateBacklogFinalization {
     )
 
     $finalizationOk = $true
-    if (Test-Path -LiteralPath $backlogPath) {
+    if (-not (Test-Path -LiteralPath $backlogPath)) {
+        # A missing backlog cannot show the task was finalized; fail closed. Item 287, I11.
+        Write-Host "[D44] ERROR: BACKLOG.md is missing at $backlogPath, so $TaskId cannot be finalized. Restore BACKLOG.md with an exact row for $TaskId, then re-run the gate with -GateOutcome accepted." -ForegroundColor Red
+        $finalizationOk = $false
+    } else {
         $backlogContent = Get-Content -LiteralPath $backlogPath -Raw -Encoding UTF8
-        if ($backlogContent -match [regex]::Escape($TaskId)) {
+        $hasExactRow = @($backlogContent -split "`r?`n" | Where-Object { Test-BacklogTaskRow -Line $_ -TaskId $TaskId }).Count -gt 0
+        if (-not $hasExactRow) {
+            # Fail closed like the deployment-to-done gate: an ID only in prose or as a prefix of
+            # another row cannot show the task was finalized. Item 285, I8.
+            Write-Host ("[D44] ERROR: BACKLOG.md has no exact row for $TaskId. A row must start with | $TaskId | or | [$TaskId](spec path) |. Repair the row in BACKLOG.md, then re-run the gate with -GateOutcome accepted.") -ForegroundColor Red
+            $finalizationOk = $false
+        } else {
             $finalization = Get-TaskFinalizationDetails -TaskId $TaskId -ProjectRoot $ProjectRoot
             if (-not $finalization.IsFinalized) {
                 # The expected path, not a recovery: the deployment prompt forbids the Operator
@@ -591,7 +728,7 @@ function Invoke-HumanGateBacklogFinalization {
                 } else {
                     # Load archive-task helper
                     $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-                    if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+                    if (-not (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive)) {
                         if (Test-Path -LiteralPath $archiveLibPath) {
                             . $archiveLibPath
                         } else {
@@ -652,10 +789,10 @@ function Invoke-AbandonedBacklogTaskArchive {
         $activeSpecPath = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $ProjectRoot
         if (-not [string]::IsNullOrEmpty($activeSpecPath) -and (Test-Path -LiteralPath $activeSpecPath) -and ($activeSpecPath -match '(?i)[/\\]active[/\\]')) {
             $archiveLibPath = Join-Path $PSScriptRoot "archive-task.ps1"
-            if (-not (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive)) {
                 if (Test-Path -LiteralPath $archiveLibPath) { . $archiveLibPath }
             }
-            if (Get-Command "Invoke-BacklogTaskArchive" -ErrorAction SilentlyContinue) {
+            if (Test-Path -LiteralPath Function:Invoke-BacklogTaskArchive) {
                 try {
                     $archiveResult = Invoke-BacklogTaskArchive -BacklogPath $backlogPath -SpecPath $activeSpecPath -Status "Abandoned"
                     Write-Host ("[D57] SUCCESS: Auto-archived abandoned task as $($archiveResult.Type) (status Abandoned): $($archiveResult.ArchivedRelPath)") -ForegroundColor Green

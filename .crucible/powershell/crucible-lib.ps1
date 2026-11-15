@@ -2,19 +2,22 @@ Set-StrictMode -Version Latest
 
 $helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
 if (-not (Test-Path -LiteralPath $helpersPath)) {
-    throw "Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $helpersPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $helpersPath
 
 $taskChecklistPath = Join-Path $PSScriptRoot "lib/task-checklist.ps1"
 if (-not (Test-Path -LiteralPath $taskChecklistPath)) {
-    throw "Required helper script not found at $taskChecklistPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $taskChecklistPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $taskChecklistPath
 
 $timePath = Join-Path $PSScriptRoot "lib/time.ps1"
 if (-not (Test-Path -LiteralPath $timePath)) {
-    throw "Required helper script not found at $timePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $timePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $timePath
 
@@ -168,136 +171,63 @@ function Invoke-NativeCommand {
     return $output
 }
 
-function Get-SpecBudgetTier {
-    param(
-        [Parameter(Mandatory = $true)][string]$Task,
-        [switch]$IncludePath,
-        [string]$ProjectRoot = ""
-    )
 
-    $specPath = Get-BacklogItemPathForTaskProjectRoot -Task $Task -ProjectRoot $ProjectRoot
-    if ([string]::IsNullOrWhiteSpace($specPath) -or -not (Test-Path -LiteralPath $specPath)) {
-        if ($IncludePath) {
-            return @{ Tier = ""; Path = "" }
-        }
-        return ""
-    }
-
-    $tier = ""
-    $frontmatter = Get-Content -LiteralPath $specPath -Head 30
-    foreach ($line in $frontmatter) {
-        if ($line -match '^\s*budget_tier:\s*"?(\w+)"?\s*$') {
-            $tier = $matches[1].ToLowerInvariant()
-            break
-        }
-    }
-
-    if ($IncludePath) {
-        return @{ Tier = $tier; Path = $specPath }
-    }
-    return $tier
-}
-
-function Invoke-FileLock {
-    param(
-        [Parameter(Mandatory = $true)][string]$LockPath,
-        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
-        [int]$TimeoutMs = 5000,
-        [string]$TimeoutMessage = "[LOCK] Timeout reached; waiting for the exclusive lock holder."
-    )
-
-    $lockAcquired = $false
-    $lockWaitTime = 0
-    $totalWaitMs = 0
-    $fileStream = $null
-    while (-not $lockAcquired) {
-        try {
-            # The handle, rather than the file's name, is the lock. FileShare.None prevents
-            # another process from opening it until this owner disposes the handle. DeleteOnClose
-            # removes the path on both normal exit and process death, so no waiter ever needs to
-            # guess whether a slow holder is stale or remove a lock owned by somebody else.
-            # OpenOrCreate makes an orphaned pathname immediately acquirable:
-            # a file without an open handle holds no lock.
-            $fileStream = New-Object System.IO.FileStream(
-                $LockPath,
-                [System.IO.FileMode]::OpenOrCreate,
-                [System.IO.FileAccess]::ReadWrite,
-                [System.IO.FileShare]::None,
-                1,
-                [System.IO.FileOptions]::DeleteOnClose
-            )
-            $lockAcquired = $true
-        } catch [System.IO.IOException] {
-            if ($lockWaitTime -ge $TimeoutMs) {
-                # The wait is deliberately unbounded: a crashed holder's handle is closed by the
-                # OS and DeleteOnClose frees the path, so anything still held after this long is a
-                # live holder that is stuck. That is worth waiting out rather than corrupting the
-                # file, but it has to be diagnosable - name the lock and the elapsed wait, because
-                # this message repeats forever and a bare one says nothing about which lock.
-                $totalWaitMs += $lockWaitTime
-                Write-Quiet ($TimeoutMessage + " Lock: " + $LockPath + ". Waited " + [int]($totalWaitMs / 1000) + "s so far; a holder still present has not crashed, it is stuck.") -ForegroundColor Yellow
-                $lockWaitTime = 0
-            } else {
-                Start-Sleep -Milliseconds 100
-                $lockWaitTime += 100
-            }
-        }
-    }
-
-    try {
-        & $ScriptBlock
-    } finally {
-        if ($null -ne $fileStream) {
-            $fileStream.Dispose()
-        }
-    }
-}
+. (Join-Path $PSScriptRoot "lib/file-lock.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 
 $crucibleContextPath = Join-Path $PSScriptRoot "lib/crucible-context.ps1"
 if (-not (Test-Path -LiteralPath $crucibleContextPath)) {
-    throw "Required helper script not found at $crucibleContextPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $crucibleContextPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $crucibleContextPath
 
 $eventLogPath = Join-Path $PSScriptRoot "lib/event-log.ps1"
 if (-not (Test-Path -LiteralPath $eventLogPath)) {
-    throw "Required helper script not found at $eventLogPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $eventLogPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $eventLogPath
 
 $blockedPath = Join-Path $PSScriptRoot "lib/blocked.ps1"
 if (-not (Test-Path -LiteralPath $blockedPath)) {
-    throw "Required helper script not found at $blockedPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $blockedPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $blockedPath
 
 $handoffPath = Join-Path $PSScriptRoot "lib/handoff.ps1"
 if (-not (Test-Path -LiteralPath $handoffPath)) {
-    throw "Required helper script not found at $handoffPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $handoffPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $handoffPath
 
 $worktreePath = Join-Path $PSScriptRoot "lib/worktree.ps1"
 if (-not (Test-Path -LiteralPath $worktreePath)) {
-    throw "Required helper script not found at $worktreePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $worktreePath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $worktreePath
 
 $pipelineDagPath = Join-Path $PSScriptRoot "lib/pipeline-dag.ps1"
 if (-not (Test-Path -LiteralPath $pipelineDagPath)) {
-    throw "Required helper script not found at $pipelineDagPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $pipelineDagPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $pipelineDagPath
 
 $crucibleGatesPath = Join-Path $PSScriptRoot "lib/crucible-gates.ps1"
 if (-not (Test-Path -LiteralPath $crucibleGatesPath)) {
-    throw "Required helper script not found at $crucibleGatesPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $crucibleGatesPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $crucibleGatesPath
 
 $sessionOutputPath = Join-Path $PSScriptRoot "lib/session-output.ps1"
 if (-not (Test-Path -LiteralPath $sessionOutputPath)) {
-    throw "Required helper script not found at $sessionOutputPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $sessionOutputPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $sessionOutputPath
 
@@ -305,31 +235,9 @@ if (-not (Test-Path -LiteralPath $sessionOutputPath)) {
 
 $taskRewindPath = Join-Path $PSScriptRoot "lib/task-rewind.ps1"
 if (-not (Test-Path -LiteralPath $taskRewindPath)) {
-    throw "Required helper script not found at $taskRewindPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository."
+    [Console]::Error.WriteLine("Required helper script not found at $taskRewindPath; your Crucible bundle is incomplete. Please see docs/updating.md to sync your bundle from the source repository.")
+    exit 1
 }
 . $taskRewindPath
 
-function ConvertTo-AsciiSafeText {
-    # Transliterate the smart punctuation agents routinely emit (em/en dashes, curly
-    # quotes, ellipsis, arrows, bullet, nbsp) to ASCII, then drop any remaining non-ASCII
-    # so a reason string survives a UTF-8 JSON round-trip without mojibake. Reasons are
-    # short human-readable strings, not content, so lossy transliteration is acceptable.
-    param([string]$Text)
-    if ([string]::IsNullOrEmpty($Text)) { return $Text }
-    $map = @{
-        [char]0x2013 = '-'; [char]0x2014 = '-'; [char]0x2012 = '-'; [char]0x2015 = '-'
-        [char]0x2018 = "'"; [char]0x2019 = "'"; [char]0x201A = "'"; [char]0x2032 = "'"
-        [char]0x201C = '"'; [char]0x201D = '"'; [char]0x201E = '"'; [char]0x2033 = '"'
-        [char]0x2026 = '...'; [char]0x2192 = '->'; [char]0x2190 = '<-'; [char]0x2022 = '*'
-        [char]0x00A0 = ' '
-    }
-    $sb = New-Object System.Text.StringBuilder
-    foreach ($ch in $Text.ToCharArray()) {
-        if ($map.ContainsKey($ch)) {
-            [void]$sb.Append($map[$ch])
-        } elseif ([int]$ch -lt 128) {
-            [void]$sb.Append($ch)
-        }
-    }
-    return $sb.ToString()
-}
+. (Join-Path $PSScriptRoot "lib/reason-text.ps1")

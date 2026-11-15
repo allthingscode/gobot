@@ -25,6 +25,20 @@ function New-PathProject {
 }
 
 try {
+    $results += Run-Test "No-code closure uses the caller project from a foreign directory" {
+        $root = New-PathProject "closure-caller"
+        $foreign = New-PathProject "closure-foreign"
+        Write-PathFixtureFile (Join-Path $root ".crucible/backlog/features/active/R-244.md") "---`ntype: Research`nstatus: Ready`n---`n# Research`n"
+        Push-Location $foreign
+        try {
+            & {
+                param($REPO_ROOT, $ForeignRoot)
+                Assert-Result "closure finds the caller project's spec" (Test-NoCodeClosure -TaskId R-244) "closure ignored REPO_ROOT and inspected cwd"
+                Assert-Result "explicit closure root wins over the caller" (-not (Test-NoCodeClosure -TaskId R-244 -ProjectRoot $ForeignRoot)) "explicit root was ignored"
+            } $root $foreign
+        } finally { Pop-Location }
+    }
+
     $results += Run-Test "Eval analysis reads all configured session inputs" {
         $root = New-PathProject "eval"
         $session = Join-Path $root "runtime state"

@@ -23,6 +23,11 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+# I11: translate helper failures at the command boundary, after helper cleanup.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
 
 $helpersPath = Join-Path $PSScriptRoot "lib/config-helpers.ps1"
 if (-not (Test-Path -LiteralPath $helpersPath)) {
@@ -37,16 +42,16 @@ if ($Drift) {
 
     $resolvedBundleRoot = $BundleRoot
     if ([string]::IsNullOrWhiteSpace($resolvedBundleRoot)) {
-        $resolvedBundleRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+        $resolvedBundleRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")))
     } else {
-        $resolvedBundleRoot = (Resolve-Path -LiteralPath $resolvedBundleRoot).Path
+        $resolvedBundleRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $resolvedBundleRoot))
     }
 
     $frameworkRoot = $FrameworkSource
     if ([string]::IsNullOrWhiteSpace($frameworkRoot)) {
         $frameworkRoot = $resolvedBundleRoot
     } else {
-        $frameworkRoot = (Resolve-Path -LiteralPath $frameworkRoot).Path
+        $frameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $frameworkRoot))
     }
 
     $installManifest = Get-InstallManifest -FrameworkRoot $frameworkRoot
@@ -69,7 +74,7 @@ if ($Drift) {
 
         $hasCommit = $false
         try {
-            $null = git -C $frameworkRoot rev-parse --quiet --verify ($installCommit + "^{commit}") 2>$null
+            $null = git -C (Resolve-FilesystemPath -Path $frameworkRoot) rev-parse --quiet --verify ($installCommit + "^{commit}") 2>$null
             if ($LASTEXITCODE -eq 0) { $hasCommit = $true }
         } catch {}
 
@@ -132,7 +137,7 @@ $RECENT_CB_WINDOW_HOURS = 72
 # --- 1. Load Data ---
 
 if (-not (Test-Path $STATE_FILE)) {
-    Write-Error "Session state file not found: $STATE_FILE"
+    [Console]::Error.WriteLine("Session state file not found: $STATE_FILE")
     exit 1
 }
 $sessionState = Get-Content $STATE_FILE | ConvertFrom-Json
@@ -140,7 +145,7 @@ $sessionState = Get-Content $STATE_FILE | ConvertFrom-Json
 $taskIds = @($sessionState.tasks.PSObject.Properties | ForEach-Object { $_.Name })
 
 if (-not (Test-Path $BACKLOG_FILE)) {
-    Write-Error "Backlog file not found: $BACKLOG_FILE"
+    [Console]::Error.WriteLine("Backlog file not found: $BACKLOG_FILE")
     exit 1
 }
 $backlogLines = Get-Content $BACKLOG_FILE
@@ -276,24 +281,7 @@ foreach ($taskId in $taskIds) {
     $dependencies = ""
     $featureFiles = @(Get-BacklogSpecFiles -Task $taskId -Directory $backlogDir -Recurse | Where-Object { $_.FullName -match "active" })
     if ($featureFiles.Count -gt 0) {
-        $specContent = Get-Content $featureFiles[0].FullName
-        $inDepends = $false
-        $deps = @()
-        foreach ($line in $specContent) {
-            if ($line -match "^depends_on:\s*\[(.*?)\]") {
-                $depsStr = $Matches[1] -replace '["''\s]', ''
-                if ($depsStr) { $deps += $depsStr -split ',' }
-                break
-            } elseif ($line -match "^depends_on:") {
-                $inDepends = $true
-            } elseif ($inDepends -and $line -match "^---\s*$") {
-                break
-            } elseif ($inDepends -and $line -match "^\s*-\s*[`"']?([A-Z]+-\d+[a-z]?)") {
-                $deps += $Matches[1]
-            } elseif ($inDepends -and $line -notmatch "^\s*-" -and $line.Trim() -ne "") {
-                $inDepends = $false
-            }
-        }
+        $deps = @(Get-SpecDependencies -SpecPath $featureFiles[0].FullName)
         if ($deps.Count -gt 0) {
             $dependencies = $deps -join ", "
         }
@@ -435,3 +423,4 @@ if (-not $Tasks -or $Summary) {
     }
 }
 Write-Host "`n"
+exit 0

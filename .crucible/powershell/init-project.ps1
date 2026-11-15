@@ -14,6 +14,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Translate unhandled setup/helper failures at the command boundary. Local
+# recovery (for example optional provenance) keeps its reusable exceptions.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 $REPO_ROOT = Split-Path -Parent $PSScriptRoot
 $templateRoot = Join-Path $REPO_ROOT "templates/project/.crucible"
 
@@ -27,6 +34,7 @@ foreach ($lib in "instruction-blocks.ps1", "language-presets.ps1", "config-helpe
 . (Join-Path $PSScriptRoot "lib/language-presets.ps1")
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 . (Join-Path $PSScriptRoot "lib/install-manifest.ps1")
+. (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
 
 function Write-Info {
     param(
@@ -38,18 +46,12 @@ function Write-Info {
     }
 }
 
-function ConvertTo-YamlScalar {
-    param([Parameter(Mandatory=$true)][string]$Value)
-    $escaped = $Value.Replace("\", "\\").Replace('"', '\"')
-    return '"' + $escaped + '"'
-}
-
 function Write-Utf8NoBomFile {
     param(
         [Parameter(Mandatory=$true)][string]$Path,
         [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Content
     )
-    [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Resolve-FilesystemPath -Path $Path), $Content, [System.Text.UTF8Encoding]::new($false))
 }
 
 function Get-CrucibleSourceStamp {
@@ -98,9 +100,9 @@ function Set-CrucibleConfigStamp {
 
     if ($Version -match '^[0-9]+\.[0-9]+\.[0-9]+') {
         if ($hasVersion) {
-            $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-YamlScalar -Value $Version))
+            $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-ConfigScalar -Value $Version))
         } else {
-            $config = $config.TrimEnd() + "`ncrucible_version: " + (ConvertTo-YamlScalar -Value $Version) + "`n"
+            $config = $config.TrimEnd() + "`ncrucible_version: " + (ConvertTo-ConfigScalar -Value $Version) + "`n"
         }
     } elseif ($hasVersion) {
         $config = $config -replace '(?m)^crucible_version: .+\r?\n', ''
@@ -108,9 +110,9 @@ function Set-CrucibleConfigStamp {
 
     if ($Commit -match '^[0-9a-f]{40}$') {
         if ($hasCommit) {
-            $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-YamlScalar -Value $Commit))
+            $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-ConfigScalar -Value $Commit))
         } else {
-            $config = $config.TrimEnd() + "`ncrucible_install_commit: " + (ConvertTo-YamlScalar -Value $Commit) + "`n"
+            $config = $config.TrimEnd() + "`ncrucible_install_commit: " + (ConvertTo-ConfigScalar -Value $Commit) + "`n"
         }
     } elseif ($hasCommit) {
         $config = $config -replace '(?m)^crucible_install_commit: .+\r?\n', ''
@@ -131,13 +133,14 @@ function Copy-TemplateDirectory {
         New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     }
 
-    $sourceRoot = (Resolve-Path -LiteralPath $Source).Path
+    $sourceRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $Source))
+    $frameworkRoot = Resolve-FilesystemPath -Path $REPO_ROOT
     $entries = Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse
     foreach ($entry in $entries) {
         $relative = $entry.FullName.Substring($sourceRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 
-        if ($entry.FullName.StartsWith($REPO_ROOT, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $repoRel = $entry.FullName.Substring($REPO_ROOT.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar).Replace("\", "/")
+        if (Test-PathWithinDirectory -Path $entry.FullName -Directory $frameworkRoot) {
+            $repoRel = Get-PathRelativeToDirectory -Path $entry.FullName -Directory $frameworkRoot -Separator "/"
             if (Test-NestedCrucibleRuntimePath -RelativePath $repoRel -Manifest $Manifest) {
                 continue
             }
@@ -193,10 +196,10 @@ if (-not $scaffoldCheck.IsAuthoritative) {
 
 $resolvedProjectRoot = $ProjectRoot
 if (Test-Path -LiteralPath $ProjectRoot) {
-    $resolvedProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $resolvedProjectRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 } else {
     New-Item -ItemType Directory -Path $ProjectRoot -Force | Out-Null
-    $resolvedProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $resolvedProjectRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 }
 
 if ([string]::IsNullOrWhiteSpace($ProjectName)) {
@@ -263,26 +266,26 @@ if (-not (Test-Path -LiteralPath $configPath)) {
 }
 
 $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
-$config = $config -replace '(?m)^  name: .+$', ('  name: ' + (ConvertTo-YamlScalar -Value $ProjectName))
-$config = $config -replace '(?m)^  description: .+$', ('  description: ' + (ConvertTo-YamlScalar -Value $Description))
+$config = $config -replace '(?m)^  name: .+$', ('  name: ' + (ConvertTo-ConfigScalar -Value $ProjectName))
+$config = $config -replace '(?m)^  description: .+$', ('  description: ' + (ConvertTo-ConfigScalar -Value $Description))
 # Crucible merges into project.default_branch and stops when it does not exist, so the
 # default is the branch the project is on, not a guess. Item 189.
 if ([string]::IsNullOrWhiteSpace($DefaultBranch)) {
-    $currentBranch = (git -C $resolvedProjectRoot symbolic-ref --short -q HEAD 2>$null)
+    $currentBranch = (git -C (Resolve-FilesystemPath -Path $resolvedProjectRoot) symbolic-ref --short -q HEAD 2>$null)
     $DefaultBranch = if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($currentBranch)) { ([string]$currentBranch).Trim() } else { "main" }
 }
-$config = $config -replace '(?m)^  default_branch: .+$', ('  default_branch: ' + (ConvertTo-YamlScalar -Value $DefaultBranch))
-$config = $config -replace '(?m)^crucible_root: .+$', ('crucible_root: ' + (ConvertTo-YamlScalar -Value ".crucible"))
+$config = $config -replace '(?m)^  default_branch: .+$', ('  default_branch: ' + (ConvertTo-ConfigScalar -Value $DefaultBranch))
+$config = $config -replace '(?m)^crucible_root: .+$', ('crucible_root: ' + (ConvertTo-ConfigScalar -Value ".crucible"))
 
 $stamp = Get-CrucibleSourceStamp
 if ($stamp.Version -match '^[0-9]+\.[0-9]+\.[0-9]+') {
-    $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-YamlScalar -Value $stamp.Version))
+    $config = $config -replace '(?m)^crucible_version: .+$', ('crucible_version: ' + (ConvertTo-ConfigScalar -Value $stamp.Version))
 } else {
     $config = $config -replace '(?m)^crucible_version: .+\r?\n', ''
 }
 
 if ($stamp.Commit -match '^[0-9a-f]{40}$') {
-    $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-YamlScalar -Value $stamp.Commit))
+    $config = $config -replace '(?m)^crucible_install_commit: .+$', ('crucible_install_commit: ' + (ConvertTo-ConfigScalar -Value $stamp.Commit))
 } else {
     $config = $config -replace '(?m)^crucible_install_commit: .+\r?\n', ''
 }
@@ -309,7 +312,7 @@ if ([string]::IsNullOrEmpty($finalBacklogDir) -and ![string]::IsNullOrEmpty($det
 }
 
 if (![string]::IsNullOrEmpty($finalBacklogDir)) {
-    $backlogVal = ConvertTo-YamlScalar -Value $finalBacklogDir
+    $backlogVal = ConvertTo-ConfigScalar -Value $finalBacklogDir
     $pathsBlock = "`npaths:`n  backlog: $backlogVal`n  session: .crucible/session`n  workspaces: .crucible/.agent-workspaces`n  prompts: .crucible/prompts`n  personas: .crucible/personas`n  sops: .crucible/sops"
     $config += $pathsBlock
 }
@@ -404,7 +407,9 @@ if ($WithSampleTask) {
         if ($Quiet) {
             $validateQuiet = $true
         }
+        $global:LASTEXITCODE = 0
         & (Join-Path $PSScriptRoot "validate-backlog.ps1") -FixSummary -BacklogPath $backlogFilePath -Quiet:$validateQuiet | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Backlog validation failed (exit $LASTEXITCODE)." }
     }
 }
 
@@ -433,14 +438,20 @@ if (Test-Path -LiteralPath (Join-Path $resolvedProjectRoot ".git")) {
     # -Quiet follows init-project's Quiet. The installer's Write-Host is this
     # process's stdout when we are ourselves a child; an uncaptured caller would
     # otherwise inherit "Success:" as a path.
+    $global:LASTEXITCODE = 0
     & $hookInstaller -Quiet:$Quiet
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installed hook activation failed (exit $LASTEXITCODE)."
+    }
 }
 
 # Item 213: generate the Claude agent definitions a Claude dispatch names. Written from the
 # installed copy so the bundle ships what it runs; only crucible-*.md in .claude/agents/.
 $agentSync = Join-Path $targetCrucible "powershell/sync-claude-agents.ps1"
 if (Test-Path -LiteralPath $agentSync -PathType Leaf) {
+    $global:LASTEXITCODE = 0
     if ($Quiet) { $null = & $agentSync -ProjectRoot $resolvedProjectRoot 6>$null } else { $null = & $agentSync -ProjectRoot $resolvedProjectRoot }
+    if ($LASTEXITCODE -ne 0) { throw "Agent definition generation exited $LASTEXITCODE." }
 }
 
 Write-Info ""
@@ -457,10 +468,14 @@ Write-Info "  - .crucible/agent-instructions/ (copy-ready root instruction snipp
 Write-Info "  - .crucible/docs/, personas/, sops/, prompts/, schemas/, standards/, powershell/"
 Write-Info "  - .claude/agents/crucible-*.md (generated Claude agent definitions; regenerate with .crucible/powershell/sync-claude-agents.ps1)"
 Write-Info ""
-$backlogDirForRel = Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot
+# Slice the normalized forms the containment test compares: the configured value can
+# spell the same directory differently (doubled backslashes, item 307), so cutting the raw
+# string at the project root's length lands mid-name.
+$backlogDirForRel = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path (Get-ConfiguredPath -Key "backlog" -ProjectRoot $resolvedProjectRoot)))
+$projectRootForRel = [System.IO.Path]::GetFullPath((Resolve-FilesystemPath -Path $resolvedProjectRoot))
 $relativeBacklogPath = $backlogDirForRel
-if ($backlogDirForRel.StartsWith($resolvedProjectRoot)) {
-    $relativeBacklogPath = $backlogDirForRel.Substring($resolvedProjectRoot.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+if (Test-PathWithinDirectory -Path $backlogDirForRel -Directory $projectRootForRel) {
+    $relativeBacklogPath = Get-PathRelativeToDirectory -Path $backlogDirForRel -Directory $projectRootForRel
 }
 $relativeBacklogPath = $relativeBacklogPath -replace '\\', '/'
 if (-not $relativeBacklogPath.EndsWith('/')) { $relativeBacklogPath += '/' }
@@ -487,9 +502,9 @@ if ($AppendInstructions) {
     Write-Info "  2. Merge .crucible/agent-instructions/AGENTS.md into the project root AGENTS.md."
     Write-Info "  3. Add CLAUDE.md or GEMINI.md forwarding snippets if those tools are used."
 }
-Write-Info "  4. From the project root, run .crucible/powershell/validate-config.ps1 -ConfigPath .crucible/config.yaml."
+Write-Info ("  4. From the project root, run " + (New-CrucibleCommand -Script "powershell/validate-config.ps1" -Transport PowerShell -Parameters ([ordered]@{ ConfigPath = ".crucible/config.yaml" }) -CrucibleRoot ".crucible") + ".")
 if ($WithSampleTask) {
-    Write-Info "  5. F-001 sample task installed. Run '.\.crucible\powershell\crucible.ps1 -Init -TaskId F-001 -ProjectRoot `"$resolvedProjectRoot`"' to smoke-test the pipeline. Add your own backlog items afterward." -ForegroundColor DarkGray
+    Write-Info ("  5. F-001 sample task installed. Run '" + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Transport PowerShell -Parameters ([ordered]@{ Init = $true; TaskId = "F-001"; ProjectRoot = $resolvedProjectRoot }) -CrucibleRoot ".\.crucible") + "' to smoke-test the pipeline. Add your own backlog items afterward.") -ForegroundColor DarkGray
 } else {
     Write-Info "  5. Add initial backlog items under $relativeBacklogPath."
 }

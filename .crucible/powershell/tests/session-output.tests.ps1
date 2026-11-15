@@ -9,7 +9,7 @@ $CRUCIBLE_LIB = Join-Path $REPO_ROOT "powershell/crucible-lib.ps1"
 $Quiet = $true
 . $CRUCIBLE_LIB
 
-if (-not (Get-Command Check-Dependencies -ErrorAction SilentlyContinue)) {
+if (-not (Test-Path -LiteralPath Function:Check-Dependencies)) {
     function Check-Dependencies {
         param([string]$BacklogItemPath, [string]$TargetSpecialist, [string]$TaskId)
     }
@@ -87,6 +87,22 @@ function New-TestContext {
 $tempRoot = New-TestFixtureRoot -NameHint "session-output-test"
 
 try {
+    $results += Run-Test -Name "Item255 initialization enforces an unquoted spec budget" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "item255-budget")
+        $ctx.TypeDir = "features"
+        $ctx.Handoff.budget_tier = "high"
+        $active = Join-Path $ctx.BacklogDir "features/active"
+        New-Item -ItemType Directory -Force -Path $active | Out-Null
+        Set-Content -LiteralPath (Join-Path $active "F-901.md") -Value "---`nbudget_tier: low`n---" -Encoding UTF8
+        Initialize-CrucibleTargetSession -Context $ctx
+        Assert-Result "unquoted tier enforced" ($ctx.Handoff.budget_tier -eq "low") "unquoted spec allowed budget escalation"
+        Remove-Item -LiteralPath (Join-Path $ctx.SessionDir "F-901/verification/task.md")
+        Set-Content -LiteralPath (Join-Path $active "F-901.md") -Value "---`ntype: feature`n---" -Encoding UTF8
+        $ctx.Handoff.budget_tier = "high"
+        Initialize-CrucibleTargetSession -Context $ctx
+        Assert-Result "missing tier keeps handoff budget" ($ctx.Handoff.budget_tier -eq "high") "absent tier changed handoff policy"
+    }
+
 
     $results += Run-Test -Name "Generated handoff reference uses supplied custom session (item 188)" -Body {
         $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "custom-handoff") -TaskId "F-188" -TargetPhase "verification"
@@ -105,6 +121,28 @@ try {
         Assert-Result -Name "checklist worktree" -Condition ($text.Contains("Enter worktree $wt")) -FailureMessage $text
     }
 
+    # Review of 6dcfdcf (item 247): task.md says to run the session-end line "via your Bash
+    # tool", but it was quoted for PowerShell, so bash read 'it''s $x' as its $x. The line is
+    # parsed here by bash itself, with printf standing in for pwsh so nothing else runs.
+    $results += Run-Test -Name "The session-end line in task.md reads as bash says it should" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot "bash it's `$x end") -TaskId "F-247" -TargetPhase "verification"
+        $ctx.TypeDir = "features"
+        $env:CRUCIBLE_CYCLE_ID = "item247-bash"
+        Initialize-CrucibleTargetSession -Context $ctx
+        $text = Get-Content -LiteralPath (Join-Path $ctx.SessionDir "F-247/verification/task.md") -Raw
+        $lines = @($text -split "`r?`n")
+        $at = [Array]::IndexOf($lines, @($lines | Where-Object { $_ -match 'via your Bash tool' })[0])
+        $command = @($lines[($at + 1)..($lines.Count - 1)] | Where-Object { $_.Trim() -ne "" })[0].Trim()
+        Assert-Result -Name "session-end line starts pwsh -File" -Condition ($command -match '^\S+ -NoProfile -ExecutionPolicy Bypass -File ') -FailureMessage $command
+        $probe = "printf '%s\n'" + ($command -replace '^\S+ -NoProfile -ExecutionPolicy Bypass -File', '')
+        $probePath = Join-Path $tempRoot "bash-session-end.sh"
+        [System.IO.File]::WriteAllText($probePath, $probe + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        $bash = Get-TestBash
+        $argv = @(Invoke-ExternalCommand -AsLines { & $bash $probePath 2>&1 } | ForEach-Object { [string]$_ })
+        $rootAt = [Array]::IndexOf($argv, "-ProjectRoot")
+        Assert-Result -Name "bash reads the project root verbatim" -Condition ($LASTEXITCODE -eq 0 -and $rootAt -ge 0 -and $argv[$rootAt + 1] -ceq $ctx.RepoRoot) -FailureMessage ($command + " => " + ($argv -join " | "))
+    }
+
     $results += Run-Test -Name "Write-NextStep writes expected content with explicit SessionDir" -Body {
         $sessionDir = Join-Path $tempRoot "next-step/session"
         $command = "$((Get-PwshCommand)) -File crucible.ps1 -Init -TaskId F-901"
@@ -120,12 +158,12 @@ try {
 
     $results += Run-Test -Name "Write-NextStep names the target and tells grok to omit model" -Body {
         $sessionDir = Join-Path $tempRoot "model-line/session"
-        $grokLines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-911" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "inherit" -RecommendedTarget "grok" 6>&1 | ForEach-Object { "$_" })
+        $grokLines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-911" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "inherit" -RecommendedTarget "grok" 6>&1 } | ForEach-Object { "$_" })
         $grokLine = @($grokLines | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
         Assert-Result -Name "grok line omits model" -Condition ($grokLine.Count -eq 1 -and $grokLine[0] -match 'inherit \(target grok\) - omit model') -FailureMessage ("got: " + ($grokLine -join " | "))
         Assert-Result -Name "grok line does not name a Claude slug" -Condition ($grokLine[0] -notmatch 'sonnet|opus|haiku') -FailureMessage ("got: " + $grokLine[0])
 
-        $claudeLines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-912" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" 6>&1 | ForEach-Object { "$_" })
+        $claudeLines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-912" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" 6>&1 } | ForEach-Object { "$_" })
         $claudeLine = @($claudeLines | Where-Object { $_ -match '\[RECOMMENDED MODEL\]' })
         Assert-Result -Name "claude line names its target" -Condition ($claudeLine.Count -eq 1 -and $claudeLine[0] -match 'claude-sonnet-5-5 \(target claude\) - dispatch the specialist') -FailureMessage ("got: " + ($claudeLine -join " | "))
         Assert-Result -Name "claude with no level prints no level" -Condition (-not ($claudeLines -match '\[RECOMMENDED LEVEL\]')) -FailureMessage ("got: " + ($claudeLines -join " | "))
@@ -134,15 +172,15 @@ try {
     # Item 213: a Claude dispatch names the generated agent definition and passes neither model nor effort.
     $results += Run-Test -Name "Write-NextStep prints the recommended agent and warns when its definition is stale" -Body {
         $sessionDir = Join-Path $tempRoot "agent-line/session"
-        $lines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-921" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 | ForEach-Object { "$_" })
+        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-921" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 } | ForEach-Object { "$_" })
         $agent = @($lines | Where-Object { $_ -match '\[RECOMMENDED AGENT\]' })
         Assert-Result -Name "agent line names the subagent_type and omits model and effort" -Condition ($agent.Count -eq 1 -and $agent[0] -match '\[RECOMMENDED AGENT\] crucible-default - dispatch with subagent_type crucible-default and omit model and effort') -FailureMessage ("got: " + ($lines -join " | "))
         Assert-Result -Name "no warning when the definition matches" -Condition (-not ($lines -match '\[WARN\]')) -FailureMessage ($lines -join " | ")
 
-        $warned = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-922" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" -RecommendedAgentIssue "Agent definition crucible-default is stale for the configured level. Run: sync" 6>&1 | ForEach-Object { "$_" })
+        $warned = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-922" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" -RecommendedAgent "crucible-default" -RecommendedAgentIssue "Agent definition crucible-default is stale for the configured level. Run: sync" 6>&1 } | ForEach-Object { "$_" })
         Assert-Result -Name "stale warning is printed" -Condition (@($warned | Where-Object { $_ -match '^\[WARN\] Agent definition crucible-default is stale' }).Count -eq 1) -FailureMessage ($warned -join " | ")
 
-        $codex = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-923" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 | ForEach-Object { "$_" })
+        $codex = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-923" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-terra" -RecommendedTarget "codex" -RecommendedEffort "high" -RecommendedLevel "default" -RecommendedAgent "crucible-default" 6>&1 } | ForEach-Object { "$_" })
         Assert-Result -Name "a Codex target prints no agent line" -Condition (-not ($codex -match '\[RECOMMENDED AGENT\]')) -FailureMessage ($codex -join " | ")
     }
 
@@ -161,18 +199,18 @@ try {
             $oldPath = $env:PATH
             try {
                 $env:PATH = ""
-                $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+                $output = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             } finally {
                 $env:PATH = $oldPath
             }
             $agentLine = @(($output -split "`r?`n") | Where-Object { $_ -match '\[RECOMMENDED AGENT\]' })
             Assert-Result -Name ($case.Phase + " names " + $case.Want) -Condition ($agentLine.Count -eq 1 -and $agentLine[0] -match ('\] ' + $case.Want + ' - dispatch with subagent_type')) -FailureMessage $output
-            Assert-Result -Name ($case.Phase + " warns with the sync command when the file is missing") -Condition ($output -match ('\[WARN\] Agent definition ' + $case.Want + ' is missing') -and $output -match 'sync-claude-agents\.ps1 -ProjectRoot \.') -FailureMessage $output
+            Assert-Result -Name ($case.Phase + " warns with the sync command when the file is missing") -Condition ($output -match ('\[WARN\] Agent definition ' + $case.Want + ' is missing') -and $output -match "& '[^']*sync-claude-agents\.ps1' -ProjectRoot '\.'") -FailureMessage $output
 
-            & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $ctx.RepoRoot 6>&1 | Out-Null
+            Invoke-ExternalCommand -AsLines { & (Join-Path $REPO_ROOT "powershell/sync-claude-agents.ps1") -ProjectRoot $ctx.RepoRoot 6>&1 } | Out-Null
             try {
                 $env:PATH = ""
-                $synced = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+                $synced = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             } finally {
                 $env:PATH = $oldPath
             }
@@ -182,21 +220,21 @@ try {
     # Item 163: a Codex level is a model and an effort together, so it is printed as one pair.
     $results += Run-Test -Name "Write-NextStep prints a Codex level as one model and effort pair" -Body {
         $sessionDir = Join-Path $tempRoot "level-line/session"
-        $lines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-914" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-sol" -RecommendedTarget "codex" -RecommendedEffort "low" -RecommendedLevel "default" 6>&1 | ForEach-Object { "$_" })
+        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-914" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "gpt-6.1-terra" -RecommendedTarget "codex" -RecommendedEffort "high" -RecommendedLevel "default" 6>&1 } | ForEach-Object { "$_" })
         $level = @($lines | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
-        Assert-Result -Name "level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = gpt-6\.1-sol at low effort \(target codex\)') -FailureMessage ("got: " + ($lines -join " | "))
+        Assert-Result -Name "level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = gpt-6\.1-terra at high effort \(target codex\)') -FailureMessage ("got: " + ($lines -join " | "))
         $effort = @($lines | Where-Object { $_ -match '\[RECOMMENDED EFFORT\]' })
-        Assert-Result -Name "effort line names its model" -Condition ($effort.Count -eq 1 -and $effort[0] -match 'low - .*-Model gpt-6\.1-sol') -FailureMessage ("got: " + ($effort -join " | "))
+        Assert-Result -Name "effort line names its model" -Condition ($effort.Count -eq 1 -and $effort[0] -match "high - .*launch-codex-specialist\.ps1 -Effort 'high', with -Model gpt-6\.1-terra \(Codex only\)") -FailureMessage ("got: " + ($effort -join " | "))
     }
 
     # Item 212: a Claude tier is a level too; the effort goes to the Agent tool's effort parameter.
     $results += Run-Test -Name "Write-NextStep prints a Claude level as a pair and points the effort at the Agent tool" -Body {
         $sessionDir = Join-Path $tempRoot "claude-level-line/session"
-        $lines = @(Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-916" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "medium" -RecommendedLevel "default" 6>&1 | ForEach-Object { "$_" })
+        $lines = @(Invoke-ExternalCommand -AsLines { Write-NextStep -SessionDir $sessionDir -Command "init" -TaskId "F-916" -Specialist "grooming" -ActionCmd "go" -RecommendedModel "claude-sonnet-5-5" -RecommendedTarget "claude" -RecommendedEffort "high" -RecommendedLevel "default" 6>&1 } | ForEach-Object { "$_" })
         $level = @($lines | Where-Object { $_ -match '\[RECOMMENDED LEVEL\]' })
-        Assert-Result -Name "claude level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = claude-sonnet-5-5 at medium effort \(target claude\)') -FailureMessage ("got: " + ($lines -join " | "))
+        Assert-Result -Name "claude level line is the pair" -Condition ($level.Count -eq 1 -and $level[0] -match '\[RECOMMENDED LEVEL\] default = claude-sonnet-5-5 at high effort \(target claude\)') -FailureMessage ("got: " + ($lines -join " | "))
         $effort = @($lines | Where-Object { $_ -match '\[RECOMMENDED EFFORT\]' })
-        Assert-Result -Name "claude effort line names the Agent tool" -Condition ($effort.Count -eq 1 -and $effort[0] -match "medium - pass as the Agent tool's effort parameter" -and $effort[0] -notmatch 'launch-codex-specialist|Codex only') -FailureMessage ("got: " + ($effort -join " | "))
+        Assert-Result -Name "claude effort line names the Agent tool" -Condition ($effort.Count -eq 1 -and $effort[0] -match "high - pass as the Agent tool's effort parameter" -and $effort[0] -notmatch 'launch-codex-specialist|Codex only') -FailureMessage ("got: " + ($effort -join " | "))
     }
     # Item 178: -Init prints the approval mode in effect, and a dispatch after a gate always waits.
     $results += Run-Test -Name "Write-CrucibleCiStatusBanner prints the approval mode, per-phase after a gate" -Body {
@@ -220,7 +258,7 @@ try {
             $oldPath = $env:PATH
             try {
                 $env:PATH = ""
-                $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+                $output = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             } finally {
                 $env:PATH = $oldPath
             }
@@ -265,20 +303,140 @@ Ceiling {budget_ceiling}
         Assert-Result -Name "handoff file absolute" -Condition ($handoffLine -eq ("Handoff " + $ctx.LatestHandoff.FullName)) -FailureMessage ("got: " + $handoffLine)
     }
 
-    $results += Run-Test -Name "A rebase prompt on a main-only repository names main, not master" -Body {
-        # Item 189.
-        $caseRoot = Join-Path $tempRoot "rebase-main"
-        $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-916" -TargetPhase "implementation"
-        $ctx.RepoRoot = $caseRoot
-        $ctx.Handoff | Add-Member -NotePropertyName rebase_count -NotePropertyValue 1 -Force
-        & git -C $caseRoot init --quiet -b main
-        & git -C $caseRoot -c user.name=T -c user.email=t@example.com commit --allow-empty -m init --quiet
-        "<!-- prompt_version: 1 -->`n{rebase_section}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
-
+    # Item 275: the roots were spliced into the template as raw text, so a root with a dollar
+    # sign expanded inside the template's double quotes when the agent ran the line.
+    $results += Run-Test -Name "A template's quoted root placeholders take a dollar-sign root as a literal" -Body {
+        $ctx = New-TestContext -TempRoot (Join-Path $tempRoot 'cash$root') -TaskId "F-917" -TargetPhase "verification"
+        @'
+<!-- prompt_version: 1 -->
+& "{{crucible_root}}/powershell/crucible.ps1" -Init -TaskId {task_id} -ProjectRoot "{project_root}"
+Notes live in {project_root}/notes.
+'@ | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "verification_prompt.md") -Encoding UTF8
         $text = New-CruciblePromptText -Context $ctx
+        $line = @(($text -split "`r?`n") | Where-Object { $_ -like '& *' })
+        Assert-Result -Name "one rendered command line" -Condition ($line.Count -eq 1) -FailureMessage $text
+        $tokens = $null; $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($line[0], [ref]$tokens, [ref]$errors)
+        $command = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))[0]
+        $elements = @($command.CommandElements)
+        $rootIndex = [array]::IndexOf(@($elements | ForEach-Object { $_.Extent.Text }), '-ProjectRoot')
+        $rootArgument = $elements[$rootIndex + 1]
+        Assert-Result -Name "project root argument is a literal" -Condition ($rootArgument -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $rootArgument.Value -ceq $ctx.RepoRoot) -FailureMessage ("got " + $rootArgument.Extent.Text + " from: " + $line[0])
+        Assert-Result -Name "script path argument is a literal" -Condition ($elements[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $elements[0].Value.Contains('cash$root')) -FailureMessage ("got " + $elements[0].Extent.Text + " from: " + $line[0])
+        Assert-Result -Name "unquoted prose placeholder is the plain root" -Condition ($text.Contains("Notes live in " + $ctx.RepoRoot + "/notes.")) -FailureMessage $text
+    }
 
-        Assert-Result -Name "rebases onto main" -Condition ($text -match 'git rebase main task/F-916' -and $text -match 'git pull origin main') -FailureMessage ("prompt: " + $text)
-        Assert-Result -Name "no master" -Condition (-not ($text -match 'master')) -FailureMessage ("prompt still names master: " + $text)
+    foreach ($scenario in @('untracked-only', 'autostash-dirty', 'wrong-branch', 'mixed-dirty', 'clean')) {
+        $results += Run-Test -Name "The rendered rebase recipe handles $scenario work in its assigned checkout" -Body {
+            # Items 189 and 273. Each refusal must depend on its owning SOP guard.
+            $caseRoot = Join-Path $tempRoot "rebase-main-$scenario"
+            $ctx = New-TestContext -TempRoot $caseRoot -TaskId "F-916" -TargetPhase "implementation"
+            $ctx.RepoRoot = $caseRoot
+            $ctx.Handoff | Add-Member -NotePropertyName rebase_count -NotePropertyValue 1 -Force
+            & git -C $caseRoot init --quiet -b main
+            & git -C $caseRoot -c user.name=T -c user.email=t@example.com commit --allow-empty -m init --quiet
+            "<!-- prompt_version: 1 -->`n{rebase_section}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
+
+            $text = New-CruciblePromptText -Context $ctx
+
+            Assert-Result -Name "rebase prompt names configured branch fact and SOP" -Condition ($text -match 'Primary branch: main' -and $text.Contains('/sops/implementation.md#rebase-workflow')) -FailureMessage $text
+            $sop = Get-Content (Join-Path $REPO_ROOT 'sops/implementation.md') -Raw -Encoding UTF8
+            $section = [regex]::Match($sop, '(?s)## Rebase Workflow.*?(?=## Decision Tree)').Value
+            [IO.File]::WriteAllText((Join-Path $ctx.PromptLib 'implementation_prompt.md'), $section)
+            $recipe = New-CruciblePromptText -Context $ctx
+            $fence = [regex]::Match($recipe, '(?s)```powershell\r?\n(.*?)```')
+            Assert-Result 'rebase recipe has a PowerShell fence' $fence.Success $recipe
+            $body = $fence.Groups[1].Value
+            Assert-Result 'rebase recipe is executable' (-not [string]::IsNullOrWhiteSpace($body)) $recipe
+            $scriptPath = Join-Path $caseRoot 'recipe.ps1'
+            [IO.File]::WriteAllText($scriptPath, $body)
+            $wt = Join-Path $caseRoot 'assigned'
+            foreach ($args in @(
+                @('config', 'user.name', 'Rebase Test'),
+                @('config', 'user.email', 'rebase@example.com'),
+                @('config', 'commit.gpgSign', 'false'),
+                @('worktree', 'add', '--quiet', '-b', 'task/F-916', $wt)
+            )) {
+                $r = Invoke-Git -Directory $caseRoot -GitArgs $args
+                Assert-Result 'rebase fixture setup succeeds' ($r.ExitCode -eq 0) $r.Raw
+            }
+            [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "task work`n")
+            $r = Invoke-Git -Directory $wt -GitArgs @('add', 'task.txt')
+            $r = Invoke-Git -Directory $wt -GitArgs @('commit', '--quiet', '-m', 'task work')
+            Assert-Result 'task commit exists' ($r.ExitCode -eq 0) $r.Raw
+            $taskTip = (Invoke-Git -Directory $wt -GitArgs @('rev-parse', 'HEAD')).Raw.Trim()
+            [IO.File]::WriteAllText((Join-Path $caseRoot 'primary.txt'), "primary work`n")
+            $r = Invoke-Git -Directory $caseRoot -GitArgs @('add', 'primary.txt')
+            $r = Invoke-Git -Directory $caseRoot -GitArgs @('commit', '--quiet', '-m', 'advance main')
+            Assert-Result 'primary advanced independently' ($r.ExitCode -eq 0) $r.Raw
+            $primaryTip = (Invoke-Git -Directory $caseRoot -GitArgs @('rev-parse', 'HEAD')).Raw.Trim()
+            if ($scenario -eq 'untracked-only') {
+                [IO.File]::WriteAllText((Join-Path $wt 'untracked.txt'), "untracked work`n")
+            } elseif ($scenario -eq 'autostash-dirty') {
+                $r = Invoke-Git -Directory $wt -GitArgs @('config', 'rebase.autoStash', 'true')
+                Assert-Result 'autostash configured' ($r.ExitCode -eq 0) $r.Raw
+                [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "dirty work`n")
+            } elseif ($scenario -eq 'wrong-branch') {
+                $r = Invoke-Git -Directory $wt -GitArgs @('checkout', '--quiet', '-b', 'other-task')
+                Assert-Result 'wrong branch fixture ready' ($r.ExitCode -eq 0) $r.Raw
+            } elseif ($scenario -eq 'mixed-dirty') {
+                [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "staged work`n")
+                $r = Invoke-Git -Directory $wt -GitArgs @('add', 'task.txt')
+                Assert-Result 'dirty index fixture ready' ($r.ExitCode -eq 0) $r.Raw
+                [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "unstaged work`n")
+                [IO.File]::WriteAllText((Join-Path $wt 'untracked.txt'), "untracked work`n")
+            }
+            if ($scenario -in @('untracked-only', 'autostash-dirty')) {
+                # Prove Git alone accepts these inputs, so refusal depends on the SOP guard.
+                $plain = Invoke-Git -Directory $wt -GitArgs @('rebase', 'main')
+                Assert-Result "$scenario plain rebase succeeds" ($plain.ExitCode -eq 0) $plain.Raw
+                $r = Invoke-Git -Directory $wt -GitArgs @('reset', '--hard', $taskTip)
+                Assert-Result 'plain rebase probe reset' ($r.ExitCode -eq 0) $r.Raw
+                if ($scenario -eq 'autostash-dirty') {
+                    [IO.File]::WriteAllText((Join-Path $wt 'task.txt'), "dirty work`n")
+                }
+            }
+            $before = (Invoke-Git -Directory $wt -GitArgs @('diff', 'HEAD')).Raw
+            $indexBefore = (Invoke-Git -Directory $wt -GitArgs @('diff', '--cached')).Raw
+            $statusBefore = (Invoke-Git -Directory $wt -GitArgs @('status', '--porcelain')).Raw
+            $stashBefore = (Invoke-Git -Directory $wt -GitArgs @('stash', 'list')).Raw
+            if ($scenario -ne 'clean') {
+                Push-Location $wt
+                try { $dirty = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $scriptPath } }
+                finally { Pop-Location }
+                $refusal = if ($scenario -eq 'wrong-branch') { 'Run from the assigned task worktree.' } else { 'Preserve uncommitted work before rebasing.' }
+                Assert-Result "$scenario guard refuses to proceed" ($dirty.ExitCode -ne 0 -and ($dirty.Output -join "`n").Contains($refusal)) ($dirty.Output -join "`n")
+                Assert-Result 'dirty worktree and index preserved' (
+                    (Invoke-Git -Directory $wt -GitArgs @('diff', 'HEAD')).Raw -ceq $before -and
+                    (Invoke-Git -Directory $wt -GitArgs @('diff', '--cached')).Raw -ceq $indexBefore -and
+                    (Invoke-Git -Directory $wt -GitArgs @('status', '--porcelain')).Raw -ceq $statusBefore -and
+                    (Invoke-Git -Directory $wt -GitArgs @('stash', 'list')).Raw -ceq $stashBefore -and
+                    (Invoke-Git -Directory $wt -GitArgs @('rev-parse', 'HEAD')).Raw.Trim() -ceq $taskTip
+                ) 'recipe changed pending work or HEAD'
+                if ($scenario -in @('untracked-only', 'mixed-dirty')) {
+                    Assert-Result 'untracked bytes preserved' ([IO.File]::ReadAllText((Join-Path $wt 'untracked.txt')) -ceq "untracked work`n") 'untracked file changed'
+                    Remove-Item -LiteralPath (Join-Path $wt 'untracked.txt')
+                }
+                $r = Invoke-Git -Directory $wt -GitArgs @('restore', '--staged', '--worktree', 'task.txt')
+                if ($scenario -eq 'wrong-branch') {
+                    Assert-Result 'wrong branch stays selected' ((Invoke-Git -Directory $wt -GitArgs @('branch', '--show-current')).Raw.Trim() -ceq 'other-task') 'recipe switched branches'
+                    $r = Invoke-Git -Directory $wt -GitArgs @('checkout', '--quiet', 'task/F-916')
+                    Assert-Result 'assigned branch restored' ($r.ExitCode -eq 0) $r.Raw
+                }
+            }
+            Push-Location $wt
+            try { $clean = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $scriptPath } }
+            finally { Pop-Location }
+            Assert-Result 'rebase recipe succeeds in assigned worktree' ($clean.ExitCode -eq 0) ($clean.Output -join "`n")
+            $ancestry = Invoke-Git -Directory $wt -GitArgs @('merge-base', '--is-ancestor', $primaryTip, 'HEAD')
+            Assert-Result 'task now contains configured primary tip' ($ancestry.ExitCode -eq 0) $ancestry.Raw
+            Assert-Result 'task and primary stay in assigned checkouts' (
+                (Invoke-Git -Directory $wt -GitArgs @('branch', '--show-current')).Raw.Trim() -ceq 'task/F-916' -and
+                (Invoke-Git -Directory $caseRoot -GitArgs @('rev-parse', 'HEAD')).Raw.Trim() -ceq $primaryTip -and
+                (Invoke-Git -Directory $caseRoot -GitArgs @('branch', '--show-current')).Raw.Trim() -ceq 'main'
+            ) 'recipe moved the primary checkout or changed task branch'
+
+        }
     }
 
     $results += Run-Test -Name "A no-code review-fix gets no worktree, no branch, and the project root as its workdir" -Body {
@@ -290,7 +448,7 @@ Ceiling {budget_ceiling}
         $ctx.Init = $true
         $activeDir = Join-Path $ctx.BacklogDir "features/active"
         New-Item -ItemType Directory -Path $activeDir -Force | Out-Null
-        "---`ntype: research`n---`nSpec`n" | Set-Content -LiteralPath (Join-Path $activeDir "R-914_spec.md") -Encoding UTF8
+        "---`ntype: research`nbudget_tier: low`n---`nSpec`n" | Set-Content -LiteralPath (Join-Path $activeDir "R-914_spec.md") -Encoding UTF8
         "# Backlog`n| [R-914](features/active/R-914_spec.md) | Spec | P2 | Ready |`n" | Set-Content -LiteralPath (Join-Path $ctx.BacklogDir "BACKLOG.md") -Encoding UTF8
         "crucible_root: `".crucible`"`npaths:`n  backlog: `"" + ($ctx.BacklogDir -replace '\\', '/') + "`"`n" | Set-Content -LiteralPath (New-Item -ItemType File -Path (Join-Path $caseRoot ".crucible/config.yaml") -Force).FullName -Encoding UTF8
         & git -C $caseRoot init --quiet -b master
@@ -302,7 +460,7 @@ Ceiling {budget_ceiling}
 
         $Push = Get-Location
         Set-Location -LiteralPath $caseRoot
-        try { Initialize-CrucibleTargetSession -Context $ctx 6>&1 | Out-Null } finally { Set-Location -LiteralPath $Push }
+        try { Invoke-ExternalCommand -AsLines { Initialize-CrucibleTargetSession -Context $ctx 6>&1 } | Out-Null } finally { Set-Location -LiteralPath $Push }
 
         Assert-Result -Name "no worktree created" -Condition (-not (Test-Path -LiteralPath (Join-Path $ctx.WorkspacesDir "implementation-R-914"))) -FailureMessage "a worktree was created for a no-code review-fix"
         & git -C $caseRoot show-ref --verify --quiet refs/heads/task/R-914
@@ -320,6 +478,8 @@ Ceiling {budget_ceiling}
         "<!-- prompt_version: 1 -->`nWork in {worktree}`n" | Set-Content -LiteralPath (Join-Path $ctx.PromptLib "implementation_prompt.md") -Encoding UTF8
         $text = New-CruciblePromptText -Context $ctx
         Assert-Result -Name "prompt workdir is the project root" -Condition ($text -match ('Work in ' + [regex]::Escape($caseRoot) + '\r?\n')) -FailureMessage ("prompt: " + $text)
+        Assert-Result -Name "no-code prompt links its owner" -Condition ($text.Contains('/sops/implementation.md#no-code-review-fix')) -FailureMessage $text
+        $text += Get-Content (Join-Path $REPO_ROOT 'sops/implementation.md') -Raw -Encoding UTF8
         Assert-Result -Name "prompt says not to branch or commit" -Condition ($text -match 'No-Code Review-Fix' -and $text -match 'do not commit') -FailureMessage ("prompt: " + $text)
     }
 
@@ -339,6 +499,8 @@ Ceiling {budget_ceiling}
 
         Assert-Result -Name "classified as a no-code re-review" -Condition (Test-NoCodeReReview -Handoff $ctx.Handoff -RepoRoot $caseRoot) -FailureMessage "an R-* re-review with no task branch should be a no-code re-review"
         $text = New-CruciblePromptText -Context $ctx
+        Assert-Result -Name "no-code review links its owner" -Condition ($text.Contains('/sops/verification.md#stub-only-close-out')) -FailureMessage $text
+        $text += Get-Content (Join-Path $REPO_ROOT 'sops/verification.md') -Raw -Encoding UTF8
         Assert-Result -Name "prompt routes to the Stub-Only Close-Out" -Condition ($text -match '## No-Code Re-Review' -and $text -match 'Stub-Only Close-Out' -and $text -match 'Do not run run-isolated-checks\.ps1') -FailureMessage ("prompt: " + $text)
 
         $fromGrooming = $ctx.Handoff.PSObject.Copy(); $fromGrooming.source_phase = "grooming"
@@ -362,6 +524,9 @@ Ceiling {budget_ceiling}
 
             $text = New-CruciblePromptText -Context $ctx
 
+            Assert-Result -Name ("incoming " + $incoming + ": prompt carries next count fact") -Condition ($text.Contains('**Next rebase count**: ' + ($incoming + 1)) -and $text.Contains('/sops/deployment.md#step-7')) -FailureMessage $text
+            Copy-Item -LiteralPath (Join-Path $REPO_ROOT 'sops/deployment.md') -Destination (Join-Path $ctx.PromptLib 'deployment_prompt.md') -Force
+            $text += New-CruciblePromptText -Context $ctx
             $reworkLines = @(($text -split "`r?`n") | Where-Object { $_ -match 'new-handoff\.ps1' -and $_ -match '-Source deployment -Target implementation' })
             Assert-Result -Name ("incoming " + $incoming + ": one merge-conflict handoff command") -Condition ($reworkLines.Count -eq 1) -FailureMessage ("expected one deployment -> implementation new-handoff command in the rendered prompt, found " + $reworkLines.Count)
             if ($reworkLines.Count -ne 1) { continue }
@@ -428,7 +593,7 @@ New-Item -ItemType Directory -Path `$handoffs,`$prompts -Force | Out-Null
 New-CruciblePromptText -Context `$ctx
 "@
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
-        $output = & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1
+        $output = Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1 }
         Assert-Result -Name "exit code" -Condition ($LASTEXITCODE -eq 1) -FailureMessage "unresolved placeholder did not exit 1; output: $($output | Out-String)"
         Assert-Result -Name "message" -Condition (($output | Out-String) -match "unresolved placeholders") -FailureMessage "unresolved placeholder message changed"
     }
@@ -442,7 +607,7 @@ New-CruciblePromptText -Context `$ctx
         try {
             $env:PATH = ""
             $script:Quiet = $false
-            $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             Assert-Result -Name "fallback output" -Condition ($output -match "\[CI\] WARN: gh not found - cannot check CI status") -FailureMessage "no-gh fallback message missing"
         } finally {
             $env:PATH = $oldPath
@@ -454,8 +619,8 @@ New-CruciblePromptText -Context `$ctx
     $results += Run-Test -Name "Operator recommendation escalates on handoff rebase or retry counters, not budget" -Body {
         $cases = @(
             @{ Name = "clean high-budget deployment"; Budget = "high"; Rebase = 0; Retry = 0; Want = "claude-haiku-5-5"; WantLevel = "light = claude-haiku-5-5 at high" },
-            @{ Name = "rebase re-entry"; Budget = "low"; Rebase = 1; Retry = 0; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at medium" },
-            @{ Name = "retried handoff"; Budget = "low"; Rebase = 0; Retry = 1; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at medium" }
+            @{ Name = "rebase re-entry"; Budget = "low"; Rebase = 1; Retry = 0; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at high" },
+            @{ Name = "retried handoff"; Budget = "low"; Rebase = 0; Retry = 1; Want = "claude-sonnet-5-5"; WantLevel = "default = claude-sonnet-5-5 at high" }
         )
         $n = 0
         foreach ($case in $cases) {
@@ -469,7 +634,7 @@ New-CruciblePromptText -Context `$ctx
             $oldPath = $env:PATH
             try {
                 $env:PATH = ""
-                $output = & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 | Out-String
+                $output = Invoke-ExternalCommand -AsLines { & { Write-CrucibleCiStatusBanner -Context $ctx } 6>&1 } | Out-String
             } finally {
                 $env:PATH = $oldPath
             }
@@ -495,7 +660,7 @@ New-CruciblePromptText -Context `$ctx
         $oldQuiet = $Quiet
         try {
             $script:Quiet = $false
-            $output = & { Write-CruciblePromptOutput -Context $ctx } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { Write-CruciblePromptOutput -Context $ctx } 6>&1 } | Out-String
             Assert-Result -Name "the handoff success line is present" -Condition ($output -match "\[CRUCIBLE\] Handoff validated\. Next step prepared\.") -FailureMessage ("the line an operator reads to know the run finished is missing. Output:`n" + $output)
             Assert-Result -Name "the success line is followed by its handoff summary" -Condition ($output -match "TASK ID   : F-906") -FailureMessage ("the banner printed but the summary under it did not, so the function did not run to completion and the banner alone would be misleading. Output:`n" + $output)
         } finally {
@@ -543,7 +708,7 @@ Spec body
             Set-Content -Path "README.md" -Value "# t" -Encoding UTF8
             git add README.md
             git commit -m "init" --quiet
-            $mainBranch = (git rev-parse --abbrev-ref HEAD).Trim()
+            $mainBranch = (Invoke-ExternalCommand -AsLines { git rev-parse --abbrev-ref HEAD }).Trim()
             $wtPath = Join-Path $repo ".crucible/.agent-workspaces/implementation-F-907"
 
             $threw = $false
@@ -581,7 +746,7 @@ Spec body
         $oldQuiet = $script:Quiet
         try {
             $script:Quiet = $false
-            $output = & { Initialize-CrucibleTargetSession -Context $ctx } 6>&1 | Out-String
+            $output = Invoke-ExternalCommand -AsLines { & { Initialize-CrucibleTargetSession -Context $ctx } 6>&1 } | Out-String
             Assert-Result -Name "scoped Groomer task confirmed" -Condition ($output.Contains("[INIT] Confirmed task: R-029") -and $output -notmatch "Next Ready task|No 'Ready' tasks|Identifying target task") -FailureMessage $output
             Assert-Result -Name "scoped Groomer handoff retained" -Condition ($ctx.Handoff.task_id -eq "R-029" -and (Test-Path -LiteralPath (Join-Path $ctx.SessionDir "R-029/grooming/task.md"))) -FailureMessage "named task was not retained"
         } finally {

@@ -27,6 +27,30 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $env:CRUCIBLE_SKIP_PROVENANCE = 'true'
 
+# Remove-Item reports most refusals inside a recursive delete (a file another process holds
+# open, an entry it may not delete) as non-terminating errors, which SilentlyContinue
+# discards: the root stays and nothing says so. Returns why a run root survived, or $null
+# when it is gone. A terminating error still reaches the caller. Defined first so the outer
+# finally can use it on every exit path. Item 393.
+function Remove-TestRunRootDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $removalErrors = @()
+    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable removalErrors
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $reasons = @($removalErrors | ForEach-Object { $_.Exception.Message } | Select-Object -Unique)
+    if ($reasons.Count -eq 0) { return 'Remove-Item reported no error' }
+    if ($reasons.Count -gt 3) { $reasons = @($reasons[0..2]) + ('and ' + ($reasons.Count - 3) + ' more') }
+    return ($reasons -join '; ')
+}
+
+function Write-OwnTestRunRootSurvival {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Reason)
+
+    Write-Host ("Warning: this run's test run root survived cleanup: '" + $Path + "': " + $Reason +
+        ". The next run collects it once this process has exited.") -ForegroundColor Yellow
+}
+
 # Before any fixture is built, point git at an isolated global config so the suite
 # never inherits the developer's core.autocrlf. Defined in tests/_harness.ps1, which
 # every test file also dot-sources, so a solo test run is isolated identically.
@@ -36,8 +60,7 @@ $testsDir = Join-Path $PSScriptRoot "tests"
 $testFiles = Get-ChildItem -Path $testsDir -Filter '*test*.ps1' | Sort-Object Name
 
 if ($Changed) {
-    # Scratch runners used by existing tests carry an explicit lib list; load the
-    # selector only in this mode so those full-suite copies still work. Item 201.
+    # Full-suite runs do not need selection or its git diff probes. Item 201.
     . (Join-Path $PSScriptRoot 'lib/test-selection.ps1')
     $selectionRoot = Split-Path -Parent $PSScriptRoot
     $selected = @(Get-AffectedTestFiles -Root $selectionRoot -Base $Base)
@@ -147,10 +170,51 @@ try {
     # The whole DirectoryInfo is passed, not the name: a root whose pid has since been
     # reused by a later process is abandoned too, and only the creation time can tell that
     # apart from a second checkout's live run. Two such roots sat here for three days.
+    #
+    # Two runners can collect the same abandoned root at once. The one that reaches an
+    # entry the other already deleted gets a terminating error from Remove-Item despite
+    # SilentlyContinue, measured as Win32Exception native error 2 while the root itself
+    # still existed. That is the deletion happening elsewhere, as is any failure on a root
+    # that is gone afterwards. Any other failure is a real refusal and stops the run,
+    # naming the root. Item 347.
+    #
+    # A non-terminating refusal leaves the root in place without stopping anything. That is a
+    # warning, not a failure: the residue belongs to another run, is usually transient (a
+    # scanner, an indexer, an exiting process), and the next collector retries. Each surviving
+    # root is named with its reason when it happens and again in the run summary. Item 393.
+    function Test-RemovalTargetVanished {
+        param([System.Exception]$Exception)
+
+        $e = $Exception
+        if ($e -is [System.IO.FileNotFoundException] -or $e -is [System.IO.DirectoryNotFoundException] -or
+            $e -is [System.Management.Automation.ItemNotFoundException]) { return $true }
+        return ($e -is [System.ComponentModel.Win32Exception] -and $e.NativeErrorCode -in @(2, 3))
+    }
+
     $tempPath = [System.IO.Path]::GetTempPath()
-    Get-ChildItem -Path $tempPath -Filter "crucible-test-run-*" -Directory -ErrorAction SilentlyContinue |
-        Where-Object { Test-TestRunRootOrphaned -Directory $_ } |
-        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    $abandonedRoots = @(Get-ChildItem -Path $tempPath -Filter "crucible-test-run-*" -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-TestRunRootOrphaned -Directory $_ })
+    $survivingRunRoots = @()
+    foreach ($abandoned in $abandonedRoots) {
+        try {
+            $survivalReason = Remove-TestRunRootDirectory -Path $abandoned.FullName
+        } catch {
+            if ((Test-RemovalTargetVanished -Exception $_.Exception) -or -not (Test-Path -LiteralPath $abandoned.FullName)) { continue }
+            throw ("Could not remove abandoned test run root '" + $abandoned.FullName + "': " + $_.Exception.Message)
+        }
+        if ($null -ne $survivalReason) {
+            $survivingRunRoots += ("'" + $abandoned.FullName + "': " + $survivalReason)
+            Write-Host ("Warning: abandoned test run root survived collection: '" + $abandoned.FullName + "': " + $survivalReason) -ForegroundColor Yellow
+        }
+    }
+
+    function Write-SurvivingRunRootSummary {
+        if ($survivingRunRoots.Count -eq 0) { return }
+        Write-Host "Surviving abandoned run roots: $($survivingRunRoots.Count) (warning; the next run retries)" -ForegroundColor Yellow
+        foreach ($survivor in $survivingRunRoots) {
+            Write-Host ("  - " + $survivor) -ForegroundColor Yellow
+        }
+    }
 
     # Pre-stage the shared adopter fixture once before running worker tests. Nothing
     # records whether this call built it: the fixture lives inside the run root now, so
@@ -182,23 +246,11 @@ try {
         return ($Output -cmatch 'EXCEPTION OCCURRED:' -or $Output -cmatch 'SOME TESTS FAILED' -or $Output -cmatch '\bFAILED:')
     }
 
-    # Collects the third outcome Run-Test can report. A test whose precondition cannot exist on
-    # this platform is not a pass. Write-TestFileSummary is what a file's own tail uses when it
-    # Skip-Tests; this is the run summary, which CI and scripts/test-linux.ps1 read. Without it
-    # the skip would be invisible here and the Linux leg would be quietly weaker than the
-    # Windows one rather than measurably narrower. Item 102, item 104.
-    function Get-OutputSkipNotes {
-        param([AllowEmptyString()][string]$Output)
-
-        $notes = @()
-        if ([string]::IsNullOrWhiteSpace($Output)) {
-            return ,$notes
-        }
-        foreach ($line in ($Output -split "`r?`n")) {
-            if ($line -cmatch '^SKIPPED: (.+)$') { $notes += $Matches[1] }
-        }
-        return ,$notes
-    }
+    # Skips are the third outcome Run-Test can report, and a test whose precondition cannot
+    # exist on this platform is not a pass. Get-TestOutputSkipNotes (tests/_harness.ps1) reads
+    # them from each file's stdout into the run summary, which CI and scripts/test-linux.ps1
+    # read. Without it the Linux leg would be quietly weaker than the Windows one rather than
+    # measurably narrower. Items 102, 104 and 344.
 
     # Consumes every line one stream has already produced, without blocking, restarting
     # the idle clock for each. Returns the still-pending read, or $null once the stream
@@ -228,20 +280,48 @@ try {
         return $Pending
     }
 
+    function Stop-TestProcess {
+        param($Item)
+
+        $proc = $Item.Proc
+        $proc.Refresh()
+        if (-not $proc.HasExited) { $proc.Kill($true) }
+        $proc.WaitForExit()
+        # Normal exits remain the hygiene check's responsibility. Only records in
+        # this killed process's subtree authorize runner cleanup. Item 337.
+        $records = @(Get-ChildItem -LiteralPath $Item.LedgerRoot -Filter '*.worktree' -File -Recurse)
+        if ($records.Count -gt 0) {
+            . (Join-Path $PSScriptRoot 'tests/_worktree-fixture.ps1')
+            Write-Host "Cleaning fixture worktrees owned by the terminated test..."
+            Remove-FrameworkTestWorktreeLedger -LedgerRoot $Item.LedgerRoot
+        }
+    }
+
     function Start-TestProcess {
         param($file, [switch]$StreamStandardOutput)
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $shell
-        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($file.FullName)`""
+        $psi.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$($file.FullName)`""
         $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
         $psi.CreateNoWindow = $true
 
+        $ledgerParent = if ($env:CRUCIBLE_TEST_WORKTREE_LEDGER) {
+            $env:CRUCIBLE_TEST_WORKTREE_LEDGER
+        } else { Get-TestRunRoot }
+        $ledgerRoot = Join-Path $ledgerParent ('worktrees-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $ledgerRoot | Out-Null
+        $psi.Environment['CRUCIBLE_TEST_WORKTREE_LEDGER'] = $ledgerRoot
+
         $p = New-Object System.Diagnostics.Process
         $p.StartInfo = $psi
         [void]$p.Start()
+        # A test must get a binding error, never a prompt that waits on the runner's
+        # console or open stdin pipe. Also give direct stdin readers immediate EOF.
+        $p.StandardInput.Close()
 
         # Streaming callers read both redirected streams themselves. Parallel mode
         # buffers per-line reads without echoing them until the child exits. Each
@@ -254,6 +334,7 @@ try {
 
         return [PSCustomObject]@{
             File = $file
+            LedgerRoot = $ledgerRoot
             Proc = $p
             OutRead = $outRead
             ErrRead = $errRead
@@ -261,6 +342,7 @@ try {
             ErrLines = (New-Object System.Collections.Generic.List[string])
             Stopwatch = $sw
             Idle = [System.Diagnostics.Stopwatch]::StartNew()
+            StopAttempted = $false
         }
     }
 
@@ -275,6 +357,7 @@ try {
 
             $item = Start-TestProcess -file $file -StreamStandardOutput
             $proc = $item.Proc
+            try {
 
             # Echo each line as the child produces it, so a test that is still running is
             # visible while it runs rather than only once it finishes. Both streams are
@@ -287,6 +370,7 @@ try {
             $idle = [System.Diagnostics.Stopwatch]::StartNew()
             $pollMs = 250
             $isTimeout = $false
+            $cleanupError = ''
 
             while ($null -ne $outRead -or $null -ne $errRead) {
                 $pending = New-Object System.Collections.Generic.List[System.Threading.Tasks.Task]
@@ -301,15 +385,13 @@ try {
                 if ($completedIndex -eq -1) {
                     if (-not $NoTimeout -and $idle.Elapsed.TotalSeconds -ge $IdleTimeoutSeconds) {
                         $isTimeout = $true
-                        try {
-                            $proc.Kill()
-                            $proc.WaitForExit()
-                        } catch {}
+                        $item.StopAttempted = $true
+                        try { Stop-TestProcess -Item $item }
+                        catch { $cleanupError = [string]$_ }
                         # Stop reading rather than waiting for the pending reads to end.
-                        # Killing the child does not close the pipes if it had spawned a
-                        # process of its own that inherited the handles, so those reads
-                        # can stay pending indefinitely and this loop would spin forever
-                        # on the very hang the timeout exists to break.
+                        # A descendant may have escaped process-tree termination while
+                        # retaining inherited handles. Do not let pending reads defeat
+                        # the timeout even in that case.
                         break
                     }
                     continue
@@ -343,12 +425,12 @@ try {
                     }
                 }
             }
-            $proc.WaitForExit()
+            if (-not $isTimeout) { $proc.WaitForExit() }
             $idle.Stop()
 
             $outText = ($outLines -join "`n")
 
-            foreach ($note in (Get-OutputSkipNotes -Output $outText)) {
+            foreach ($note in (Get-TestOutputSkipNotes -Output $outText)) {
                 $skipNotes += ($file.Name + ": " + $note)
             }
 
@@ -359,13 +441,20 @@ try {
 
             if ($isTimeout) {
                 Write-Host "FAIL  $($file.Name) (TIMEOUT after $($IdleTimeoutSeconds)s)" -ForegroundColor Red
+                if ($cleanupError) {
+                    Write-Host "Cleanup failed for $($file.Name): $cleanupError" -ForegroundColor Red
+                }
             }
-            $proc.Dispose()
 
             if ($testFailed) {
                 $failedTests += $file.Name
             } else {
                 $passCount++
+            }
+            } finally {
+                try {
+                    if (-not $item.StopAttempted -and -not $proc.HasExited) { Stop-TestProcess -Item $item }
+                } finally { $proc.Dispose() }
             }
         }
 
@@ -381,6 +470,7 @@ try {
                 Write-Host ("  - " + $note) -ForegroundColor Yellow
             }
         }
+        Write-SurvivingRunRootSummary
         if ($failedTests.Count -gt 0) {
             $sortedFailed = @($failedTests | Sort-Object)
             Write-Host "Failed: $($sortedFailed.Count) ($($sortedFailed -join ', '))" -ForegroundColor Red
@@ -467,6 +557,7 @@ try {
 
         $running = @()
         $completed = @()
+        $runError = $null
 
         try {
             # 1. Run the pool, then each serial-marked file alone with the same loop.
@@ -503,6 +594,7 @@ try {
 
                         $exited = $false
                         $isTimeout = $false
+                        $cleanupError = ''
 
                         $item.OutRead = Read-PendingLines -Pending $item.OutRead -Reader $proc.StandardOutput -Lines $item.OutLines -Idle $item.Idle
                         $item.ErrRead = Read-PendingLines -Pending $item.ErrRead -Reader $proc.StandardError -Lines $item.ErrLines -Idle $item.Idle
@@ -521,11 +613,10 @@ try {
                             # Either way the pending reads are abandoned rather than waited
                             # out, since waiting on them is the hang this exists to break.
                             if (-not $proc.HasExited) {
-                                try {
-                                    $proc.Kill()
-                                    $proc.WaitForExit()
-                                } catch {}
                                 $isTimeout = $true
+                                $item.StopAttempted = $true
+                                try { Stop-TestProcess -Item $item }
+                                catch { $cleanupError = [string]$_ }
                             }
                             $item.OutRead = $null
                             $item.ErrRead = $null
@@ -554,6 +645,10 @@ try {
                             } else {
                                 if ($isTimeout) {
                                     Write-Host "FAIL  $($file.Name) (TIMEOUT after $($IdleTimeoutSeconds)s)" -ForegroundColor Red
+                                    # Beside the FAIL line, as serial mode prints it. Item 340.
+                                    if ($cleanupError) {
+                                        Write-Host "Cleanup failed for $($file.Name): $cleanupError" -ForegroundColor Red
+                                    }
                                 } elseif ($hasOutputFailure) {
                                     Write-Host "FAIL  $($file.Name) ($($duration)s, Output Failure Signature)" -ForegroundColor Red
                                 } else {
@@ -569,9 +664,13 @@ try {
                                 Duration = $duration
                                 IsTimeout = $isTimeout
                                 Timeout = $IdleTimeoutSeconds
+                                CleanupError = $cleanupError
                             }
 
                             $proc.Dispose()
+                            # The old pool array survives until the end of this tick. An
+                            # exception on a later child must not stop this disposed one.
+                            $item.Proc = $null
                         } else {
                             $stillRunning += $item
                         }
@@ -604,21 +703,23 @@ try {
                 }
             }
         }
-        finally {
-            # Clean up any remaining processes from unfinished runs
+        catch {
+            $runError = $_
+            throw
+        } finally {
+            $cleanupErrors = @()
             foreach ($item in $running) {
                 if ($null -ne $item.Proc) {
                     try {
-                        $item.Proc.Refresh()
-                        if (-not $item.Proc.HasExited) {
-                            $item.Proc.Kill()
-                            $item.Proc.WaitForExit()
-                        }
-                    } catch {}
-                    try {
-                        $item.Proc.Dispose()
-                    } catch {}
+                        if (-not $item.StopAttempted -and -not $item.Proc.HasExited) { Stop-TestProcess -Item $item }
+                    } catch { $cleanupErrors += ($item.File.Name + ': ' + [string]$_) }
+                    finally { $item.Proc.Dispose() }
                 }
+            }
+            if ($cleanupErrors.Count -gt 0) {
+                if ($null -eq $runError) { throw ($cleanupErrors -join "`n") }
+                # Report secondary cleanup errors without replacing the original error.
+                Write-Host ("Cleanup failed: " + ($cleanupErrors -join "`n")) -ForegroundColor Red
             }
         }
 
@@ -639,6 +740,10 @@ try {
                 }
                 Write-Host "--------------------------------------------------" -ForegroundColor Red
 
+                if ($item.CleanupError) {
+                    Write-Host "Cleanup failed for $($item.File.Name): $($item.CleanupError)" -ForegroundColor Red
+                }
+
                 if (-not [string]::IsNullOrWhiteSpace($item.Output)) {
                     Write-Host "--- Standard Output ---" -ForegroundColor Yellow
                     Write-Host $item.Output
@@ -657,7 +762,7 @@ try {
         $passCount = 0
         $skipNotes = @()
         foreach ($item in $completed) {
-            foreach ($note in (Get-OutputSkipNotes -Output $item.Output)) {
+            foreach ($note in (Get-TestOutputSkipNotes -Output $item.Output)) {
                 $skipNotes += ($item.File.Name + ": " + $note)
             }
             if ($item.ExitCode -eq 0 -and -not (Test-OutputHasFailure -Output $item.Output)) {
@@ -679,6 +784,7 @@ try {
                 Write-Host ("  - " + $note) -ForegroundColor Yellow
             }
         }
+        Write-SurvivingRunRootSummary
         if ($failedTests.Count -gt 0) {
             $sortedFailed = @($failedTests | Sort-Object)
             Write-Host "Failed: $($sortedFailed.Count) ($($sortedFailed -join ', '))" -ForegroundColor Red
@@ -696,7 +802,8 @@ try {
         # the outer run's fixtures while it is still using them.
         if ($CRUCIBLE_TEST_ROOT_CREATED -and $env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT)) {
             Write-Host "Cleaning up test run root..." -ForegroundColor Cyan
-            Remove-Item -LiteralPath $env:CRUCIBLE_TEST_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+            $ownRootReason = Remove-TestRunRootDirectory -Path $env:CRUCIBLE_TEST_ROOT
+            if ($null -ne $ownRootReason) { Write-OwnTestRunRootSurvival -Path $env:CRUCIBLE_TEST_ROOT -Reason $ownRootReason }
         }
     } finally {
         if ($null -ne $runLock) {
@@ -704,19 +811,22 @@ try {
         }
     }
 }
-exit $exitCode
+if ($exitCode -ne 0) { exit $exitCode }
+exit 0
 } catch {
     if ($Changed) {
-        Write-Host "Changed test run failed: $_" -ForegroundColor Red
+        [Console]::Error.WriteLine("Changed test run failed: $_")
         exit 1
     }
-    throw
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
 } finally {
     if ($Changed) {
         # Empty selections exit before the normal runner cleanup. Item 201.
         $ownsRoot = Get-Variable -Name CRUCIBLE_TEST_ROOT_CREATED -ValueOnly -ErrorAction SilentlyContinue
         if ($ownsRoot -and $env:CRUCIBLE_TEST_ROOT -and (Test-Path -LiteralPath $env:CRUCIBLE_TEST_ROOT)) {
-            Remove-Item -LiteralPath $env:CRUCIBLE_TEST_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+            $ownRootReason = Remove-TestRunRootDirectory -Path $env:CRUCIBLE_TEST_ROOT
+            if ($null -ne $ownRootReason) { Write-OwnTestRunRootSurvival -Path $env:CRUCIBLE_TEST_ROOT -Reason $ownRootReason }
         }
         Write-Host 'Partial run: the full suite (no -Changed) and the Linux leg are still required before pushing.' -ForegroundColor Yellow
     }

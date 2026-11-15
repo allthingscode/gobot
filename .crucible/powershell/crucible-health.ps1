@@ -11,18 +11,24 @@ param (
     [Parameter(Mandatory=$false)][string]$ProjectRoot = ""
 )
 
+# I11: configuration helpers remain reusable; this command owns refusal.
+trap {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+
 $ErrorActionPreference = "Stop"
 $crucibleLibPath = Join-Path $PSScriptRoot "crucible-lib.ps1"
 . $crucibleLibPath
 # Anchor paths to the project root (where .crucible/ lives).
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-    $REPO_ROOT = (Get-Location).Path
+    $REPO_ROOT = Resolve-ConfigProjectRoot
 } else {
     if (-not (Test-Path -LiteralPath $ProjectRoot)) {
         Write-Host ("Error: -ProjectRoot path does not exist: " + $ProjectRoot) -ForegroundColor Red
         exit 1
     }
-    $REPO_ROOT = (Resolve-Path -LiteralPath $ProjectRoot).Path
+    $REPO_ROOT = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $ProjectRoot))
 }
 # Item 188: health and cleanup inspect and archive the same configured session.
 $sessionDir = Get-ConfiguredPath -Key "session" -ProjectRoot $REPO_ROOT
@@ -192,15 +198,12 @@ try {
         $implementationWtPaths = @(git worktree list --porcelain | Where-Object { $_ -match '^worktree .*implementation-' } | ForEach-Object { $_ -replace '^worktree ', '' })
         
         foreach ($wt in $implementationWtPaths) {
-            $hooksPath = git -C $wt config core.hooksPath
+            $hooksPath = git -C (Resolve-FilesystemPath -Path $wt) config core.hooksPath
             # Git resolves inherited relative hooksPath against the worktree root.
             # A directory without pre-commit leaves the worktree unprotected. Item 155.
             $ok = $false
             if (-not [string]::IsNullOrWhiteSpace($hooksPath)) {
-                $resolved = $hooksPath.Trim()
-                if (-not [System.IO.Path]::IsPathRooted($resolved)) {
-                    $resolved = Join-Path $wt $resolved
-                }
+                $resolved = Resolve-PathFromRoot -Root $wt -Path $hooksPath.Trim()
                 if (Test-Path -LiteralPath (Join-Path $resolved "pre-commit") -PathType Leaf) {
                     $ok = $true
                 }
@@ -218,7 +221,7 @@ try {
             Write-Quiet "  None." -ForegroundColor Gray
         } else {
             $misconfiguredWorktrees | ForEach-Object { 
-                $current = git -C $_ config core.hooksPath
+                $current = git -C (Resolve-FilesystemPath -Path $_) config core.hooksPath
                 Write-Quiet ("  - " + $_ + " - core.hooksPath: " + $current) -ForegroundColor Yellow
             }
             Write-Quiet "  A legacy per-worktree override clears with: git -C <worktree> config --worktree --unset core.hooksPath" -ForegroundColor Gray
@@ -330,7 +333,8 @@ try {
                 foreach ($wt in $orphanedWorktrees) {
                     if ($Force) {
                         Write-Quiet ("Removing worktree: " + $wt) -ForegroundColor Yellow
-                        git worktree remove --force $wt
+                        if (-not (Test-GitDiscardSafe -Directory $wt -Operation "orphaned worktree cleanup" -IncludeUntracked)) { continue }
+                        git worktree remove $wt
                     } else {
                         Write-Quiet ("Would remove worktree: " + $wt) -ForegroundColor Gray
                     }
@@ -442,3 +446,4 @@ try {
 } finally {
     Pop-Location
 }
+exit 0
