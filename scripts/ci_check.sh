@@ -8,6 +8,11 @@ set -euo pipefail
 # Isolate Go and Lint caches per worktree
 export GOCACHE="$(git rev-parse --show-toplevel)/.go-build-cache"
 export GOLANGCI_LINT_CACHE="$(git rev-parse --show-toplevel)/.golangci-lint-cache"
+if [ -n "${CRUCIBLE_SCRATCH_DIR:-}" ]; then
+    export GOCACHE="$CRUCIBLE_SCRATCH_DIR/go-build"
+    export GOLANGCI_LINT_CACHE="$CRUCIBLE_SCRATCH_DIR/golangci-lint"
+    mkdir -p "$GOCACHE" "$GOLANGCI_LINT_CACHE"
+fi
 export GOTMPDIR="$(git rev-parse --show-toplevel)/.tmp/go"
 export TMP="$(git rev-parse --show-toplevel)/.tmp/process"
 export TEMP="$TMP"
