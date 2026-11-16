@@ -76,6 +76,8 @@ type Consolidator interface {
 // with different sessionKeys proceed in parallel.
 type SessionManager struct {
 	compactionWorkers       sync.WaitGroup
+	compactionMu            sync.Mutex
+	compactionClosed        bool
 	mu                      sync.RWMutex
 	runner                  Runner
 	store                   CheckpointStore                              // may be nil; shared single-user store

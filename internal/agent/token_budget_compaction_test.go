@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -358,10 +359,12 @@ func waitForCondition(t *testing.T, description string, condition func() bool) {
 // compactionStore decorates real SQLite with controlled failures and barriers.
 type compactionStore struct {
 	CheckpointStore
-	load  func(context.Context, string) (*agentctx.ThreadSnapshot, error)
-	save  func(context.Context, string, int, []agentctx.StrategicMessage) (bool, error)
-	read  func(context.Context, string) (int, *time.Time, error)
-	write func(context.Context, string, int, *time.Time) error
+	fixtureDir  string
+	keepFixture bool
+	load        func(context.Context, string) (*agentctx.ThreadSnapshot, error)
+	save        func(context.Context, string, int, []agentctx.StrategicMessage) (bool, error)
+	read        func(context.Context, string) (int, *time.Time, error)
+	write       func(context.Context, string, int, *time.Time) error
 }
 
 func (s *compactionStore) LoadLatest(ctx context.Context, key string) (*agentctx.ThreadSnapshot, error) {
@@ -409,18 +412,31 @@ func (r *compactionRunner) RunText(ctx context.Context, key, prompt, _ string) (
 
 func sqliteCompactionFixture(t *testing.T) (*compactionStore, *SessionManager) {
 	t.Helper()
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp("", "gobot-compaction-*")
+	if err != nil {
+		t.Fatal(err)
+	}
 	store, err := agentctx.GetCheckpointManager(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { agentctx.EvictCheckpointManagerForTest(dir) })
+	wrapped := &compactionStore{CheckpointStore: store, fixtureDir: dir}
+	t.Cleanup(func() { wrapped.cleanupFixture(t) })
 	seedCompactionSession(t, store, t.Name())
-	wrapped := &compactionStore{CheckpointStore: store}
 	mgr := NewSessionManager(&compactionRunner{}, wrapped, "mock")
 	mgr.SetTokenBudget(30)
 	mgr.SetSummaryTurns(2)
 	return wrapped, mgr
+}
+func (s *compactionStore) cleanupFixture(t *testing.T) {
+	t.Helper()
+	if s.keepFixture {
+		return
+	}
+	agentctx.EvictCheckpointManagerForTest(s.fixtureDir)
+	if err := os.RemoveAll(s.fixtureDir); err != nil {
+		t.Errorf("remove fixture: %v", err)
+	}
 }
 func seedCompactionSession(t *testing.T, store CheckpointStore, key string) {
 	t.Helper()
@@ -437,8 +453,9 @@ func seedCompactionSession(t *testing.T, store CheckpointStore, key string) {
 	}
 }
 func runTestCompaction(mgr *SessionManager, ctx context.Context, key string, store CheckpointStore) {
-	mgr.compactionWorkers.Add(1)
-	mgr.compactSessionAsync(ctx, key, store)
+	if mgr.registerCompaction() {
+		mgr.compactSessionAsync(ctx, key, store)
+	}
 }
 
 func startCompaction(t *testing.T, mgr *SessionManager, key string, store CheckpointStore) <-chan struct{} {
@@ -501,14 +518,17 @@ func assertCompactionLockReleased(t *testing.T) {
 // sqliteDispatchHarness owns all goroutines until their locks have drained before
 // the SQLite fixture is evicted. The guard diagnoses deadlocks, not performance.
 type sqliteDispatchHarness struct {
-	t          *testing.T
-	ctx        context.Context
-	cancel     context.CancelFunc
-	releases   []chan struct{}
-	done       []<-chan struct{}
-	dispatches []*sqliteDispatchResult
-	keys       []string
-	managers   map[*SessionManager]struct{}
+	t             *testing.T
+	ctx           context.Context
+	cancel        context.CancelFunc
+	releases      []chan struct{}
+	done          []<-chan struct{}
+	dispatches    []*sqliteDispatchResult
+	keys          []string
+	managers      map[*SessionManager]struct{}
+	fixture       *compactionStore
+	report        func(string, ...any)
+	guardOverride time.Duration
 }
 type sqliteDispatchResult struct {
 	done    chan struct{}
@@ -516,17 +536,17 @@ type sqliteDispatchResult struct {
 	checked bool
 }
 
-func newSQLiteDispatchHarness(t *testing.T, keys ...string) *sqliteDispatchHarness {
+func newSQLiteDispatchHarness(t *testing.T, fixture *compactionStore, keys ...string) *sqliteDispatchHarness {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cleanup owns cancellation
-	h := &sqliteDispatchHarness{t: t, ctx: ctx, cancel: cancel, keys: keys, managers: make(map[*SessionManager]struct{})}
+	h := &sqliteDispatchHarness{t: t, ctx: ctx, cancel: cancel, keys: keys, managers: make(map[*SessionManager]struct{}), fixture: fixture, report: t.Errorf}
 	t.Cleanup(h.cleanup)
 	return h
 }
 
 //nolint:gocognit,cyclop // cleanup joins all work and reports each outstanding error.
 func (h *sqliteDispatchHarness) cleanup() {
-	t := h.t
+	failed := false
 	for _, release := range h.releases {
 		releaseCompactionBarrier(release)
 	}
@@ -535,7 +555,8 @@ func (h *sqliteDispatchHarness) cleanup() {
 		select {
 		case <-done:
 		case <-time.After(h.guard()):
-			t.Errorf("timed out waiting for goroutine cleanup")
+			failed = true
+			h.report("timed out waiting for goroutine cleanup")
 		}
 	}
 	for _, result := range h.dispatches {
@@ -543,10 +564,10 @@ func (h *sqliteDispatchHarness) cleanup() {
 			select {
 			case err := <-result.errors:
 				if err != nil && !errors.Is(err, context.Canceled) {
-					t.Errorf("dispatch cleanup: %v", err)
+					h.report("dispatch cleanup: %v", err)
 				}
 			default:
-				t.Errorf("dispatch cleanup: result unavailable")
+				h.report("dispatch cleanup: result unavailable")
 			}
 		}
 	}
@@ -555,8 +576,13 @@ func (h *sqliteDispatchHarness) cleanup() {
 		err := mgr.waitForBackgroundCompactions(ctx)
 		cancel()
 		if err != nil {
-			t.Errorf("background compaction cleanup: %v", err)
+			failed = true
+			h.report("background compaction cleanup: %v", err)
 		}
+	}
+	if failed {
+		h.fixture.keepFixture = true
+		return
 	}
 	h.condition("session lock cleanup", func() bool {
 		metrics := GetLockMetrics()
@@ -569,6 +595,9 @@ func (h *sqliteDispatchHarness) cleanup() {
 	})
 }
 func (h *sqliteDispatchHarness) guard() time.Duration {
+	if h.guardOverride > 0 {
+		return h.guardOverride
+	}
 	// Reserve one quarter of the remaining test deadline for cleanup; without a
 	// deadline use one minute, a deadlock guard rather than a latency target.
 	if deadline, ok := h.t.Deadline(); ok {
@@ -650,7 +679,7 @@ func TestCompactionSQLiteWorkerFirstAndIndependentSessions(t *testing.T) {
 	t.Parallel()
 	store, mgr := sqliteCompactionFixture(t)
 	other := t.Name() + "/independent"
-	h := newSQLiteDispatchHarness(t, t.Name(), other)
+	h := newSQLiteDispatchHarness(t, store, t.Name(), other)
 	entered, release := h.barrier()
 	runner := &compactionRunner{text: func(ctx context.Context, key, _ string) (string, error) {
 		if key == t.Name() {
@@ -701,7 +730,7 @@ func TestCompactionSQLiteWorkerFirstAndIndependentSessions(t *testing.T) {
 func TestCompactionSQLiteDispatchFirstAndQueuedWorkers(t *testing.T) {
 	t.Parallel()
 	store, mgr := sqliteCompactionFixture(t)
-	h := newSQLiteDispatchHarness(t, t.Name())
+	h := newSQLiteDispatchHarness(t, store, t.Name())
 	entered, release := h.barrier()
 	prompts := make(chan string, 3)
 	mgr.runner = &compactionRunner{
@@ -770,6 +799,7 @@ func TestCompactionBackgroundJoinCancellation(t *testing.T) {
 		joinCtx, joinCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer joinCancel()
 		if err := mgr.waitForBackgroundCompactions(joinCtx); err != nil {
+			store.keepFixture = true
 			t.Errorf("join before fixture eviction: %v", err)
 		}
 	})
@@ -789,10 +819,53 @@ func TestCompactionBackgroundJoinCancellation(t *testing.T) {
 	}
 }
 
+func TestCompactionSQLiteTimedOutCleanupKeepsFixture(t *testing.T) {
+	t.Parallel()
+	store, mgr := sqliteCompactionFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	release := make(chan struct{})
+	result := make(chan error, 1)
+	key := t.Name()
+	go func() {
+		defer close(done)
+		<-release
+		_, err := store.LoadLatest(context.Background(), key)
+		result <- err
+	}()
+	defer func() { releaseCompactionBarrier(release); <-done }()
+	var reports []string
+	h := &sqliteDispatchHarness{t: t, ctx: ctx, cancel: cancel, done: []<-chan struct{}{done},
+		managers: map[*SessionManager]struct{}{mgr: {}}, fixture: store, guardOverride: time.Millisecond,
+		report: func(format string, args ...any) { reports = append(reports, fmt.Sprintf(format, args...)) }}
+	h.cleanup()
+	if len(reports) == 0 || !store.keepFixture {
+		t.Fatal("timeout did not retain fixture and report failure")
+	}
+	store.cleanupFixture(t)
+	if _, err := store.LoadLatest(context.Background(), t.Name()); err != nil {
+		t.Fatalf("retained fixture unavailable: %v", err)
+	}
+	if mgr.registerCompaction() {
+		mgr.compactionWorkers.Done()
+		t.Fatal("worker registered after join")
+	}
+	close(release)
+	<-done
+	if err := <-result; err != nil {
+		t.Fatalf("late operation could not use fixture: %v", err)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("unexpected late cleanup reports: %v", reports)
+	}
+	store.keepFixture = false // This test has now explicitly joined its delayed operation.
+}
+
 func TestCompactionSQLiteBlockedHookCancellation(t *testing.T) {
 	t.Parallel()
-	_, mgr := sqliteCompactionFixture(t)
-	h := newSQLiteDispatchHarness(t, t.Name())
+	store, mgr := sqliteCompactionFixture(t)
+	h := newSQLiteDispatchHarness(t, store, t.Name())
 	entered, release := h.barrier()
 	hooks := &Hooks{}
 	hooks.RegisterPostDispatch(sqlitePostDispatchBarrier(entered, release))

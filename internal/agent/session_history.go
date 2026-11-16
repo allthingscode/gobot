@@ -286,8 +286,9 @@ func (m *SessionManager) updateTokenBudget(ctx context.Context, sessionKey strin
 	slog.Debug("agent: session token budget", logattr.SessionKey(sessionKey), slog.Int("tokens", newTokens), slog.Int("budget", m.tokenBudget))
 	if newTokens > m.tokenBudget && ctx.Err() == nil {
 		slog.Info("agent: session token budget exceeded, triggering compaction", logattr.SessionKey(sessionKey))
-		m.compactionWorkers.Add(1)
-		go m.compactSessionAsync(ctx, sessionKey, store)
+		if m.registerCompaction() {
+			go m.compactSessionAsync(ctx, sessionKey, store)
+		}
 	}
 }
 
@@ -350,8 +351,22 @@ func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey 
 	return result, nil
 }
 
-// waitForBackgroundCompactions joins scheduled workers after dispatches have stopped.
+// registerCompaction serializes worker registration with the start of a join.
+func (m *SessionManager) registerCompaction() bool {
+	m.compactionMu.Lock()
+	defer m.compactionMu.Unlock()
+	if m.compactionClosed {
+		return false
+	}
+	m.compactionWorkers.Add(1)
+	return true
+}
+
+// waitForBackgroundCompactions closes registration and joins scheduled workers.
 func (m *SessionManager) waitForBackgroundCompactions(ctx context.Context) error {
+	m.compactionMu.Lock()
+	m.compactionClosed = true
+	m.compactionMu.Unlock()
 	done := make(chan struct{})
 	go func() {
 		m.compactionWorkers.Wait()
