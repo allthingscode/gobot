@@ -206,6 +206,42 @@ Write-Output 'guarded dependencies loaded; zero dependency command-discovery cal
         }
     }
 
+    foreach ($case in @('summary-only', 'fix-summary', 'valid-row')) {
+        $results += Run-Test -Name "Item404 orphan check: $case" -Body {
+            $root = Join-Path $tempRoot "item404-$case"
+            New-MinimalBacklogTree -Root $root
+            New-SpecFile -Root $root -RelPath 'bugs/active/B-404_Sample.md' -ItemId 'B-404' -Type 'Bug'
+            $backlog = Join-Path $root 'BACKLOG.md'
+            $summary = if ($case -eq 'fix-summary') { '| **P2** | 0 | - |' } else { '| **P2** | 1 | B-404 |' }
+            $row = if ($case -eq 'valid-row') { '| [B-404](bugs/active/B-404_Sample.md) | P2 | Ready | Sample | Architect |' } else { '' }
+            @"
+# Backlog
+## Priority Summary
+| Priority | Active Count | Item IDs |
+|---|---|---|
+| **P0** | 0 | - |
+| **P1** | 0 | - |
+$summary
+| **P3** | 0 | - |
+## Active Items
+| ID | Priority | Status | Title | Target |
+|---|---|---|---|---|
+$row
+"@ | Set-Content -LiteralPath $backlog -Encoding UTF8
+            if ($case -eq 'fix-summary') {
+                $fixOutput = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $SCRIPT -BacklogPath $backlog -FixSummary 2>&1 })
+                $p2Line = @(Get-Content -LiteralPath $backlog -Encoding UTF8 | Where-Object { $_ -match '^\| \*\*P2\*\* \|' })
+                Assert-Result 'summary excludes row-less ID' ($p2Line.Count -eq 1 -and $p2Line[0] -notmatch 'B-404') ($p2Line -join "`n")
+            }
+            $r = Invoke-Validator -BacklogPath $backlog
+            if ($case -eq 'valid-row') {
+                Assert-Result 'proper row passes' ($r.ExitCode -eq 0) $r.Output
+            } else {
+                Assert-Result 'missing row reports orphan' ($r.ExitCode -eq 2 -and $r.Output.Contains('Orphaned file: bugs/active/B-404_Sample.md has no entry in BACKLOG.md')) $r.Output
+            }
+        }
+    }
+
     # --- Test 1: clean tree with one valid link passes ---
     $results += Run-Test -Name "Clean tree with valid Active Items link passes" -Body {
         $root = Join-Path $tempRoot "clean"

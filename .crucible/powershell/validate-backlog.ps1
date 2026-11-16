@@ -301,10 +301,9 @@ try {
 
                             # Check A: Orphaned Files
                             $activeItems += $itemId
-                            $priorityItems[$priority] += $itemId
                             $matchFound = $false
                             foreach ($cLine in $content) {
-                                if ($cLine -match "\b$itemId\b") {
+                                if (Test-BacklogTaskRow -Line $cLine -TaskId $itemId) {
                                     $matchFound = $true
                                     break
                                 }
@@ -313,6 +312,8 @@ try {
                                 $relPath = $file.FullName -replace [regex]::Escape($backlogDir + [System.IO.Path]::DirectorySeparatorChar), ''
                                 $relPath = $relPath -replace '\\', '/'
                                 $errors += "Orphaned file: $relPath has no entry in BACKLOG.md"
+                            } else {
+                                $priorityItems[$priority] += $itemId
                             }
                         }
                     } catch {

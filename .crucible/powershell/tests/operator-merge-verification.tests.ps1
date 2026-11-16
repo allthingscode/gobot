@@ -864,6 +864,33 @@ try {
 
     # --- deployment -> grooming tests ---
 
+    $results += Run-Test -Name "deployment -> grooming producer preserves dependency block without a hash" -Body {
+        $projectRoot = Join-Path $tempRoot "grooming-depblocked-producer"
+        $taskId = "F-403"
+        Initialize-ProjectRepo -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
+        Push-Location $projectRoot
+        try {
+            git checkout -b task/$taskId --quiet
+            Set-Content -LiteralPath "work.txt" -Value "unmerged task work" -Encoding UTF8
+            git add work.txt
+            git commit -m "task work" --quiet
+            git checkout master --quiet
+        } finally { Pop-Location }
+        $producer = Join-Path $REPO_ROOT "powershell/new-handoff.ps1"
+        $written = Invoke-ExternalCommand {
+            & (Get-PwshCommand) -NoProfile -File $producer -TaskId $taskId -Source deployment -Target grooming -Reason "Dependency blocked" -ProjectRoot $projectRoot -SessionCycleId test-cycle -CycleId test-cycle -PromptVersion test-v1
+        }
+        Assert-Result -Name "producer succeeds" -Condition ($written.ExitCode -eq 0) -FailureMessage ($written.Output -join "`n")
+        $handoffs = @(Get-ChildItem (Join-Path $projectRoot ".crucible/session/handoffs") -Filter "$taskId-*.json")
+        Assert-Result -Name "one handoff written" -Condition ($handoffs.Count -eq 1) -FailureMessage "expected one handoff, got $($handoffs.Count)"
+        $handoff = Get-Content -LiteralPath $handoffs[0].FullName -Raw | ConvertFrom-Json
+        Assert-Result -Name "no task tip recorded" -Condition ([string]::IsNullOrWhiteSpace($handoff.commit_hash)) -FailureMessage "unexpected commit_hash: $($handoff.commit_hash)"
+        $res = Invoke-CrucibleForTask -ProjectRoot $projectRoot -TaskId $taskId -AcceptGate
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "dependency block passes" -Condition ($res.ExitCode -eq 0) -FailureMessage "expected 0, got $($res.ExitCode). Output:`n$output"
+        Assert-Result -Name "no verification failure" -Condition ($output -notmatch "artifact_verification_failed") -FailureMessage "unexpected verification failure. Output:`n$output"
+    }
+
     $results += Run-Test -Name "deployment -> grooming dependency-blocked passes without commit_hash" -Body {
         $projectRoot = Join-Path $tempRoot "grooming-depblocked"
         $taskId = "C-OP-GROOM-DEPBLK"

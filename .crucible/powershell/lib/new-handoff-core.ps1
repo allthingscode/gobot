@@ -425,6 +425,19 @@ if ($isGitRepo) {
         }
     }
 
+    # Before merge, use the current task tip instead of an inherited stale hash.
+    # With no branch, retain the inherited value. Item 403.
+    if ($Source -ne "deployment" -and [string]::IsNullOrWhiteSpace($CommitHash)) {
+        $taskBranchRef = "refs/heads/task/$TaskId"
+        git show-ref --verify --quiet $taskBranchRef 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $taskTip = (git rev-parse $taskBranchRef 2>$null)
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($taskTip)) {
+                $resolvedCommitHash = $taskTip.Trim()
+            }
+        }
+    }
+
     # Deployment -> done must name the current task-branch tip; inherited hashes may
     # be stale after a rebase or recovery. Without a task branch, write null for the
     # merge-verification gate to judge as a No-Code Closure. A dangling inherited

@@ -1100,6 +1100,70 @@ budget_tier: "low"
         }
     }
 
+    # Item 403: a later handoff must not inherit a stale task-branch commit.
+    Invoke-Test -Name "omitted commit hash follows the task branch and inherits without a branch" -Script {
+        $taskId = "F-HANDOFF-TIP"
+        $gitRepoDir = Join-Path $tempRoot "git-handoff-tip-test"
+        New-Item -ItemType Directory -Path $gitRepoDir -Force | Out-Null
+        $origRepoRoot = $REPO_ROOT
+        $REPO_ROOT = $gitRepoDir
+        Set-Location -LiteralPath $gitRepoDir
+        try {
+            & git init -b master --quiet
+            & git config user.name "Test"
+            & git config user.email "test@example.com"
+            & git config commit.gpgSign false
+            $configDir = Join-Path $gitRepoDir ".crucible"
+            $backlogDir = Join-Path $configDir "backlog"
+            New-Item -ItemType Directory -Path $backlogDir -Force | Out-Null
+            @("project: HandoffTipTest", "paths:", "  backlog: .crucible/backlog", "  session: .crucible/session", "  workspaces: .crucible/.agent-workspaces") |
+                Set-Content -LiteralPath (Join-Path $configDir "config.yaml") -Encoding UTF8
+            "| $taskId | Ready | Test |" | Set-Content -LiteralPath (Join-Path $backlogDir "BACKLOG.md") -Encoding UTF8
+            Set-Content -LiteralPath "work.txt" -Value "A"
+            & git add work.txt .crucible/config.yaml .crucible/backlog/BACKLOG.md
+            & git commit -m "commit A" --quiet
+            & git checkout -b "task/$taskId" --quiet
+            $tipA = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
+            $argsForHandoff = @{
+                TaskId = $taskId; Source = "implementation"; Target = "verification"
+                Reason = "implementation complete"; SessionCycleId = "cycle-test"
+                SchemaPath = $schemaPath; ProjectRoot = $gitRepoDir
+            }
+            $first = Invoke-Generator -InputArgs ($argsForHandoff + @{ CommitHash = $tipA }) -NoRegister
+            if ($first.ExitCode -ne 0) { throw "First handoff failed: $($first.Output)" }
+            $handoffs = Join-Path $gitRepoDir ".crucible/session/handoffs"
+            $firstFile = Get-ChildItem -Path $handoffs -Filter ($taskId + "-*.json") | Select-Object -First 1
+            $firstHash = (Get-Content -LiteralPath $firstFile.FullName -Raw | ConvertFrom-Json).commit_hash
+            if ($firstHash -ne $tipA) { throw "First handoff should record A ($tipA), got $firstHash" }
+
+            Set-Content -LiteralPath "work.txt" -Value "B"
+            & git add work.txt
+            & git commit -m "commit B" --quiet
+            $tipB = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
+            & git checkout master --quiet
+            Start-Sleep -Milliseconds 1100
+            $second = Invoke-Generator -InputArgs $argsForHandoff -NoRegister
+            if ($second.ExitCode -ne 0) { throw "Later handoff failed: $($second.Output)" }
+            $secondFile = Get-ChildItem -Path $handoffs -Filter ($taskId + "-*.json") | Sort-Object Name -Descending | Select-Object -First 1
+            $secondHash = (Get-Content -LiteralPath $secondFile.FullName -Raw | ConvertFrom-Json).commit_hash
+
+            & git branch -D "task/$taskId" --quiet
+            Start-Sleep -Milliseconds 1100
+            $control = Invoke-Generator -InputArgs $argsForHandoff -NoRegister
+            if ($control.ExitCode -ne 0) { throw "No-branch handoff failed: $($control.Output)" }
+            $controlFile = Get-ChildItem -Path $handoffs -Filter ($taskId + "-*.json") | Sort-Object Name -Descending | Select-Object -First 1
+            $controlHash = (Get-Content -LiteralPath $controlFile.FullName -Raw | ConvertFrom-Json).commit_hash
+            if ($controlHash -ne $secondHash) { throw "No-branch handoff should inherit $secondHash, got $controlHash" }
+            if ($secondHash -ne $tipB) { throw "Later handoff should record B ($tipB), got $secondHash (A: $tipA)" }
+        } finally {
+            $REPO_ROOT = $origRepoRoot
+            Set-Location -LiteralPath $tempRoot
+            if (Test-Path -LiteralPath $gitRepoDir) {
+                Remove-Item -Recurse -Force -LiteralPath $gitRepoDir -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     # The deployment prompt said -CommitHash could be omitted and the hash would be
     # inherited. Nothing upstream carries one - no phase before deployment merges anything -
     # so the handoff was refused for a missing field. The tip of the task branch is the
