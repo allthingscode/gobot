@@ -493,10 +493,142 @@ func assertCompactionLockReleased(t *testing.T) {
 	}
 }
 
+// sqliteDispatchHarness owns all goroutines until their locks have drained before
+// the SQLite fixture is evicted. The guard diagnoses deadlocks, not performance.
+type sqliteDispatchHarness struct {
+	t          *testing.T
+	ctx        context.Context
+	cancel     context.CancelFunc
+	releases   []chan struct{}
+	done       []<-chan struct{}
+	dispatches []*sqliteDispatchResult
+	keys       []string
+}
+type sqliteDispatchResult struct {
+	done    chan struct{}
+	errors  chan error
+	checked bool
+}
+
+func newSQLiteDispatchHarness(t *testing.T, keys ...string) *sqliteDispatchHarness {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cleanup owns cancellation
+	h := &sqliteDispatchHarness{t: t, ctx: ctx, cancel: cancel, keys: keys}
+	t.Cleanup(h.cleanup)
+	return h
+}
+
+//nolint:gocognit // cleanup joins all work and reports each outstanding error.
+func (h *sqliteDispatchHarness) cleanup() {
+	t := h.t
+	for _, release := range h.releases {
+		releaseCompactionBarrier(release)
+	}
+	h.cancel()
+	for _, done := range h.done {
+		h.wait(done, "goroutine cleanup")
+	}
+	for _, result := range h.dispatches {
+		if !result.checked {
+			err := <-result.errors
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("dispatch cleanup: %v", err)
+			}
+		}
+	}
+	h.condition("session lock cleanup", func() bool {
+		metrics := GetLockMetrics()
+		for _, key := range h.keys {
+			if _, exists := metrics[key]; exists {
+				return false
+			}
+		}
+		return true
+	})
+}
+func (h *sqliteDispatchHarness) guard() time.Duration {
+	// Reserve one quarter of the remaining test deadline for cleanup; without a
+	// deadline use one minute, a deadlock guard rather than a latency target.
+	if deadline, ok := h.t.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > 0 {
+			return remaining * 3 / 4
+		}
+		return time.Millisecond
+	}
+	return time.Minute
+}
+func (h *sqliteDispatchHarness) wait(ch <-chan struct{}, description string) {
+	h.t.Helper()
+	timer := time.NewTimer(h.guard())
+	defer timer.Stop()
+	select {
+	case <-ch:
+	case <-timer.C:
+		h.t.Fatalf("timed out waiting for %s", description)
+	}
+}
+func (h *sqliteDispatchHarness) condition(description string, condition func() bool) {
+	h.t.Helper()
+	timer := time.NewTimer(h.guard())
+	defer timer.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for !condition() {
+		select {
+		case <-timer.C:
+			h.t.Fatalf("timed out waiting for %s", description)
+		case <-tick.C:
+		}
+	}
+}
+func (h *sqliteDispatchHarness) barrier() (entered, release chan struct{}) {
+	entered, release = make(chan struct{}), make(chan struct{})
+	h.releases = append(h.releases, release)
+	return entered, release
+}
+func (h *sqliteDispatchHarness) worker(mgr *SessionManager, key string, store CheckpointStore) <-chan struct{} {
+	done := make(chan struct{})
+	h.done = append(h.done, done)
+	go func() { defer close(done); mgr.compactSessionAsync(h.ctx, key, store) }()
+	return done
+}
+func (h *sqliteDispatchHarness) dispatch(mgr *SessionManager, key string) *sqliteDispatchResult {
+	result := &sqliteDispatchResult{done: make(chan struct{}), errors: make(chan error, 1)}
+	h.dispatches = append(h.dispatches, result)
+	h.done = append(h.done, result.done)
+	go func() {
+		defer close(result.done)
+		_, err := mgr.Dispatch(h.ctx, key, "alice", "newest user")
+		result.errors <- err
+	}()
+	return result
+}
+func (h *sqliteDispatchHarness) await(result *sqliteDispatchResult) {
+	h.t.Helper()
+	h.wait(result.done, "dispatch")
+	result.checked = true
+	if err := <-result.errors; err != nil {
+		h.t.Fatal(err)
+	}
+}
+func sqlitePostDispatchBarrier(entered, release chan struct{}) func(context.Context, string, string) string {
+	return func(ctx context.Context, _, response string) string {
+		close(entered)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return response
+	}
+}
+
 func TestCompactionSQLiteWorkerFirstAndIndependentSessions(t *testing.T) {
 	t.Parallel()
 	store, mgr := sqliteCompactionFixture(t)
-	entered, release := make(chan struct{}), make(chan struct{})
+	other := t.Name() + "/independent"
+	h := newSQLiteDispatchHarness(t, t.Name(), other)
+	entered, release := h.barrier()
 	runner := &compactionRunner{text: func(ctx context.Context, key, _ string) (string, error) {
 		if key == t.Name() {
 			close(entered)
@@ -509,36 +641,36 @@ func TestCompactionSQLiteWorkerFirstAndIndependentSessions(t *testing.T) {
 		return compactionTestSummary, nil
 	}}
 	mgr.runner = runner
-	worker := startCompaction(t, mgr, t.Name(), store)
-	t.Cleanup(func() { releaseCompactionBarrier(release) })
-	waitForClosed(t, entered, "summary holding session lock")
-	dispatch := startCompactionDispatch(t, mgr, t.Name())
-	waitForCondition(t, "dispatch waiting on compaction lock", func() bool { return GetLockMetrics()[t.Name()].WaitCount >= 1 })
-	other := t.Name() + "/independent"
+	worker := h.worker(mgr, t.Name(), store)
+	h.wait(entered, "summary holding session lock")
+	dispatch := h.dispatch(mgr, t.Name())
+	h.condition("dispatch waiting on compaction lock", func() bool { return GetLockMetrics()[t.Name()].WaitCount >= 1 })
 	seedCompactionSession(t, store.CheckpointStore, other)
 	otherManager := NewSessionManager(runner, nil, "mock")
 	otherManager.SetTokenBudget(30)
 	otherManager.SetSummaryTurns(2)
 	otherManager.SetCheckpointStoreProvider(func(string) (CheckpointStore, error) { return store, nil })
 	otherHooks := &Hooks{}
-	otherHooks.RegisterPostDispatch(func(_ context.Context, key, response string) string {
-		waitForCondition(t, "independent automatic worker queued", func() bool { return GetLockMetrics()[key].WaitCount >= 1 })
-		return response
-	})
+	hookEntered, hookRelease := h.barrier()
+	otherHooks.RegisterPostDispatch(sqlitePostDispatchBarrier(hookEntered, hookRelease))
 	otherManager.SetHooks(otherHooks)
-	awaitCompactionDispatch(t, startCompactionDispatch(t, otherManager, other))
-	waitForClosed(t, startCompaction(t, otherManager, other, store), "unrelated compaction")
-	waitForCondition(t, "independent workers finished", func() bool {
+	otherDispatch := h.dispatch(otherManager, other)
+	h.wait(hookEntered, "independent post-dispatch hook")
+	h.condition("independent automatic worker queued", func() bool { return GetLockMetrics()[other].WaitCount >= 1 })
+	close(hookRelease)
+	h.await(otherDispatch)
+	h.wait(h.worker(otherManager, other, store), "unrelated compaction")
+	h.condition("independent workers finished", func() bool {
 		_, exists := GetLockMetrics()[other]
 		return !exists
 	})
 	otherSnap, err := store.LoadLatest(context.Background(), other)
-	if err != nil || otherSnap.Messages[0].Content.String() != compactionTestSummary {
+	if err != nil || otherSnap == nil || len(otherSnap.Messages) == 0 || otherSnap.Messages[0].Content.String() != compactionTestSummary {
 		t.Fatalf("independent session did not compact: %v", err)
 	}
 	close(release)
-	waitForClosed(t, worker, "worker-first publication")
-	awaitCompactionDispatch(t, dispatch)
+	h.wait(worker, "worker-first publication")
+	h.await(dispatch)
 	assertCompactionLatest(t, store, 2, []string{compactionTestSummary, "recent one", "recent two", "newest user", compactionTestReply})
 	assertCompactionLockReleased(t)
 }
@@ -546,7 +678,8 @@ func TestCompactionSQLiteWorkerFirstAndIndependentSessions(t *testing.T) {
 func TestCompactionSQLiteDispatchFirstAndQueuedWorkers(t *testing.T) {
 	t.Parallel()
 	store, mgr := sqliteCompactionFixture(t)
-	entered, release := make(chan struct{}), make(chan struct{})
+	h := newSQLiteDispatchHarness(t, t.Name())
+	entered, release := h.barrier()
 	prompts := make(chan string, 3)
 	mgr.runner = &compactionRunner{
 		run: func(ctx context.Context, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
@@ -564,23 +697,23 @@ func TestCompactionSQLiteDispatchFirstAndQueuedWorkers(t *testing.T) {
 		},
 	}
 	hooks := &Hooks{}
-	hooks.RegisterPostDispatch(func(_ context.Context, key, response string) string {
-		waitForCondition(t, "automatic worker queued after save", func() bool { return GetLockMetrics()[key].WaitCount >= 3 })
-		return response
-	})
+	hookEntered, hookRelease := h.barrier()
+	hooks.RegisterPostDispatch(sqlitePostDispatchBarrier(hookEntered, hookRelease))
 	mgr.SetHooks(hooks)
-	dispatch := startCompactionDispatch(t, mgr, t.Name())
-	t.Cleanup(func() { releaseCompactionBarrier(release) })
-	waitForClosed(t, entered, "dispatch holding lock")
-	workers := []<-chan struct{}{startCompaction(t, mgr, t.Name(), store), startCompaction(t, mgr, t.Name(), store)}
-	waitForCondition(t, "both queued workers", func() bool { return GetLockMetrics()[t.Name()].WaitCount >= 2 })
+	dispatch := h.dispatch(mgr, t.Name())
+	h.wait(entered, "dispatch holding lock")
+	workers := []<-chan struct{}{h.worker(mgr, t.Name(), store), h.worker(mgr, t.Name(), store)}
+	h.condition("both queued workers", func() bool { return GetLockMetrics()[t.Name()].WaitCount >= 2 })
 	close(release)
-	awaitCompactionDispatch(t, dispatch)
+	h.wait(hookEntered, "post-dispatch hook")
+	h.condition("automatic worker queued after save", func() bool { return GetLockMetrics()[t.Name()].WaitCount >= 3 })
+	close(hookRelease)
+	h.await(dispatch)
 	for _, done := range workers {
-		waitForClosed(t, done, "queued worker")
+		h.wait(done, "queued worker")
 	}
 	mgr.compactSessionAsync(context.Background(), t.Name(), store)
-	waitForCondition(t, "all queued workers to release references", func() bool {
+	h.condition("all queued workers to release references", func() bool {
 		_, exists := GetLockMetrics()[t.Name()]
 		return !exists
 	})
@@ -596,6 +729,24 @@ func TestCompactionSQLiteDispatchFirstAndQueuedWorkers(t *testing.T) {
 		t.Fatalf("metadata: %d %v %v", tokens, at, err)
 	}
 	assertCompactionLockReleased(t)
+}
+
+func TestCompactionSQLiteBlockedHookCancellation(t *testing.T) {
+	t.Parallel()
+	_, mgr := sqliteCompactionFixture(t)
+	h := newSQLiteDispatchHarness(t, t.Name())
+	entered, release := h.barrier()
+	hooks := &Hooks{}
+	hooks.RegisterPostDispatch(sqlitePostDispatchBarrier(entered, release))
+	mgr.SetHooks(hooks)
+	dispatch := h.dispatch(mgr, t.Name())
+	h.wait(entered, "blocked post-dispatch hook")
+	h.cancel()
+	h.wait(dispatch.done, "cancelled post-dispatch hook")
+	dispatch.checked = true
+	if err := <-dispatch.errors; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled dispatch: %v", err)
+	}
 }
 
 func TestCompactionSQLiteSaveBeforeTrigger(t *testing.T) {
