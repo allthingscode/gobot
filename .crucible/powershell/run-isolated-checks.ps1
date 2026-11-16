@@ -16,6 +16,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 . (Join-Path $PSScriptRoot "lib/platform.ps1")
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 . (Join-Path $PSScriptRoot "lib/checks-not-run.ps1")
+. (Join-Path $PSScriptRoot "lib/worktree.ps1")
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = Resolve-ConfigProjectRoot
@@ -103,6 +104,9 @@ if (-not [string]::IsNullOrWhiteSpace($Commit)) {
     }
 }
 
+$scratchDir = Join-Path $worktree ".crucible-scratch"
+Initialize-ImplementationScratch -WorktreePath $worktree
+
 # Map "test" mode to "quick" if the framework calls it with "test" for backward compatibility
 $targetMode = if ($Mode -eq "test") { "quick" } else { $Mode }
 
@@ -127,8 +131,14 @@ function Invoke-Check {
     Write-Host ("==> {0}" -f $Name)
     # Execute the string as a command line
     $global:LASTEXITCODE = 0
-    Invoke-Expression $CommandString
-    $checkExit = $LASTEXITCODE
+    $previousScratch = [Environment]::GetEnvironmentVariable("CRUCIBLE_SCRATCH_DIR", "Process")
+    try {
+        [Environment]::SetEnvironmentVariable("CRUCIBLE_SCRATCH_DIR", $scratchDir, "Process")
+        Invoke-Expression $CommandString
+        $checkExit = $LASTEXITCODE
+    } finally {
+        [Environment]::SetEnvironmentVariable("CRUCIBLE_SCRATCH_DIR", $previousScratch, "Process")
+    }
     # A nonzero command exit is still an executed check. A launch/parse error throws
     # above, retaining its previous skip instead of claiming that it ran.
     Clear-ChecksNotRun -SessionDir $sessionRoot -TaskId $TaskId -Source "isolated checks" -Check $Name
@@ -341,6 +351,7 @@ function Invoke-ProjectPrePushHook {
     $psi.UseShellExecute = $false
     $psi.RedirectStandardInput = $true
     $psi.Environment["CRUCIBLE_PRE_PUSH_PREFLIGHT"] = "1"
+    $psi.Environment["CRUCIBLE_SCRATCH_DIR"] = $scratchDir
     $hookPath = Get-GitHookToolPath -Interpreter $interpreter
     if ($null -ne $hookPath) { $psi.Environment["PATH"] = $hookPath }
     $proc = [System.Diagnostics.Process]::Start($psi)

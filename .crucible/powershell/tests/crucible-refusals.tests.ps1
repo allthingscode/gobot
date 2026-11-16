@@ -904,6 +904,7 @@ $context = @{
                     Copy-Item -LiteralPath (Join-Path $source 'run-isolated-checks.ps1') -Destination $root
                     # Deterministic config/native results select each command boundary
                     # error without starting worktrees, tools, or external services.
+                    Write-FixtureText (Join-Path $lib 'worktree.ps1') 'function Initialize-ImplementationScratch { param($WorktreePath) }'
                     Write-FixtureText (Join-Path $lib 'checks-not-run.ps1') @'
 function Clear-ChecksNotRun {}
 function Write-CheckNotRun {}

@@ -373,6 +373,8 @@ verification:
 
 `validate-config.ps1` rejects unsupported or empty host conditions and empty alternative commands. Checks not run are written to `.crucible/session/{task_id}/verification/checks-not-run.txt` for the Reviewer handoff and Human Gate. The same record holds pipeline checks the gates skipped, such as the scope check for a task with no `file_affinity`; a line is removed only when its check runs again, or when a human retires a renamed or removed check with `retire-check-not-run.ps1`, which keeps the line, the reason and any replacement in `checks-not-run-retired.txt` (see the Human Gate section of `docs/operating-manual.md`).
 
+Crucible sets `CRUCIBLE_SCRATCH_DIR` to the absolute path of `.crucible-scratch` inside the task worktree for configured checks, the pre-push preflight hook, and specialists. Put disposable caches and generated check output there. It belongs to Crucible, is per task, and is removed with the worktree; do not store work that needs to be kept there. The repository's common Git `info/exclude` ignores this name in every checkout.
+
 A task with no implementation worktree, such as research, runs the configured checks with `run-isolated-checks.ps1 -Commit <rev>`. The commands run in a temporary detached worktree at that commit under `.crucible/.agent-workspaces/`, which is removed afterwards whether the checks pass or fail, so files they write never reach the main checkout. Each command's exit code is printed. The pre-push hook does not run in this mode.
 
 `install-hooks.ps1` warns when the project tracks a directory holding a `pre-commit`, `commit-msg`, or `pre-push` file that `project_dir` does not name.

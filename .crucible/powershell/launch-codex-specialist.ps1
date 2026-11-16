@@ -414,6 +414,12 @@ if ($Phase -eq "deployment") {
     $WorkingDir = $REPO_ROOT
 }
 
+$scratchWorktree = if ($usingAdhocSession) { $null } elseif ($WorkingDir -ne $REPO_ROOT) { $WorkingDir } else {
+    $candidate = Join-Path (Get-ConfiguredPath -Key "workspaces" -ProjectRoot $REPO_ROOT) ("implementation-" + $TaskId)
+    if (Test-Path -LiteralPath $candidate -PathType Container) { Resolve-FilesystemPath -Path $candidate }
+}
+$scratchDir = if ($scratchWorktree) { Join-Path $scratchWorktree ".crucible-scratch" } else { $null }
+
 if ([string]::IsNullOrWhiteSpace($Role)) {
     $Role = Get-RoleForPhase -PhaseName $Phase
 }
@@ -544,7 +550,13 @@ $evidence = @{
 }
 try {
     try {
-        $result = Invoke-CodexExec -CodexArgs $codexArgs -Prompt $PromptText -TranscriptPath $transcriptPath
+        $previousScratch = [Environment]::GetEnvironmentVariable("CRUCIBLE_SCRATCH_DIR", "Process")
+        try {
+            [Environment]::SetEnvironmentVariable("CRUCIBLE_SCRATCH_DIR", $scratchDir, "Process")
+            $result = Invoke-CodexExec -CodexArgs $codexArgs -Prompt $PromptText -TranscriptPath $transcriptPath
+        } finally {
+            [Environment]::SetEnvironmentVariable("CRUCIBLE_SCRATCH_DIR", $previousScratch, "Process")
+        }
         $evidence.ExitCode = $result.ExitCode
         $evidence.Output = [string]$result.Output
     } catch {

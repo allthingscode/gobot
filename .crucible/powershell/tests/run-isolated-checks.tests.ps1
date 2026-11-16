@@ -2,6 +2,8 @@ $ErrorActionPreference = "Stop"
 $REPO_ROOT = (Resolve-Path -Path "$PSScriptRoot/../..").Path
 . (Join-Path $PSScriptRoot '_harness.ps1')
 . (Join-Path $REPO_ROOT "powershell/lib/platform.ps1")
+$Quiet = $true
+. (Join-Path $REPO_ROOT "powershell/crucible-lib.ps1")
 $RUN_CHECKS_SCRIPT = Join-Path $REPO_ROOT "powershell/run-isolated-checks.ps1"
 $pwshCmd = Get-PwshCommand
 
@@ -73,6 +75,39 @@ try {
     Initialize-Repo -ProjectRoot $projectRoot
     Add-ImplementationWorktree -ProjectRoot $projectRoot -TaskId $taskId | Out-Null
 
+    $results += Run-Test -Name "Item 405 configured check receives scratch path" -Body {
+        $fixture = Join-Path $tempRoot "scratch-check"
+        Initialize-Repo -ProjectRoot $fixture
+        $cfg = Join-Path $fixture ".crucible/config.yaml"
+        [IO.File]::WriteAllText($cfg, "project: ScratchTest`nverification:`n  quick:`n    - name: scratch`n      command: Write-Host SCRATCH-`$env:CRUCIBLE_SCRATCH_DIR`n", [Text.UTF8Encoding]::new($false))
+        Save-FixtureConfig -ProjectRoot $fixture
+        $wt = Add-ImplementationWorktree -ProjectRoot $fixture -TaskId T-405
+        try {
+            $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-405 -Mode quick -ProjectRoot $fixture }
+            Assert-Result -Name "configured check sees scratch" -Condition (($res.Output -join "`n").Contains("SCRATCH-" + (Join-Path $wt ".crucible-scratch"))) -FailureMessage ($res.Output -join "`n")
+        } finally { Remove-WorktreeIfPresent -ProjectRoot $fixture -WorktreePath $wt }
+    }
+
+
+    $results += Run-Test -Name "Item 405 checks initialize scratch for an existing worktree" -Body {
+        $fixture = Join-Path $tempRoot "scratch-existing"
+        Initialize-Repo -ProjectRoot $fixture
+        $cfg = Join-Path $fixture ".crucible/config.yaml"
+        [IO.File]::WriteAllText($cfg, "project: ScratchTest`nverification:`n  quick:`n    - name: scratch`n      command: Set-Content -LiteralPath (Join-Path `$env:CRUCIBLE_SCRATCH_DIR cache) -Value cache`n", [Text.UTF8Encoding]::new($false))
+        Save-FixtureConfig -ProjectRoot $fixture
+        $wt = Add-ImplementationWorktree -ProjectRoot $fixture -TaskId T-405
+        try {
+            $exclude = Join-Path $fixture ".git/info/exclude"
+            [IO.File]::WriteAllText($exclude, "")
+            $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId T-405 -Mode quick -ProjectRoot $fixture }
+            Assert-Result -Name "check wrote scratch" -Condition ($res.ExitCode -eq 0 -and (Test-Path -LiteralPath (Join-Path $wt ".crucible-scratch/cache"))) -FailureMessage ($res.Output -join "`n")
+            $status = Invoke-ExternalCommand { git -C $wt status --porcelain }
+            Assert-Result -Name "scratch absent from status" -Condition ($status.ExitCode -eq 0 -and ($status.Output -join "`n") -eq "") -FailureMessage ($status.Output -join "`n")
+            Push-Location $fixture
+            try { $removed = Remove-ImplementationWorktree -TaskId T-405 -ProjectRoot $fixture } finally { Pop-Location }
+            Assert-Result -Name "scratch worktree removed" -Condition ($removed -and -not (Test-Path -LiteralPath $wt)) -FailureMessage "cleanup refused the scratch-only worktree"
+        } finally { Remove-WorktreeIfPresent -ProjectRoot $fixture -WorktreePath $wt }
+    }
 
     $results += Run-Test -Name "Unreadable encoding baseline fails closed (item 225)" -Body {
         $orphanProject = Join-Path $tempRoot "orphan-project"
@@ -366,6 +401,15 @@ try {
     $worktreeHooksDir = Join-Path $worktreePath "project-hooks"
     New-Item -ItemType Directory -Path $worktreeHooksDir -Force | Out-Null
     $worktreeHook = Join-Path $worktreeHooksDir "pre-push"
+
+    $results += Run-Test -Name "Item 405 pre-push hook receives scratch path" -Body {
+        $hookConfig | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8
+        Save-FixtureConfig -ProjectRoot $projectRoot
+        [IO.File]::WriteAllText($worktreeHook, "#!/bin/sh`necho `"hook scratch=`$CRUCIBLE_SCRATCH_DIR`"`n")
+        $res = Invoke-ExternalCommand { & $pwshCmd -NoProfile -File $RUN_CHECKS_SCRIPT -TaskId $taskId -Mode full -ProjectRoot $projectRoot }
+        $output = $res.Output -join "`n"
+        Assert-Result -Name "hook sees scratch" -Condition ($res.ExitCode -eq 0 -and $output.Contains("hook scratch=" + (Join-Path $worktreePath ".crucible-scratch"))) -FailureMessage $output
+    }
 
     $results += Run-Test -Name "A failing project pre-push hook fails full mode and its output is shown (item 172)" -Body {
         $hookConfig | Set-Content -LiteralPath (Join-Path $projectRoot ".crucible/config.yaml") -Encoding UTF8

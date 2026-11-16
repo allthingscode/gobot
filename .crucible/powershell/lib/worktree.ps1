@@ -192,6 +192,26 @@ function Initialize-ImplementationWorktreeHooks {
     }
 }
 
+function Initialize-ImplementationScratch {
+    param([Parameter(Mandatory=$true)][string]$WorktreePath)
+
+    $exclude = Invoke-Git -Directory $WorktreePath rev-parse --path-format=absolute --git-path info/exclude
+    if ($exclude.ExitCode -ne 0) { throw "Cannot locate the repository info/exclude file." }
+    $excludePath = Resolve-FilesystemPath -Path $exclude.Raw.Trim()
+    $line = "/.crucible-scratch/"
+    $content = if (Test-Path -LiteralPath $excludePath) { [IO.File]::ReadAllText($excludePath) } else { "" }
+    if (@($content -split "`r?`n") -cnotcontains $line) {
+        $prefix = if ($content.Length -gt 0 -and -not $content.EndsWith("`n")) { "`n" } else { "" }
+        [IO.File]::AppendAllText($excludePath, $prefix + $line + "`n", [Text.UTF8Encoding]::new($false))
+    }
+    $scratch = Join-Path $WorktreePath ".crucible-scratch"
+    $item = Get-Item -LiteralPath $scratch -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $item.PSIsContainer)) {
+        throw "Scratch path is not a normal directory: $scratch"
+    }
+    if ($null -eq $item) { New-Item -ItemType Directory -Path $scratch | Out-Null }
+}
+
 function Initialize-ImplementationWorktree {
     param(
         [Parameter(Mandatory=$true)][string]$WorktreePath,
@@ -224,6 +244,7 @@ function Initialize-ImplementationWorktree {
     } else {
         Write-Quiet ("[INIT] Worktree already exists at $WorktreePath.") -ForegroundColor Cyan
     }
+    Initialize-ImplementationScratch -WorktreePath $WorktreePath
     Initialize-ImplementationWorktreeHooks -WorktreePath $WorktreePath
 }
 
@@ -250,10 +271,40 @@ function Remove-ImplementationWorktree {
     $wtPath = Resolve-ImplementationWorktreePath -TaskId $TaskId -WorkspacesDir $workspacesDir
     if (-not (Test-Path $wtPath)) { return $true }
 
+    $scratch = Resolve-FilesystemPath -Path (Join-Path $wtPath ".crucible-scratch")
+    if ((Split-Path -Parent $scratch) -ne $wtPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)) {
+        Write-Host "Refusing cleanup: scratch is not a direct child of the worktree." -ForegroundColor Yellow
+        return $false
+    }
+    $scratchItem = Get-Item -LiteralPath $scratch -Force -ErrorAction SilentlyContinue
+    if ($null -ne $scratchItem -and (($scratchItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $scratchItem.PSIsContainer)) {
+        Write-Host "Refusing cleanup: scratch is a link or not a directory: $scratch" -ForegroundColor Yellow
+        return $false
+    }
+
     Write-Quiet "[HUMAN GATE] Removing implementation worktree at $wtPath..."
     Invoke-GitChecked { git worktree prune }
     if (-not (Test-Path $wtPath)) { return $true }
 
+    # Refuse before removing scratch if any other work exists. The regular I2 guard
+    # still runs after scratch is removed, immediately before worktree removal.
+    if ($null -ne $scratchItem) {
+        $status = Invoke-Git -Directory $wtPath status --porcelain=v1 -z --untracked-files=all --ignored
+        $tracked = Invoke-Git -Directory $wtPath ls-files -z -- .crucible-scratch
+        $entries = @($status.Raw -split "`0" | Where-Object { $_ })
+        $other = @($entries | Where-Object { -not $_.StartsWith('!! .crucible-scratch/', [StringComparison]::Ordinal) })
+        if ($status.ExitCode -ne 0 -or $tracked.ExitCode -ne 0 -or $tracked.Raw -or $other.Count -gt 0) {
+            Write-Host "Refusing cleanup: worktree has other work or its status could not be established; scratch is preserved." -ForegroundColor Yellow
+            foreach ($entry in $other) { Write-Host ("  " + $entry) -ForegroundColor Yellow }
+            return $false
+        }
+        $scratchItem = Get-Item -LiteralPath $scratch -Force -ErrorAction Stop
+        if (($scratchItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $scratchItem.PSIsContainer) {
+            Write-Host "Refusing cleanup: scratch is a link or not a directory: $scratch" -ForegroundColor Yellow
+            return $false
+        }
+        Remove-Item -LiteralPath $scratch -Recurse -Force
+    }
     # Never --force: uncommitted work was not merged, and deleting it is unrecoverable. Item 221.
     if (-not (Test-GitDiscardSafe -Directory $wtPath -Operation "implementation worktree cleanup" -IncludeUntracked)) {
         Write-Host "[HUMAN GATE] Worktree at $wtPath has uncommitted changes that were not merged; left it and task/$TaskId in place." -ForegroundColor Yellow
@@ -286,6 +337,7 @@ function Restore-ImplementationWorktree {
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Warning: Failed to recreate implementation worktree at $wtPath" -ForegroundColor Yellow
         } else {
+            Initialize-ImplementationScratch -WorktreePath $wtPath
             Initialize-ImplementationWorktreeHooks -WorktreePath $wtPath
             Write-Quiet "[HUMAN GATE] Recreated implementation worktree at $wtPath"
         }

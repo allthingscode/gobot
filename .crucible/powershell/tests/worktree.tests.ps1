@@ -40,6 +40,83 @@ function New-HumanGateWorktreeTestRepo {
 }
 
 try {
+    $results += Run-Test -Name "Item 405 scratch-only worktree can be cleaned up" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "scratch-cleanup"
+        $wtPath = Join-Path $repoPath "workspaces/implementation-F-405-clean"
+        Push-Location $repoPath
+        try {
+            Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-405-clean" | Out-Null
+            $scratch = Join-Path $wtPath ".crucible-scratch"
+            New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $scratch "cache"), "cache`n")
+            $removed = Remove-ImplementationWorktree -TaskId "F-405-clean" -ProjectRoot $repoPath
+            Assert-Result -Name "scratch-only worktree removed" -Condition ($removed -and -not (Test-Path -LiteralPath $wtPath)) -FailureMessage "scratch-only worktree remained"
+            if ($removed) { git branch -d task/F-405-clean | Out-Null }
+            git show-ref --verify --quiet refs/heads/task/F-405-clean
+            Assert-Result -Name "scratch-only branch removed" -Condition ($LASTEXITCODE -ne 0) -FailureMessage "task branch remained"
+        } finally { Pop-Location }
+    }
+
+    $results += Run-Test -Name "Item 405 other ignored work preserves scratch too" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "scratch-other"
+        $wtPath = Join-Path $repoPath "workspaces/implementation-F-405-other"
+        Push-Location $repoPath
+        try {
+            Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-405-other" | Out-Null
+            $scratch = Join-Path $wtPath ".crucible-scratch"
+            New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $scratch "cache"), "cache`n")
+            [IO.File]::WriteAllText((Join-Path $wtPath "other.tmp"), "work`n")
+            git -C $wtPath config --local core.excludesFile (Join-Path $repoPath "exclude")
+            [IO.File]::WriteAllText((Join-Path $repoPath "exclude"), "other.tmp`n")
+            $removed = Remove-ImplementationWorktree -TaskId "F-405-other" -ProjectRoot $repoPath
+            Assert-Result -Name "other ignored file refuses cleanup" -Condition (-not $removed -and (Test-Path -LiteralPath (Join-Path $wtPath "other.tmp"))) -FailureMessage "ignored work was not preserved"
+            Assert-Result -Name "scratch preserved on refusal" -Condition (Test-Path -LiteralPath (Join-Path $scratch "cache")) -FailureMessage "scratch was removed before refusal"
+        } finally { Pop-Location }
+    }
+
+    $results += Run-Test -Name "Item 405 new worktree ignores its scratch directory" -Body {
+        $repoPath = New-ImplementationWorktreeTestRepo -Name "scratch-ignore"
+        $wtPath = Join-Path $tempRoot "implementation-F-405-ignore"
+        Push-Location $repoPath
+        try {
+            Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-405-ignore" | Out-Null
+            $scratch = Join-Path $wtPath ".crucible-scratch"
+            Assert-Result -Name "scratch created" -Condition (Test-Path -LiteralPath $scratch -PathType Container) -FailureMessage "scratch directory was not created"
+            git -C $wtPath check-ignore -q .crucible-scratch/probe
+            Assert-Result -Name "scratch ignored" -Condition ($LASTEXITCODE -eq 0) -FailureMessage "scratch directory is not ignored"
+        } finally { Pop-Location }
+    }
+
+    $results += Run-Test -Name "Item 405 scratch link is never followed" -Body {
+        $repoPath = New-HumanGateWorktreeTestRepo -Name "scratch-link"
+        $wtPath = Join-Path $repoPath "workspaces/implementation-F-405-link"
+        $target = Join-Path $tempRoot "scratch-link-target"
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $target "valuable"), "keep`n")
+        Push-Location $repoPath
+        try {
+            Initialize-ImplementationWorktree -WorktreePath $wtPath -TaskId "F-405-link" | Out-Null
+            $scratch = Join-Path $wtPath ".crucible-scratch"
+            if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Force }
+            $linkType = if (Test-PlatformIsWindows) { "Junction" } else { "SymbolicLink" }
+            New-Item -ItemType $linkType -Path $scratch -Target $target | Out-Null
+            $script:discardCalled = $false
+            $script:statusCalled = $false
+            function Invoke-Git {
+                param([Parameter(ValueFromRemainingArguments=$true)][object[]]$GitArgs, [string]$Directory)
+                if ($GitArgs.Count -gt 0 -and $GitArgs[0] -eq "status") { $script:statusCalled = $true }
+                return [pscustomobject]@{ ExitCode = 1; Raw = ""; Lines = @() }
+            }
+            function Test-GitDiscardSafe { $script:discardCalled = $true; return $false }
+            $removed = Remove-ImplementationWorktree -TaskId "F-405-link" -ProjectRoot $repoPath
+            Assert-Result -Name "scratch link refuses cleanup" -Condition (-not $removed -and (Test-Path -LiteralPath $wtPath)) -FailureMessage "worktree with scratch link was removed"
+            Assert-Result -Name "scratch link target survives" -Condition (Test-Path -LiteralPath (Join-Path $target "valuable")) -FailureMessage "scratch link target was deleted"
+            Assert-Result -Name "scratch link refused before status" -Condition (-not $script:discardCalled) -FailureMessage "discard guard was called for a scratch link"
+            Assert-Result -Name "scratch link refused before direct status" -Condition (-not $script:statusCalled) -FailureMessage "git status was called for a scratch link"
+        } finally { Pop-Location }
+    }
+
     # Exercise the moved human-gate operations against disposable repos. TODO item 197.
     $results += Run-Test -Name "Remove-ImplementationWorktree removes an existing worktree" -Body {
         $repoPath = New-HumanGateWorktreeTestRepo -Name "remove-repo"

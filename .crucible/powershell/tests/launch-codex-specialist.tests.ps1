@@ -55,6 +55,7 @@ for ($i = 0; $i -lt $args.Count; $i++) {
 }
 $enc = New-Object System.Text.UTF8Encoding($false)
 Write-Output ("ARGS: " + ($args -join " "))
+Write-Output ("SCRATCH: " + $env:CRUCIBLE_SCRATCH_DIR)
 switch ($mode) {
     "infra" {
         [Console]::Error.WriteLine("orchestrator_helper_launch_failed: program not found")
@@ -283,6 +284,17 @@ $binDir = Join-Path $tempRoot "fake-bin"
 Write-FakeCodex -BinDir $binDir
 
 try {
+    $results += Run-Test -Name "Item 405 specialist receives scratch path" -Body {
+        $projectRoot = Join-Path $tempRoot "proj-scratch"
+        New-Item -ItemType Directory -Path (Join-Path $projectRoot ".crucible") -Force | Out-Null
+        $wt = Join-Path $projectRoot "worktree"
+        New-Item -ItemType Directory -Path $wt -Force | Out-Null
+        $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @("-TaskId", "C-405", "-Phase", "implementation", "-Model", "gpt-6-sol", "-PromptText", "TEST", "-ProjectRoot", $projectRoot, "-WorkingDir", $wt)
+        $transcript = Join-Path $projectRoot ".crucible/session/C-405/implementation/codex-transcript.txt"
+        $content = if (Test-Path -LiteralPath $transcript) { [IO.File]::ReadAllText($transcript) } else { $res.Output -join "`n" }
+        Assert-Result -Name "specialist sees scratch" -Condition ($content.Contains("SCRATCH: " + (Join-Path $wt ".crucible-scratch"))) -FailureMessage $content
+    }
+
     $results += Run-Test -Name "Preflight PASS on a healthy runtime" -Body {
         $res = Invoke-Launcher -Mode "success" -BinDir $binDir -LauncherArgs @("-Preflight", "-Model", "gpt-6-sol")
         Assert-Result -Name "preflight pass line" -Condition ($res.Output -match "\[CODEX PREFLIGHT\] PASS") -FailureMessage "expected PASS. Output:`n$($res.Output)"
