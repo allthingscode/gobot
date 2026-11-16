@@ -69,7 +69,7 @@ func (t *WaitForTool) Execute(ctx context.Context, sessionKey, userID string, ar
 	runCtx, runCancel := context.WithTimeout(tabCtx, timeout)
 	defer runCancel()
 
-	if err := t.executor.Run(runCtx, chromedp.WaitVisible(selector, chromedp.ByQuery)); err != nil {
+	if err := t.executor.Run(runCtx, VoidAction(chromedp.WaitVisible(chromedp.CSS(selector)))); err != nil {
 		return "", fmt.Errorf("failed to wait for selector %q: %w", selector, err)
 	}
 	return "ready", nil
@@ -115,7 +115,7 @@ func runDynamicAttempt(totalCtx context.Context, exec Executor, waitSelector str
 		}
 	}
 
-	_ = exec.Run(totalCtx, chromedp.Evaluate(`window.scrollBy(0, Math.max(400, Math.floor(window.innerHeight * 0.8)));`, nil))
+	_ = exec.Run(totalCtx, VoidAction(chromedp.Evaluate[chromedp.Void](`window.scrollBy(0, Math.max(400, Math.floor(window.innerHeight * 0.8)));`)))
 	if !waitAttemptInterval(totalCtx, result) {
 		return true, nil
 	}
@@ -125,18 +125,18 @@ func runDynamicAttempt(totalCtx context.Context, exec Executor, waitSelector str
 func waitForSelectorVisible(totalCtx context.Context, exec Executor, waitSelector string) bool {
 	perAttemptCtx, perAttemptCancel := context.WithTimeout(totalCtx, 1500*time.Millisecond)
 	defer perAttemptCancel()
-	return exec.Run(perAttemptCtx, chromedp.WaitVisible(waitSelector, chromedp.ByQuery)) == nil
+	return exec.Run(perAttemptCtx, VoidAction(chromedp.WaitVisible(chromedp.CSS(waitSelector)))) == nil
 }
 
 func detectDynamicSignal(totalCtx context.Context, exec Executor) (string, bool) {
 	var signal string
-	if err := exec.Run(totalCtx, chromedp.Evaluate(`(() => {
+	if err := exec.Run(totalCtx, ResultAction[string]{Task: chromedp.Evaluate[string](`(() => {
 		const text = (document.body && document.body.innerText ? document.body.innerText : "").toLowerCase();
 		if (text.includes("captcha") || text.includes("verify you are human") || text.includes("cloudflare")) return "anti_bot_signal";
 		if (text.includes("log in") || text.includes("sign in") || text.includes("authentication required")) return "auth_signal";
 		if (document.readyState === "complete") return "ready_state_complete";
 		return "dynamic_pending";
-	})()`, &signal)); err != nil {
+	})()`), Result: &signal}); err != nil {
 		return "", false
 	}
 	return signal, true

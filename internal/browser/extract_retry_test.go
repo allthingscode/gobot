@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chromedp/chromedp"
-
 	"github.com/allthingscode/gobot/internal/browser"
 )
 
@@ -73,7 +71,7 @@ func TestExtractExecute_QualityGateDedupes(t *testing.T) {
 
 type mockExtractExec struct{}
 
-func (m *mockExtractExec) Run(ctx context.Context, actions ...chromedp.Action) error {
+func (m *mockExtractExec) Run(ctx context.Context, actions ...browser.Action) error {
 	_ = ctx
 	_ = actions
 	return nil

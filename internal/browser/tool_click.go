@@ -48,7 +48,7 @@ func (t *ClickTool) Execute(ctx context.Context, sessionKey, userID string, args
 	runCtx, runCancel := context.WithTimeout(tabCtx, defaultToolTimeout)
 	defer runCancel()
 
-	err := t.executor.Run(runCtx, chromedp.Click(selector, chromedp.ByQuery))
+	err := t.executor.Run(runCtx, VoidAction(chromedp.Click(chromedp.CSS(selector))))
 	if err != nil {
 		return "", fmt.Errorf("failed to click selector %q: %w", selector, err)
 	}

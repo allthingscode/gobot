@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chromedp/chromedp"
-
 	"github.com/allthingscode/gobot/internal/browser"
 )
 
@@ -14,7 +12,7 @@ type dynamicWaitMockExec struct {
 	runCount int
 }
 
-func (m *dynamicWaitMockExec) Run(ctx context.Context, actions ...chromedp.Action) error {
+func (m *dynamicWaitMockExec) Run(ctx context.Context, actions ...browser.Action) error {
 	m.runCount++
 	_ = ctx
 	_ = actions

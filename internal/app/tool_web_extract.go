@@ -215,7 +215,7 @@ func (t *WebExtractTool) capturePageMap(ctx context.Context) (string, error) {
 	})()`
 
 	var pageMapJSON string
-	if err := t.executor.Run(ctx, chromedp.Evaluate(pageMapExpr, &pageMapJSON)); err != nil {
+	if err := t.executor.Run(ctx, browser.ResultAction[string]{Task: chromedp.Evaluate[string](pageMapExpr), Result: &pageMapJSON}); err != nil {
 		return "", fmt.Errorf("web_extract: page mapping: %w", err)
 	}
 	return pageMapJSON, nil
