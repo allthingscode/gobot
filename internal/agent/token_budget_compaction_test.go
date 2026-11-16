@@ -256,7 +256,7 @@ func TestSessionManager_CompactSessionAsyncPersistsSummaryAndMetadata(t *testing
 		runner:       &mockRunner{response: "compacted summary"},
 	}
 
-	mgr.compactSessionAsync(context.Background(), testSess, store)
+	runTestCompaction(mgr, context.Background(), testSess, store)
 
 	saves := store.saveCalls()
 	assertCompactedSnapshot(t, saves)
@@ -436,11 +436,16 @@ func seedCompactionSession(t *testing.T, store CheckpointStore, key string) {
 		t.Fatal(err)
 	}
 }
+func runTestCompaction(mgr *SessionManager, ctx context.Context, key string, store CheckpointStore) {
+	mgr.compactionWorkers.Add(1)
+	mgr.compactSessionAsync(ctx, key, store)
+}
+
 func startCompaction(t *testing.T, mgr *SessionManager, key string, store CheckpointStore) <-chan struct{} {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { defer close(done); mgr.compactSessionAsync(ctx, key, store) }()
+	go func() { defer close(done); runTestCompaction(mgr, ctx, key, store) }()
 	t.Cleanup(func() { cancel(); waitForClosed(t, done, "worker cleanup") })
 	return done
 }
@@ -503,6 +508,7 @@ type sqliteDispatchHarness struct {
 	done       []<-chan struct{}
 	dispatches []*sqliteDispatchResult
 	keys       []string
+	managers   map[*SessionManager]struct{}
 }
 type sqliteDispatchResult struct {
 	done    chan struct{}
@@ -513,12 +519,12 @@ type sqliteDispatchResult struct {
 func newSQLiteDispatchHarness(t *testing.T, keys ...string) *sqliteDispatchHarness {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cleanup owns cancellation
-	h := &sqliteDispatchHarness{t: t, ctx: ctx, cancel: cancel, keys: keys}
+	h := &sqliteDispatchHarness{t: t, ctx: ctx, cancel: cancel, keys: keys, managers: make(map[*SessionManager]struct{})}
 	t.Cleanup(h.cleanup)
 	return h
 }
 
-//nolint:gocognit // cleanup joins all work and reports each outstanding error.
+//nolint:gocognit,cyclop // cleanup joins all work and reports each outstanding error.
 func (h *sqliteDispatchHarness) cleanup() {
 	t := h.t
 	for _, release := range h.releases {
@@ -526,14 +532,30 @@ func (h *sqliteDispatchHarness) cleanup() {
 	}
 	h.cancel()
 	for _, done := range h.done {
-		h.wait(done, "goroutine cleanup")
+		select {
+		case <-done:
+		case <-time.After(h.guard()):
+			t.Errorf("timed out waiting for goroutine cleanup")
+		}
 	}
 	for _, result := range h.dispatches {
 		if !result.checked {
-			err := <-result.errors
-			if err != nil && !errors.Is(err, context.Canceled) {
-				t.Errorf("dispatch cleanup: %v", err)
+			select {
+			case err := <-result.errors:
+				if err != nil && !errors.Is(err, context.Canceled) {
+					t.Errorf("dispatch cleanup: %v", err)
+				}
+			default:
+				t.Errorf("dispatch cleanup: result unavailable")
 			}
+		}
+	}
+	for mgr := range h.managers {
+		ctx, cancel := context.WithTimeout(context.Background(), h.guard())
+		err := mgr.waitForBackgroundCompactions(ctx)
+		cancel()
+		if err != nil {
+			t.Errorf("background compaction cleanup: %v", err)
 		}
 	}
 	h.condition("session lock cleanup", func() bool {
@@ -590,10 +612,11 @@ func (h *sqliteDispatchHarness) barrier() (entered, release chan struct{}) {
 func (h *sqliteDispatchHarness) worker(mgr *SessionManager, key string, store CheckpointStore) <-chan struct{} {
 	done := make(chan struct{})
 	h.done = append(h.done, done)
-	go func() { defer close(done); mgr.compactSessionAsync(h.ctx, key, store) }()
+	go func() { defer close(done); runTestCompaction(mgr, h.ctx, key, store) }()
 	return done
 }
 func (h *sqliteDispatchHarness) dispatch(mgr *SessionManager, key string) *sqliteDispatchResult {
+	h.managers[mgr] = struct{}{}
 	result := &sqliteDispatchResult{done: make(chan struct{}), errors: make(chan error, 1)}
 	h.dispatches = append(h.dispatches, result)
 	h.done = append(h.done, result.done)
@@ -712,7 +735,7 @@ func TestCompactionSQLiteDispatchFirstAndQueuedWorkers(t *testing.T) {
 	for _, done := range workers {
 		h.wait(done, "queued worker")
 	}
-	mgr.compactSessionAsync(context.Background(), t.Name(), store)
+	runTestCompaction(mgr, context.Background(), t.Name(), store)
 	h.condition("all queued workers to release references", func() bool {
 		_, exists := GetLockMetrics()[t.Name()]
 		return !exists
@@ -729,6 +752,41 @@ func TestCompactionSQLiteDispatchFirstAndQueuedWorkers(t *testing.T) {
 		t.Fatalf("metadata: %d %v %v", tokens, at, err)
 	}
 	assertCompactionLockReleased(t)
+}
+
+func TestCompactionBackgroundJoinCancellation(t *testing.T) {
+	t.Parallel()
+	store, mgr := sqliteCompactionFixture(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	store.load = func(ctx context.Context, key string) (*agentctx.ThreadSnapshot, error) {
+		close(entered)
+		<-release
+		return store.CheckpointStore.LoadLatest(ctx, key)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		releaseCompactionBarrier(release)
+		joinCtx, joinCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer joinCancel()
+		if err := mgr.waitForBackgroundCompactions(joinCtx); err != nil {
+			t.Errorf("join before fixture eviction: %v", err)
+		}
+	})
+	mgr.updateTokenBudget(ctx, t.Name(), tokenBudgetSnapshot(1, []string{"many words to exceed the low budget for background compaction", "more words to exceed the token budget in this test"}).Messages, store)
+	waitForClosed(t, entered, "automatic worker")
+	cancel()
+	joinCtx, joinCancel := context.WithCancel(context.Background())
+	joinCancel()
+	if err := mgr.waitForBackgroundCompactions(joinCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("blocked worker join = %v, want cancellation", err)
+	}
+	close(release)
+	joinCtx, joinCancel = context.WithTimeout(context.Background(), time.Minute)
+	defer joinCancel()
+	if err := mgr.waitForBackgroundCompactions(joinCtx); err != nil {
+		t.Fatalf("worker join: %v", err)
+	}
 }
 
 func TestCompactionSQLiteBlockedHookCancellation(t *testing.T) {
@@ -786,7 +844,7 @@ func TestCompactionSQLiteSaveBeforeTrigger(t *testing.T) {
 	close(release)
 	awaitCompactionDispatch(t, dispatch)
 	waitForClosed(t, published, "automatic compaction publication")
-	mgr.compactSessionAsync(context.Background(), t.Name(), store)
+	runTestCompaction(mgr, context.Background(), t.Name(), store)
 	assertCompactionLatest(t, store, 2, []string{compactionTestSummary, "newest user", compactionTestReply})
 	assertCompactionLockReleased(t)
 }
@@ -857,7 +915,7 @@ func TestCompactionSQLitePublicationFailures(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			tc.configure(store, mgr, cancel)
-			mgr.compactSessionAsync(ctx, t.Name(), store)
+			runTestCompaction(mgr, ctx, t.Name(), store)
 			want := []string{"old one with several extra words to exceed the retained budget", "old two with several extra words to exceed the retained budget", "recent one", "recent two"}
 			if tc.durable {
 				want = []string{compactionTestSummary, "recent one", "recent two"}
@@ -888,7 +946,7 @@ func assertCompactionRetry(t *testing.T, store *compactionStore, mgr *SessionMan
 	t.Helper()
 	store.load, store.save, store.read, store.write = nil, nil, nil, nil
 	mgr.runner = &compactionRunner{}
-	mgr.compactSessionAsync(context.Background(), t.Name(), store)
+	runTestCompaction(mgr, context.Background(), t.Name(), store)
 	assertCompactionLatest(t, store, 1, []string{compactionTestSummary, "recent one", "recent two"})
 	snap, err := store.LoadLatest(context.Background(), t.Name())
 	if err != nil {
@@ -915,7 +973,7 @@ func TestCompactionLockCancellationAndTimeout(t *testing.T) {
 			if cancelled {
 				cancel()
 			}
-			mgr.compactSessionAsync(ctx, t.Name(), store)
+			runTestCompaction(mgr, ctx, t.Name(), store)
 			allLocksMu.Lock()
 			refs := lock.refCount
 			allLocksMu.Unlock()
@@ -1031,7 +1089,7 @@ func TestCompactionEligibilitySkips(t *testing.T) {
 			if tc.nilStore {
 				active = nil
 			}
-			mgr.compactSessionAsync(ctx, t.Name(), active)
+			runTestCompaction(mgr, ctx, t.Name(), active)
 			tokens, at, err := store.CheckpointStore.GetSessionTokens(context.Background(), t.Name())
 			wantTokens := 1000
 			if tc.name == "empty snapshot" || tc.name == "short history" {
@@ -1125,7 +1183,7 @@ func TestTokenBudgetDurableBoundaries(t *testing.T) {
 					return err
 				}
 			}
-			mgr.compactSessionAsync(ctx, t.Name(), store)
+			runTestCompaction(mgr, ctx, t.Name(), store)
 			wantCalls := 0
 			if tc.budget < 48 && !tc.failWrite && !tc.cancelWrite {
 				wantCalls = 1

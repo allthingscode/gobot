@@ -286,6 +286,7 @@ func (m *SessionManager) updateTokenBudget(ctx context.Context, sessionKey strin
 	slog.Debug("agent: session token budget", logattr.SessionKey(sessionKey), slog.Int("tokens", newTokens), slog.Int("budget", m.tokenBudget))
 	if newTokens > m.tokenBudget && ctx.Err() == nil {
 		slog.Info("agent: session token budget exceeded, triggering compaction", logattr.SessionKey(sessionKey))
+		m.compactionWorkers.Add(1)
 		go m.compactSessionAsync(ctx, sessionKey, store)
 	}
 }
@@ -349,12 +350,28 @@ func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey 
 	return result, nil
 }
 
+// waitForBackgroundCompactions joins scheduled workers after dispatches have stopped.
+func (m *SessionManager) waitForBackgroundCompactions(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		m.compactionWorkers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for background compactions: %w", ctx.Err())
+	}
+}
+
 // compactSessionAsync runs token-budget compaction in a background goroutine.
 // It holds Dispatch's session lock while loading, summarizing, and publishing,
 // so a subsequent same-session request can wait or fail on cancellation or timeout.
 // Other sessions use independent locks. store is the resolved per-user (or shared)
 // CheckpointStore for this session. Errors are logged rather than returned.
 func (m *SessionManager) compactSessionAsync(ctx context.Context, sessionKey string, store CheckpointStore) {
+	defer m.compactionWorkers.Done()
 	m.mu.RLock()
 	lockTimeout := m.lockTimeout
 	m.mu.RUnlock()
