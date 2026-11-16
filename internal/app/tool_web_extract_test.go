@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,7 +13,6 @@ import (
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
 	"github.com/allthingscode/gobot/internal/provider"
-	"github.com/chromedp/chromedp"
 )
 
 type webExtractMockProvider struct {
@@ -37,10 +37,79 @@ func (m *webExtractMockProvider) Chat(ctx context.Context, req provider.ChatRequ
 func (m *webExtractMockProvider) Models() []provider.ModelInfo { return nil }
 
 type webExtractMockExecutor struct {
-	runFunc func(ctx context.Context, actions ...chromedp.Action) error
+	runFunc func(ctx context.Context, actions ...browser.Action) error
 }
 
-func (m *webExtractMockExecutor) Run(ctx context.Context, actions ...chromedp.Action) error {
+func TestCapturePageMapResults(t *testing.T) {
+	t.Parallel()
+	for _, fail := range []bool{false, true} {
+		name := "mapping returned"
+		if fail {
+			name = "failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			checkPageMapResult(t, fail)
+		})
+	}
+}
+
+func checkPageMapResult(t *testing.T, fail bool) {
+	t.Helper()
+	want := `{"title":"Example","snippet":"Content"}`
+	sentinel := errors.New("evaluate failed")
+	tool := newWebExtractTool(&config.Config{}, nil, "")
+	var runErr error
+	if fail {
+		runErr = sentinel
+	}
+	tool.executor = pageMapExecutor(t, want, runErr)
+	got, err := tool.capturePageMap(context.Background())
+	if fail {
+		if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "web_extract: page mapping") {
+			t.Fatalf("error = %v; want wrapped mapping error", err)
+		}
+		return
+	}
+	if err != nil || got != want {
+		t.Fatalf("mapping = %q, %v; want %q", got, err, want)
+	}
+}
+
+func pageMapExecutor(t *testing.T, want string, runErr error) *webExtractMockExecutor {
+	t.Helper()
+	return &webExtractMockExecutor{runFunc: func(ctx context.Context, actions ...browser.Action) error {
+		if runErr != nil {
+			return runErr
+		}
+		if len(actions) != 1 {
+			t.Fatalf("mapping has %d actions", len(actions))
+		}
+		step, ok := actions[0].(browser.ResultAction[string])
+		if !ok {
+			t.Fatalf("mapping action type = %T", actions[0])
+		}
+		*step.Result = want
+		return nil
+	}}
+}
+
+func webExtractResults(ctx context.Context, actions ...browser.Action) error {
+	for _, action := range actions {
+		switch step := action.(type) {
+		case browser.ResultAction[string]:
+			*step.Result = `{"snippet":"Page content"}`
+			if len(actions) == 2 {
+				*step.Result = "Example page"
+			}
+		case browser.ResultAction[[]string]:
+			*step.Result = []string{"First", "Second", "Third"}
+		}
+	}
+	return nil
+}
+
+func (m *webExtractMockExecutor) Run(ctx context.Context, actions ...browser.Action) error {
 	if m.runFunc != nil {
 		return m.runFunc(ctx, actions...)
 	}
@@ -69,7 +138,7 @@ func TestWebExtractTool_Execute(t *testing.T) {
 				`{"selector": ".title", "reasoning": "Standard titles."}`,
 				"Summary.",
 			},
-			wantItems: 3, // Mocked GetTextsTool returns 3 items in our setup below if we adjust it
+			wantItems: 3,
 		},
 		{
 			name: "JSONFallback",
@@ -96,11 +165,7 @@ func TestWebExtractTool_Execute(t *testing.T) {
 			}
 
 			tool := newWebExtractTool(cfg, prov, "test-model")
-			tool.executor = &webExtractMockExecutor{
-				runFunc: func(ctx context.Context, actions ...chromedp.Action) error {
-					return nil
-				},
-			}
+			tool.executor = &webExtractMockExecutor{runFunc: webExtractResults}
 			tool.clientFactory = func(cfg config.BrowserConfig) (*browser.Client, error) {
 				return browser.NewClientForTest(context.Background(), func() {}), nil
 			}
@@ -115,16 +180,13 @@ func TestWebExtractTool_Execute(t *testing.T) {
 				t.Fatalf("Execute failed: %v", err)
 			}
 
-			if tt.name == "SelectorExtraction" {
-				if !strings.Contains(resp, "No items matching") {
-					t.Errorf("expected 'No items matching' response, got: %s", resp)
-				}
-				return
-			}
-
 			var out map[string]any
 			if err := json.Unmarshal([]byte(resp), &out); err != nil {
 				t.Fatalf("failed to unmarshal response: %v", err)
+			}
+			items, ok := out["items"].([]any)
+			if !ok || len(items) != tt.wantItems || out["page_title"] != "Example page" {
+				t.Fatalf("response lost results: %s; want %d items and page title", resp, tt.wantItems)
 			}
 		})
 	}

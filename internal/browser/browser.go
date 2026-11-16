@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/remote"
 
 	"github.com/allthingscode/gobot/internal/config"
 )
@@ -22,28 +23,48 @@ type Client struct {
 
 // NewClient creates a new browser client based on the configuration.
 func NewClient(cfg config.BrowserConfig) (*Client, error) {
+	return newClient(cfg, clientRuntime{
+		remote: func(ctx context.Context, url string) (context.Context, context.CancelFunc) {
+			return remote.NewAllocator(ctx, url)
+		},
+		local: chromedp.NewExecAllocator,
+		newContext: func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return chromedp.NewContext(ctx)
+		},
+		start: func(ctx context.Context) error { return chromedp.Do(ctx) },
+	})
+}
+
+type clientRuntime struct {
+	remote     func(context.Context, string) (context.Context, context.CancelFunc)
+	local      func(context.Context, ...chromedp.ExecAllocatorOption) (context.Context, context.CancelFunc)
+	newContext func(context.Context) (context.Context, context.CancelFunc)
+	start      func(context.Context) error
+}
+
+func newClient(cfg config.BrowserConfig, rt clientRuntime) (*Client, error) {
 	var allocCtx context.Context
 	var allocCancel context.CancelFunc
 
 	switch {
 	case cfg.DebugPort > 0:
 		url := fmt.Sprintf("ws://localhost:%d", cfg.DebugPort)
-		allocCtx, allocCancel = chromedp.NewRemoteAllocator(context.Background(), url)
+		allocCtx, allocCancel = rt.remote(context.Background(), url)
 	case cfg.Headless:
-		opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		opts := append(chromedp.DefaultExecAllocatorOptions[:len(chromedp.DefaultExecAllocatorOptions):len(chromedp.DefaultExecAllocatorOptions)],
 			chromedp.Flag("headless", true),
 			chromedp.Flag("disable-gpu", true),
 		)
-		allocCtx, allocCancel = chromedp.NewExecAllocator(context.Background(), opts...)
+		allocCtx, allocCancel = rt.local(context.Background(), opts...)
 	default:
 		return nil, fmt.Errorf("browser not configured (headless=false, debug_port=0)")
 	}
 
 	// Create an initial context to start the browser.
-	ctx, cancel := chromedp.NewContext(allocCtx)
+	ctx, cancel := rt.newContext(allocCtx)
 
 	// Ensure the browser is started.
-	if err := chromedp.Run(ctx); err != nil {
+	if err := rt.start(ctx); err != nil {
 		cancel()
 		allocCancel()
 		return nil, fmt.Errorf("failed to start browser: %w", err)

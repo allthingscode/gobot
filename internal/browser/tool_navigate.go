@@ -49,8 +49,8 @@ func (t *NavigateTool) Execute(ctx context.Context, sessionKey, userID string, a
 
 	var title string
 	err := t.executor.Run(runCtx,
-		chromedp.Navigate(urlStr),
-		chromedp.Title(&title),
+		VoidAction(chromedp.Navigate(urlStr)),
+		ResultAction[string]{Task: chromedp.Title(), Result: &title},
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to navigate: %w", err)

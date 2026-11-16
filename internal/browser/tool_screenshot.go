@@ -42,7 +42,7 @@ func (t *ScreenshotTool) Execute(ctx context.Context, sessionKey, userID string,
 	defer runCancel()
 
 	var buf []byte
-	err := t.executor.Run(runCtx, chromedp.FullScreenshot(&buf, 90))
+	err := t.executor.Run(runCtx, ResultAction[[]byte]{Task: chromedp.FullScreenshot(90), Result: &buf})
 	if err != nil {
 		return "", fmt.Errorf("failed to capture screenshot: %w", err)
 	}

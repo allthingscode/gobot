@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chromedp/chromedp"
-
 	"github.com/allthingscode/gobot/internal/browser"
 	"github.com/allthingscode/gobot/internal/provider"
 )
@@ -16,7 +14,7 @@ type mockExecutor struct {
 	err error
 }
 
-func (m *mockExecutor) Run(ctx context.Context, actions ...chromedp.Action) error {
+func (m *mockExecutor) Run(ctx context.Context, actions ...browser.Action) error {
 	return m.err
 }
 

@@ -50,7 +50,7 @@ func (t *GetTextTool) Execute(ctx context.Context, sessionKey, userID string, ar
 	defer runCancel()
 
 	var text string
-	err := t.executor.Run(runCtx, chromedp.Text(selector, &text, chromedp.ByQuery))
+	err := t.executor.Run(runCtx, ResultAction[string]{Task: chromedp.Text(chromedp.CSS(selector)), Result: &text})
 	if err != nil {
 		return "", fmt.Errorf("failed to get text for selector %q: %w", selector, err)
 	}
@@ -118,7 +118,7 @@ func (t *GetTextsTool) Execute(ctx context.Context, sessionKey, userID string, a
 })()`, string(selectorJSON), limit)
 
 	var texts []string
-	if err := t.executor.Run(runCtx, chromedp.Evaluate(expr, &texts)); err != nil {
+	if err := t.executor.Run(runCtx, ResultAction[[]string]{Task: chromedp.Evaluate[[]string](expr), Result: &texts}); err != nil {
 		return "", fmt.Errorf("failed to get texts for selector %q: %w", selector, err)
 	}
 	if texts == nil {

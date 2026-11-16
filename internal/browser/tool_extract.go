@@ -93,10 +93,10 @@ func (t *ExtractTool) Execute(ctx context.Context, sessionKey, userID string, ar
 	defer runCancel()
 
 	var title string
-	if err := t.executor.Run(runCtx, chromedp.Navigate(input.URL), chromedp.Title(&title)); err != nil {
+	if err := t.executor.Run(runCtx, VoidAction(chromedp.Navigate(input.URL)), ResultAction[string]{Task: chromedp.Title(), Result: &title}); err != nil {
 		return "", fmt.Errorf("failed to navigate: %w", err)
 	}
-	if err := t.executor.Run(runCtx, chromedp.WaitVisible(input.WaitSelector, chromedp.ByQuery)); err != nil {
+	if err := t.executor.Run(runCtx, VoidAction(chromedp.WaitVisible(chromedp.CSS(input.WaitSelector)))); err != nil {
 		return "", fmt.Errorf("failed to wait for selector %q: %w", input.WaitSelector, err)
 	}
 
@@ -322,7 +322,7 @@ func (t *ExtractTool) extractTexts(ctx context.Context, limit int, selector stri
   return nodes.map((n) => (n && n.innerText ? n.innerText.trim() : "")).filter((s) => s.length > 0);
 })()`, string(selectorJSON), limit)
 	var items []string
-	if err := t.executor.Run(ctx, chromedp.Evaluate(expr, &items)); err != nil {
+	if err := t.executor.Run(ctx, ResultAction[[]string]{Task: chromedp.Evaluate[[]string](expr), Result: &items}); err != nil {
 		return nil, fmt.Errorf("failed to get texts for selector %q: %w", selector, err)
 	}
 	if items == nil {

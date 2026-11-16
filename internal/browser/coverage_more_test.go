@@ -7,13 +7,11 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/chromedp/chromedp"
 )
 
 type errorExecutor struct{}
 
-func (e errorExecutor) Run(context.Context, ...chromedp.Action) error {
+func (e errorExecutor) Run(context.Context, ...Action) error {
 	return errors.New("not visible")
 }
 
@@ -90,4 +88,4 @@ func TestExtractHelpersAdditionalBranches(t *testing.T) {
 
 type mockExtractExecutor struct{}
 
-func (m mockExtractExecutor) Run(context.Context, ...chromedp.Action) error { return nil }
+func (m mockExtractExecutor) Run(context.Context, ...Action) error { return nil }

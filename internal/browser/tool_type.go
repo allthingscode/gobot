@@ -54,7 +54,7 @@ func (t *TypeTool) Execute(ctx context.Context, sessionKey, userID string, args 
 	runCtx, runCancel := context.WithTimeout(tabCtx, defaultToolTimeout)
 	defer runCancel()
 
-	err := t.executor.Run(runCtx, chromedp.SendKeys(selector, textStr, chromedp.ByQuery))
+	err := t.executor.Run(runCtx, VoidAction(chromedp.SendKeys(chromedp.CSS(selector), textStr)))
 	if err != nil {
 		return "", fmt.Errorf("failed to type into selector %q: %w", selector, err)
 	}
