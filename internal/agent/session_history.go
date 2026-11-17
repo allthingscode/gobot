@@ -286,7 +286,9 @@ func (m *SessionManager) updateTokenBudget(ctx context.Context, sessionKey strin
 	slog.Debug("agent: session token budget", logattr.SessionKey(sessionKey), slog.Int("tokens", newTokens), slog.Int("budget", m.tokenBudget))
 	if newTokens > m.tokenBudget && ctx.Err() == nil {
 		slog.Info("agent: session token budget exceeded, triggering compaction", logattr.SessionKey(sessionKey))
-		go m.compactSessionAsync(ctx, sessionKey, store)
+		if m.registerCompaction() {
+			go m.compactSessionAsync(ctx, sessionKey, store)
+		}
 	}
 }
 
@@ -349,12 +351,42 @@ func (m *SessionManager) buildCompactionSummary(ctx context.Context, sessionKey 
 	return result, nil
 }
 
+// registerCompaction serializes worker registration with the start of a join.
+func (m *SessionManager) registerCompaction() bool {
+	m.compactionMu.Lock()
+	defer m.compactionMu.Unlock()
+	if m.compactionClosed {
+		return false
+	}
+	m.compactionWorkers.Add(1)
+	return true
+}
+
+// waitForBackgroundCompactions closes registration and joins scheduled workers.
+func (m *SessionManager) waitForBackgroundCompactions(ctx context.Context) error {
+	m.compactionMu.Lock()
+	m.compactionClosed = true
+	m.compactionMu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		m.compactionWorkers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for background compactions: %w", ctx.Err())
+	}
+}
+
 // compactSessionAsync runs token-budget compaction in a background goroutine.
 // It holds Dispatch's session lock while loading, summarizing, and publishing,
 // so a subsequent same-session request can wait or fail on cancellation or timeout.
 // Other sessions use independent locks. store is the resolved per-user (or shared)
 // CheckpointStore for this session. Errors are logged rather than returned.
 func (m *SessionManager) compactSessionAsync(ctx context.Context, sessionKey string, store CheckpointStore) {
+	defer m.compactionWorkers.Done()
 	m.mu.RLock()
 	lockTimeout := m.lockTimeout
 	m.mu.RUnlock()
