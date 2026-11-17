@@ -131,9 +131,9 @@ exit 0
             Set-Content -LiteralPath $syntheticTest -Value $syntheticContent -Encoding UTF8
 
             if ($mode -eq "serial") {
-                $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1 })
+                $outputLines = @(Invoke-ExternalCommand -AsLines -SkipHandling Fixture { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial 2>&1 })
             } else {
-                $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
+                $outputLines = @(Invoke-ExternalCommand -AsLines -SkipHandling Fixture { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy 2>&1 })
             }
             $exitCode = $LASTEXITCODE
             $output = $outputLines -join "`n"

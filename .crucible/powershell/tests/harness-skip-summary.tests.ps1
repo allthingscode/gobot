@@ -64,10 +64,33 @@ function Test-TailReportsSkip {
 }
 
 try {
+    # Item 381: failing reproduction. A plain capture of a test file whose output carries an
+    # anchored SKIPPED: note hides that skip from the outer run, and nothing fails. The capture
+    # owner must refuse it unless the caller declares the child nested or a fixture that plants
+    # a skip.
+    $results += Run-Test -Name "A plain capture of a skipping test file is refused by the capture owner" -Body {
+        $dir = Join-Path $tempRoot "plain-capture"
+        $file = New-SkipSummaryChild -Dir $dir -Tail "Write-TestFileSummary -Results `$results"
+        $shell = (Get-Process -Id $PID).Path
+        $refused = $false
+        try { $null = Invoke-ExternalCommand { & $shell -NoProfile -File $file } } catch { $refused = $_.Exception.Message -match 'captured a SKIPPED: note without a declaration' }
+        Assert-Result -Name "the plain capture of a skipping child is refused" -Condition $refused -FailureMessage "the capture returned normally, so the child's SKIPPED: note reached no outer summary"
+    }
+
+    $results += Run-Test -Name "Line captures refuse skips and declared fixtures retain them" -Body {
+        $refused = $false
+        try { $null = @(Invoke-ExternalCommand -AsLines { Write-Output 'SKIPPED: planted reason' }) } catch { $refused = $_.Exception.Message -match 'without a declaration' }
+        Assert-Result -Name 'line capture refuses the anchored note' -Condition $refused -FailureMessage 'No skip declaration was required.'
+        $lines = @(Invoke-ExternalCommand -AsLines -SkipHandling Fixture { Write-Output 'SKIPPED: planted reason' })
+        Assert-Result -Name 'declared fixture retains its note' -Condition ($lines.Count -eq 1 -and $lines[0] -ceq 'SKIPPED: planted reason') -FailureMessage ($lines -join ', ')
+        $ordinary = Invoke-ExternalCommand { Write-Output 'prefix SKIPPED: text'; Write-Output 'skipped: lowercase' }
+        Assert-Result -Name 'non-contract text is retained' -Condition ($ordinary.Output -cmatch 'prefix SKIPPED: text') -FailureMessage $ordinary.Output
+    }
+
     $results += Run-Test -Name "A file that skips does not report the skip as passed" -Body {
         $dir = Join-Path $tempRoot "helper"
         $file = New-SkipSummaryChild -Dir $dir -Tail "Write-TestFileSummary -Results `$results"
-        $cmd = Invoke-ExternalCommand {
+        $cmd = Invoke-ExternalCommand -SkipHandling Fixture {
             & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $file
         }
         Assert-Result -Name "skipping file exits 0" -Condition ($cmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
@@ -77,7 +100,7 @@ try {
     $results += Run-Test -Name "Restoring the old tail fails that check" -Body {
         $dir = Join-Path $tempRoot "old-tail"
         $file = New-SkipSummaryChild -Dir $dir -Tail $OLD_TAIL
-        $cmd = Invoke-ExternalCommand {
+        $cmd = Invoke-ExternalCommand -SkipHandling Fixture {
             & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $file
         }
         Assert-Result -Name "old tail still exits 0" -Condition ($cmd.ExitCode -eq 0) -FailureMessage ("expected exit 0, got " + $cmd.ExitCode + ". Output: " + $cmd.Output)
@@ -108,7 +131,7 @@ $results = @()
 $results += Run-Test -Name "captures a planted skip" -Body {
     $shell = (Get-Process -Id $PID).Path
     $file = Join-Path $PSScriptRoot "skipping.tests.ps1"
-    $r = Invoke-ExternalCommand { & $shell -NoProfile -ExecutionPolicy Bypass -File $file }
+    $r = Invoke-ExternalCommand -SkipHandling Fixture { & $shell -NoProfile -ExecutionPolicy Bypass -File $file }
     Assert-Result -Name "planted skip captured" -Condition ($r.Output -cmatch '(?m)^SKIPPED: skips - ') -FailureMessage $r.Output
 }
 Write-TestFileSummary -Results $results
@@ -121,13 +144,13 @@ Write-TestFileSummary -Results $results
         Set-Content -LiteralPath $fixture -Value $fixtureBody -Encoding UTF8
         $reason = "skips - this platform cannot supply the precondition"
 
-        $w = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $wrapper }
+        $w = Invoke-ExternalCommand -SkipHandling Fixture { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $wrapper }
         Assert-Result -Name "wrapper exits 0" -Condition ($w.ExitCode -eq 0) -FailureMessage $w.Output
         $wSkips = @([regex]::Matches($w.Output, '(?m)^SKIPPED: .*$') | ForEach-Object { $_.Value.TrimEnd() })
         Assert-Result -Name "the wrapper publishes the child's skip once, naming the child" -Condition ($wSkips.Count -eq 1 -and $wSkips[0] -ceq ("SKIPPED: skipping.tests.ps1: " + $reason)) -FailureMessage ("expected one anchored skip line naming skipping.tests.ps1. Output: " + $w.Output)
         Assert-Result -Name "the wrapper's tail counts the nested skip apart from its own cases" -Condition ($w.Output -cmatch '(?m)^ALL TESTS PASSED \(1 tests, 1 nested skipped\)\s*$') -FailureMessage $w.Output
 
-        $o = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $outer }
+        $o = Invoke-ExternalCommand -SkipHandling Fixture { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $outer }
         Assert-Result -Name "outer wrapper exits 0" -Condition ($o.ExitCode -eq 0) -FailureMessage $o.Output
         $oSkips = @([regex]::Matches($o.Output, '(?m)^SKIPPED: .*$') | ForEach-Object { $_.Value.TrimEnd() })
         Assert-Result -Name "two levels of nesting still count the skip once" -Condition ($oSkips.Count -eq 1 -and $oSkips[0] -ceq ("SKIPPED: wrapper.tests.ps1: skipping.tests.ps1: " + $reason)) -FailureMessage ("expected one anchored skip line naming both files. Output: " + $o.Output)

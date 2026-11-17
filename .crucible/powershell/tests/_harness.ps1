@@ -315,13 +315,12 @@ $script:CrucibleNestedSkipCount = 0
 # a lowercased, indented display copy (item 338), so the child's anchored skip line never
 # reached the runner. This runs the child and republishes each note once, prefixed with
 # the child's name; the child's own line stays in the capture, so a skip is counted once
-# at every level. A fixture that plants skips on purpose uses Invoke-ExternalCommand and
-# publishes nothing. Item 344.
+# at every level. Item 344.
 function Invoke-NestedTestFile {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     $shell = (Get-Process -Id $PID).Path
-    $cmd = Invoke-ExternalCommand { & $shell -NoProfile -ExecutionPolicy Bypass -File $Path }
+    $cmd = Invoke-ExternalCommand -SkipHandling Nested { & $shell -NoProfile -ExecutionPolicy Bypass -File $Path }
     $notes = Get-TestOutputSkipNotes -Output $cmd.Output
     $name = Split-Path -Leaf $Path
     foreach ($note in $notes) {
@@ -362,10 +361,13 @@ function Invoke-ExternalCommand {
     param(
         [Parameter(Mandatory=$true)][scriptblock]$Command,
         # Preserve native pipeline objects and LASTEXITCODE for existing line captures.
-        [switch]$AsLines
+        [switch]$AsLines,
+        # Nested republishes notes; Fixture and Inspect explicitly retain them for assertions.
+        [ValidateSet('Nested', 'Fixture', 'Inspect')][string]$SkipHandling
     )
     $output = [Collections.Generic.List[object]]::new()
     $lastForwardedProgress = $null
+    $skipSeen = $false
     $receive = {
         # Treat any case-insensitive progress-prefix match as display data.
         # Forward without retaining it, including real child payload collisions.
@@ -375,6 +377,7 @@ function Invoke-ExternalCommand {
             $lastForwardedProgress = $forwardedProgress
             return
         }
+        if ([string]$_ -cmatch '(?m)^SKIPPED: .+') { $skipSeen = $true }
         # Forward child lines without a timer. Lowercase the display
         # copy so a deliberately failing fixture cannot trip its parent's verdict.
         # Objects not matched as progress, including failure/skip contracts, stay captured.
@@ -397,6 +400,9 @@ function Invoke-ExternalCommand {
         # shadow. Before any native invocation, preserve the absent value as null.
         $nativeExit = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
         $exitCode = if ($null -ne $nativeExit) { $nativeExit.Value } else { $null }
+        if ($skipSeen -and -not $SkipHandling) {
+            throw 'Invoke-ExternalCommand captured a SKIPPED: note without a declaration; use Invoke-NestedTestFile or declare a fixture or inspection with -SkipHandling.'
+        }
     } catch {
         $partialOutput = @($output.ToArray())
         # Preserve inner capture data after adding this owner's earlier output.

@@ -26,7 +26,7 @@ exit 7
         [IO.File]::WriteAllText($driver, @'
 param($Harness, $Shell, $Child, $Release, $Result)
 . $Harness
-$r = Invoke-ExternalCommand { & $Shell -NoProfile -File $Child $Release }
+$r = Invoke-ExternalCommand -SkipHandling Fixture { & $Shell -NoProfile -File $Child $Release }
 [IO.File]::WriteAllText($Result, ($r | ConvertTo-Json))
 '@, $utf8)
         $psi = [Diagnostics.ProcessStartInfo]::new($shell)
