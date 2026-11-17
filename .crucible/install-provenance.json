@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "0a99b04fee815bdccdf2569fcbafcb1e843ec505",
+  "source_commit": "49adf62ba4cd852224b2cae8e7360de901cc9086",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -383,8 +383,8 @@
       "base_hash": "39a10283f268ccbd50b5ed853399acaf2a5f08af2cb729182322d79cc8246ac4"
     },
     "powershell/sync-claude-agents.ps1": {
-      "hash": "cf03b5123a963c1e9890664c5a83f43ae40d016b6e0153b786a7081387f124c4",
-      "base_hash": "cf03b5123a963c1e9890664c5a83f43ae40d016b6e0153b786a7081387f124c4"
+      "hash": "16b96c25c3fd0abee222dce3e98938a5773822985a27793186d2904b01982393",
+      "base_hash": "16b96c25c3fd0abee222dce3e98938a5773822985a27793186d2904b01982393"
     },
     "powershell/tests/_command-binding.ps1": {
       "hash": "d745c31c969f492d369349f1352e5a8ec62d8b771d747cfb92ffe90421588d4b",
@@ -551,8 +551,8 @@
       "base_hash": "f79e7bd41931ef8dee88cbf5c41fe7d14d9187b0414c19ad5b992a43eb3bfc7a"
     },
     "powershell/tests/crucible-refusals.tests.ps1": {
-      "hash": "91988c8317f0cdf3c67a2743d7966fd2117d335fad6e7c7fbd836511b078ccff",
-      "base_hash": "91988c8317f0cdf3c67a2743d7966fd2117d335fad6e7c7fbd836511b078ccff"
+      "hash": "d73a3653d5f20365371f2f82940954fa6f554cc3c3d14411c31a59bd3fdf6202",
+      "base_hash": "d73a3653d5f20365371f2f82940954fa6f554cc3c3d14411c31a59bd3fdf6202"
     },
     "powershell/tests/crucible-status.tests.ps1": {
       "hash": "a510b74363102e176bf96dd47ca1443bd51e33d3bd60055768dbf477d4011769",
@@ -899,8 +899,8 @@
       "base_hash": "3e38263fd08dd7eae7e2084aa3e4c88ab920effbf6cb30707923c89dc8e9b7ba"
     },
     "powershell/update-bundle.ps1": {
-      "hash": "08c6be677b620fd0af319c25f769e4ccf5beef0a2a21bc4ea4f9907473d5b127",
-      "base_hash": "08c6be677b620fd0af319c25f769e4ccf5beef0a2a21bc4ea4f9907473d5b127"
+      "hash": "f654f4e4a6994276c3af2a88a00a41813cfeb0c8193720c540aca77d4064ac57",
+      "base_hash": "f654f4e4a6994276c3af2a88a00a41813cfeb0c8193720c540aca77d4064ac57"
     },
     "powershell/update-session-state.ps1": {
       "hash": "c904a441993d2d9378b2405e1215057aae488b3284c2cec4b7444bb562092773",

@@ -3,7 +3,9 @@ param(
     # The project whose .claude/agents/ receives the crucible-*.md files.
     [string]$ProjectRoot = "",
     # Report missing or stale files and exit 1 without writing anything.
-    [switch]$Check
+    [switch]$Check,
+    # Report whether regeneration changed any definitions to the bundle updater.
+    [switch]$ReportChanges
 )
 
 # I11: configuration helpers remain reusable; this command owns refusal.
@@ -35,8 +37,10 @@ if ($Check) {
 
 $warning = Get-ClaudeAgentIgnoreWarning -ProjectRoot $root
 if ($warning) { Write-Warning $warning }
+$changed = $ReportChanges -and @(Get-ClaudeAgentDrift -ProjectRoot $root).Count -gt 0
 $written = @(Write-ClaudeAgentDefinitions -ProjectRoot $root)
 foreach ($path in $written) {
     Write-Host ("[CLAUDE AGENTS] wrote " + $path)
 }
+if ($changed) { Write-Host '[CLAUDE AGENTS] definitions changed' }
 exit 0

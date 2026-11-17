@@ -69,9 +69,8 @@ $cases = @(
     foreach ($name in @('analyze', 'health', 'agents', 'launcher-bundle', 'validator-config', 'handoff-config')) {
         @{ Kind = 'remaining-config'; Name = $name; Expected = 'CONFIG_FAILURE|crucible_root value is empty|Cannot qualify a filesystem path' }
     }
-    foreach ($name in @('init', 'update')) {
-        @{ Kind = 'remaining-agent-caller'; Name = $name; Expected = 'generation exited 7' }
-    }
+    @{ Kind = 'remaining-agent-caller'; Name = 'init'; Expected = 'generation exited 7' }
+    @{ Kind = 'remaining-agent-caller'; Name = 'update'; Expected = 'Claude agent regeneration failed' }
     foreach ($pair in @(
         @('backlog-dir', 'Backlog directory not found'),
         @('backlog-file', 'BACKLOG.md not found'),
@@ -480,13 +479,15 @@ Write-Host 'CALLER_SUCCESS'
                 'remaining-agent-caller' {
                     $script = if ($case.Name -eq 'init') { 'init-project.ps1' } else { 'update-bundle.ps1' }
                     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $source $script), [ref]$null, [ref]$null)
-                    $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.Text.StartsWith('& $agentSync') }, $true)
                     if ($case.Name -eq 'init') {
+                        $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.Text.StartsWith('& $agentSync') }, $true)
                         while ($node -isnot [Management.Automation.Language.IfStatementAst] -or $node.Extent.Text -notmatch '^if \(Test-Path') { $node = $node.Parent }
                         $body = $ast.EndBlock.Traps[0].Extent.Text + "`n" + $node.Extent.Text
                     } else {
-                        while ($node -isnot [Management.Automation.Language.TryStatementAst]) { $node = $node.Parent }
-                        $body = $node.Extent.Text
+                        $node = $ast.Find({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.Extent.Text.StartsWith('& $pwsh -NoProfile -File') -and $n.Extent.Text -match '\$agentSync' }, $true)
+                        while ($null -ne $node -and $node -isnot [Management.Automation.Language.TryStatementAst]) { $node = $node.Parent }
+                        if ($null -eq $node) { throw 'Agent regeneration child invocation not found' }
+                        $body = $ast.EndBlock.Traps[0].Extent.Text + "`n" + $node.Extent.Text
                     }
                     Write-FixtureText (Join-Path $root 'boundary.ps1') $body
                     Write-FixtureText (Join-Path $root 'powershell/lib/claude-agents.ps1') 'function Get-ClaudeAgentDrift { @() }'
@@ -509,7 +510,25 @@ Write-Host 'CALLER_SUCCESS'
 $scenario = 'failure'
 '@
                     $call = "& './boundary.ps1'"
-                    if ($case.Name -eq 'update') { $call += "; `$global:LASTEXITCODE = 0" }
+                    if ($case.Name -eq 'update') {
+                        Write-FixtureText (Join-Path $root 'sync-claude-agents.ps1') @'
+param($ProjectRoot, [switch]$ReportChanges)
+if ($env:ITEM261_AGENT_SCENARIO -eq 'failure') { exit 7 }
+'@
+                        $setup = @'
+Set-StrictMode -Version Latest
+function Get-PwshCommand { (Get-Process -Id $PID).Path }
+function Resolve-FilesystemPath { param($Path) $Path }
+$agentSync = Join-Path $PSScriptRoot 'sync-claude-agents.ps1'
+$adopterRootResolved = $PSScriptRoot
+$env:ITEM261_AGENT_SCENARIO = 'success'
+$global:LASTEXITCODE = 7
+& './boundary.ps1'
+if ($LASTEXITCODE -ne 0) { throw 'SUCCESS_STATUS_STALE' }
+Write-Host 'CALLER_SUCCESS'
+$env:ITEM261_AGENT_SCENARIO = 'failure'
+'@
+                    }
                 }
                 'handoff' {
                     Copy-Item -LiteralPath (Join-Path $source 'new-handoff.ps1') -Destination $root
@@ -1000,7 +1019,7 @@ $afterCall
             }
             $diagnostic = [IO.File]::ReadAllText($stderr)
             $evidence = "exit=$($res.ExitCode)`n$($res.Output)`n$diagnostic"
-            $advisory = ($case.Kind -eq 'state-caller' -and $case.Name -in @('human', 'blocked')) -or ($case.Kind -eq 'remaining-agent-caller' -and $case.Name -eq 'update')
+            $advisory = ($case.Kind -eq 'state-caller' -and $case.Name -in @('human', 'blocked'))
             if ($advisory) {
                 Assert-Result 'advisory caller continues' ($res.ExitCode -eq 0 -and $res.Output -match 'CALLER_CONTINUED') $evidence
                 Assert-Result 'advisory failure is reported' ($res.Output -match $case.Expected) $evidence

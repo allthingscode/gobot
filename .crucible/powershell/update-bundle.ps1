@@ -15,6 +15,7 @@ trap {
 }
 . (Join-Path $PSScriptRoot "lib/config-helpers.ps1")
 . (Join-Path $PSScriptRoot "lib/crucible-command.ps1")
+. (Join-Path $PSScriptRoot "lib/platform.ps1")
 $AdopterRoot = Resolve-ConfigProjectRoot -ProjectRoot $AdopterRoot
 
 # Retention for the per-run report written to session/update-bundle/. A normal update writes
@@ -573,13 +574,15 @@ function Invoke-UpdateBundle {
         if ((Test-Path -LiteralPath (Join-Path $adopterCrucibleRoot "config.yaml")) -and
             (Test-Path -LiteralPath $agentSync -PathType Leaf)) {
             try {
-                . (Join-Path $adopterCrucibleRoot "powershell/lib/claude-agents.ps1")
-                $agentsChanged = @(Get-ClaudeAgentDrift -ProjectRoot $adopterRootResolved).Count -gt 0
+                $pwsh = Get-PwshCommand
                 $global:LASTEXITCODE = 0
-                $null = & $agentSync -ProjectRoot $adopterRootResolved
-                if ($LASTEXITCODE -ne 0) { throw "Agent definition generation exited $LASTEXITCODE." }
+                $agentOutput = & $pwsh -NoProfile -File (Resolve-FilesystemPath -Path $agentSync) -ProjectRoot (Resolve-FilesystemPath -Path $adopterRootResolved) -ReportChanges
+                if ($LASTEXITCODE -ne 0) { throw "child exited $LASTEXITCODE" }
+                foreach ($line in $agentOutput) { Write-Host $line }
+                $agentsChanged = $agentOutput -contains '[CLAUDE AGENTS] definitions changed'
+                if (($agentOutput -join "`n") -match '(?i)could not regenerate') { throw 'child reported it could not regenerate' }
             } catch {
-                Write-Warning ("Could not regenerate .claude/agents/crucible-*.md: " + $_.Exception.Message)
+                throw ("Claude agent regeneration failed: " + $_.Exception.Message)
             }
         }
     }
