@@ -605,6 +605,24 @@ function Invoke-UpdateBundle {
             Write-Host ("  git commit -m `"chore(crucible): update adopter bundle " + $old7 + " -> " + $new7 + "`"")
             Write-Host "The framework-integrity circuit breaker treats uncommitted .crucible/ changes as a"
             Write-Host ("specialist modifying framework-owned files and will hard-stop " + (New-CrucibleCommand -Script "powershell/crucible.ps1" -Parameters ([ordered]@{ Init = $true }) -Reference) + " with exit 2.")
+            # Informational: the update commit does not exist yet; compare against the
+            # current primary tip so the operator can identify already-stale tasks.
+            try {
+                $primary = Get-ConfiguredPrimaryBranch -ProjectRoot $adopterRootResolved
+                $branches = Invoke-Git -Directory $adopterRootResolved for-each-ref '--format=%(refname:short)' refs/heads/task/
+                if ($branches.ExitCode -eq 0) {
+                    $staleTasks = @($branches.Lines | Where-Object {
+                        -not [string]::IsNullOrWhiteSpace($_) -and
+                        (Invoke-Git -Directory $adopterRootResolved merge-base --is-ancestor $primary $_).ExitCode -eq 1
+                    })
+                    if ($staleTasks.Count -gt 0) {
+                        Write-Host 'In-flight task branches missing the primary tip (see docs/updating.md step 8):'
+                        foreach ($taskBranch in $staleTasks) { Write-Host ('  ' + $taskBranch) }
+                    }
+                }
+            } catch {
+                Write-Warning ('Could not check in-flight task branches: ' + $_.Exception.Message)
+            }
         }
     }
 

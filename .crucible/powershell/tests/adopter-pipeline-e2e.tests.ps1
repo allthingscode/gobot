@@ -397,6 +397,27 @@ try {
             -FailureMessage "corrected decision failed to archive the task or clean up the pending file"
     }
 
+    foreach ($containsBase in @($false, $true)) {
+        $results += Run-Test -Name "Item 402 rebaselined Init with branch contains base: $containsBase" -Body {
+            $task = 'F-402'
+            $cycle = 'cycle-402'
+            $env:CRUCIBLE_CYCLE_ID = $cycle
+            $projectRoot = New-AdopterProject -Root (Join-Path $tempRoot "item402-$containsBase") -TaskId $task -Title 'Rebaseline Task' -Status 'Ready' -StatusTarget 'Groomer'
+            $oldBase = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim()
+            git -C $projectRoot branch "task/$task" $oldBase
+            git -C $projectRoot -c user.name=Test -c user.email=test@example.com commit --allow-empty -m 'bundle update' --quiet
+            $newBase = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim()
+            if ($containsBase) { git -C $projectRoot branch -f "task/$task" $newBase }
+            Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source grooming -Target implementation -Cycle $cycle -Count 1 -Extra @{ artifacts = @('src/feature.txt'); base_commit = $oldBase } | Out-Null
+            $rebaseline = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $NEWHANDOFF_SCRIPT -TaskId $task -Rebaseline -BaseCommit $newBase -ProjectRoot $projectRoot }
+            Assert-Result 'rebaseline succeeds' ($rebaseline.ExitCode -eq 0) ($rebaseline.Output -join "`n")
+            $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet }
+            Assert-Result 'Init succeeds' ($run.ExitCode -eq 0) ($run.Output -join "`n")
+            $prompt = Get-Content -LiteralPath (Join-Path $projectRoot ".crucible/session/$task/implementation/prompt.md") -Raw
+            Assert-Result 'prompt reflects branch ancestry' (($prompt -match '## Rebase Workflow') -eq (-not $containsBase)) $prompt
+        }
+    }
+
     $results += Run-Test -Name "Drives the front half: grooming -> implementation -> verification -> deployment" -Body {
         $cycle = "cycle-e2e-front"
         $env:CRUCIBLE_CYCLE_ID = $cycle

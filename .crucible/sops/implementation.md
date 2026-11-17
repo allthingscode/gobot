@@ -51,6 +51,8 @@ When the prompt identifies a No-Code Review-Fix, the task has no task branch or 
 
 When the prompt identifies a rebase, stay in the assigned task worktree. Use its Primary branch task fact as `{primary_branch}`. Rebase onto that local branch, the same tip used by merge simulation; if it needs updating, have the orchestrator update it in the main checkout first.
 
+This also applies when a handoff was rebaselined after a bundle update as described in `docs/updating.md` step 8.
+
 Run this recipe from the task worktree. It refuses staged, unstaged, or untracked work; commit the intended task changes or preserve them separately before retrying. Do not automatically stash or discard them.
 
 ```powershell

@@ -219,9 +219,21 @@ function New-CruciblePromptText {
         # than asking the specialist to add one to a number it read. Item 127.
         $promptText = $promptText.Replace("{next_rebase_count}", ([int]$rebaseCount + 1))
 
+        $needsBaseRebase = $false
+        if ($handoff.target_phase -eq 'implementation' -and $handoff.PSObject.Properties['base_commit'] -and
+            -not [string]::IsNullOrWhiteSpace([string]$handoff.base_commit)) {
+            $taskRef = 'refs/heads/task/' + $TaskId
+            $branch = Invoke-Git -Directory $repoRoot show-ref --verify --quiet $taskRef
+            if ($branch.ExitCode -eq 0) {
+                $ancestry = Invoke-Git -Directory $repoRoot merge-base --is-ancestor ([string]$handoff.base_commit) $taskRef
+                $needsBaseRebase = $ancestry.ExitCode -eq 1
+                if ($ancestry.ExitCode -notin @(0, 1)) { Write-Warning "Could not check base_commit '$($handoff.base_commit)' for task '$TaskId'." }
+            }
+        }
+
         # Conditional rebase section injection. The branch is the configured primary branch,
         # not a hardcoded master, so a main-only repository gets commands that run. Item 189.
-        $rebaseOnto = if ($rebaseCount -gt 0) { Get-ConfiguredPrimaryBranch -ProjectRoot $repoRoot } else { "" }
+        $rebaseOnto = if ($rebaseCount -gt 0 -or $needsBaseRebase) { Get-ConfiguredPrimaryBranch -ProjectRoot $repoRoot } else { "" }
         $promptText = $promptText.Replace("{primary_branch}", $rebaseOnto)
         $architectRebaseContent = "`n## Rebase Workflow`n`n" +
             "Primary branch: " + $rebaseOnto + ". Rebase count: " + $rebaseCount + ".`n" +
@@ -230,7 +242,7 @@ function New-CruciblePromptText {
             "Primary branch: " + $rebaseOnto + ". Rebase count: " + $rebaseCount + ".`n" +
             "[Post-rebase SOP](<" + $resolvedCrucibleRoot + "/sops/verification.md#post-rebase-verification>).`n"
 
-        if ($rebaseCount -gt 0) {
+        if ($rebaseCount -gt 0 -or $needsBaseRebase) {
             if ($handoff.target_phase -eq "implementation") {
                 $promptText = $promptText.Replace("{rebase_section}", $architectRebaseContent)
             } elseif ($handoff.target_phase -eq "verification") {

@@ -123,6 +123,8 @@ pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -D
 
    This copies the task's latest handoff with only `base_commit` changed, records the old value as `rebaselined_from`, and marks the old handoff superseded. It does not count against the handoff budget. The new base must descend from the old one. The breaker prints the same command with the task ID filled in.
 
+   If the task branch lacks the new base, the next implementation prompt identifies the rebase workflow in the implementation SOP.
+
 ---
 
 ## The update log
