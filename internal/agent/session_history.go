@@ -362,6 +362,13 @@ func (m *SessionManager) registerCompaction() bool {
 	return true
 }
 
+// WaitForBackgroundCompactions permanently closes registration and waits for scheduled
+// workers until ctx expires. Cancellation may prevent a worker from saving its snapshot;
+// a later call can wait again for workers that outlived the deadline.
+func (m *SessionManager) WaitForBackgroundCompactions(ctx context.Context) error {
+	return m.waitForBackgroundCompactions(ctx)
+}
+
 // waitForBackgroundCompactions closes registration and joins scheduled workers.
 func (m *SessionManager) waitForBackgroundCompactions(ctx context.Context) error {
 	m.compactionMu.Lock()

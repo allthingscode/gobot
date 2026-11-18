@@ -1,13 +1,19 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
@@ -817,5 +823,202 @@ func TestShouldRetryGeminiProbe(t *testing.T) {
 	}
 	if shouldRetryGeminiProbe(errors.New("invalid api key")) {
 		t.Error("expected false for non-retryable auth error")
+	}
+}
+
+// shutdownCompactionStore pauses the background reload after the dispatch has
+// persisted and scheduled compaction. The store intentionally ignores cancellation.
+type shutdownCompactionStore struct {
+	agent.CheckpointStore
+	loads            atomic.Int32
+	entered, release chan struct{}
+}
+
+func (s *shutdownCompactionStore) LoadLatest(ctx context.Context, key string) (*agentctx.ThreadSnapshot, error) {
+	if s.loads.Add(1) == 2 {
+		close(s.entered)
+		<-s.release
+	}
+	return s.CheckpointStore.LoadLatest(ctx, key)
+}
+
+func TestRuntimeJoinsScheduledCompaction(t *testing.T) {
+	// Start the process-wide signal listener outside the synctest bubble.
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals)
+	signal.Stop(signals)
+	for _, cron := range []bool{false, true} {
+		t.Run(map[bool]string{false: "primary", true: "cron per-user"}[cron], func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) { testRuntimeJoinsScheduledCompaction(t, cron) })
+		})
+	}
+}
+
+func testRuntimeJoinsScheduledCompaction(t *testing.T, cron bool) {
+	t.Helper()
+	cfg := &config.Config{}
+	cfg.Runtime.StorageRoot = t.TempDir()
+	cfg.Context.SessionTokenBudget = 1
+	cfg.Cron.Enabled = cron
+	cfg.Runtime.MultiUserEnabled = cron
+	storeRoot := cfg.StorageRoot()
+	if cron {
+		storeRoot = cfg.WorkspacePath("user")
+	}
+	store, err := agentctx.GetCheckpointManager(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		agentctx.EvictCheckpointManagerForTest(storeRoot)
+		agentctx.EvictCheckpointManagerForTest(cfg.WorkspacePath(""))
+		agentctx.EvictCheckpointManagerForTest(cfg.StorageRoot())
+	})
+	wrapped := &shutdownCompactionStore{CheckpointStore: store, entered: make(chan struct{}), release: make(chan struct{})}
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(wrapped.release) })
+	prov := &mockChatProvider{resp: "a sufficiently long response to exceed the token budget"}
+	stack := &AgentStack{Runner: NewAgentRunner(prov, "mock", "", cfg), Model: "mock"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	managers := make(chan *agent.SessionManager, 1)
+	done := make(chan error, 1)
+	exited := make(chan struct{})
+	defer func() {
+		cancel()
+		releaseOnce.Do(func() { close(wrapped.release) })
+		select {
+		case <-exited:
+		case <-time.After(10 * time.Second):
+			t.Error("runtime did not exit during cleanup")
+		}
+	}()
+	go func() {
+		defer close(exited)
+		done <- runInitializedAgentLoopWithReady(ctx, cfg, stack, nil, nil, nil, nil, time.Now(), nil, func(_ context.Context, primary, cronMgr *agent.SessionManager) {
+			mgr := primary
+			if cron {
+				mgr = cronMgr
+			}
+			managers <- mgr
+		})
+	}()
+	assertRuntimeJoinsCompaction(t, ctx, cancel, managers, wrapped, done, &releaseOnce)
+}
+
+//nolint:cyclop // Each barrier reports a distinct runtime failure.
+func assertRuntimeJoinsCompaction(t *testing.T, ctx context.Context, cancel context.CancelFunc, managers <-chan *agent.SessionManager, wrapped *shutdownCompactionStore, done <-chan error, releaseOnce *sync.Once) {
+	t.Helper()
+	var mgr *agent.SessionManager
+	select {
+	case mgr = <-managers:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runtime did not start")
+	}
+	if mgr == nil {
+		t.Fatal("missing runtime manager")
+	}
+	defer func() {
+		releaseOnce.Do(func() { close(wrapped.release) })
+		if err := mgr.WaitForBackgroundCompactions(context.Background()); err != nil {
+			t.Errorf("join worker during cleanup: %v", err)
+		}
+	}()
+	mgr.SetCheckpointStoreProvider(func(string) (agent.CheckpointStore, error) { return wrapped, nil })
+	if _, err := mgr.Dispatch(ctx, t.Name(), "user", "words that exceed the tiny token budget"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-wrapped.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("worker did not enter store")
+	}
+	cancel()
+	// Wait for shutdown to run until all bubble goroutines are blocked. The
+	// fake clock cannot advance while Wait is pending, so the join deadline
+	// cannot mask an early return.
+	synctest.Wait()
+	select {
+	case err := <-done:
+		t.Fatalf("shutdown returned before worker release: %v", err)
+	default:
+	}
+	releaseOnce.Do(func() { close(wrapped.release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown did not finish")
+	}
+}
+
+//nolint:gocognit,cyclop // The shared-deadline scenario coordinates two independent workers.
+func TestJoinSessionCompactionsSharedDeadline(t *testing.T) {
+	root := t.TempDir()
+	store, err := agentctx.GetCheckpointManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { agentctx.EvictCheckpointManagerForTest(root) })
+	cfg := &config.Config{}
+	prov := &mockChatProvider{resp: "enough words for a compaction"}
+	var managers []*agent.SessionManager
+	var stores []*shutdownCompactionStore
+	t.Cleanup(func() {
+		for _, s := range stores {
+			select {
+			case <-s.release:
+			default:
+				close(s.release)
+			}
+		}
+		for _, mgr := range managers {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			_ = mgr.WaitForBackgroundCompactions(ctx)
+			cancel()
+		}
+	})
+	for i := 0; i < 2; i++ {
+		wrapped := &shutdownCompactionStore{CheckpointStore: store, entered: make(chan struct{}), release: make(chan struct{})}
+		mgr := agent.NewSessionManager(NewAgentRunner(prov, "mock", "", cfg), wrapped, "mock")
+		mgr.SetTokenBudget(1)
+		managers = append(managers, mgr)
+		stores = append(stores, wrapped)
+		if _, err := mgr.Dispatch(context.Background(), fmt.Sprintf("join-%d", i), "user", "enough words for compaction"); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-wrapped.entered:
+		case <-time.After(10 * time.Second):
+			t.Fatal("worker did not enter store")
+		}
+	}
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	started := time.Now()
+	joinSessionCompactions(20*time.Millisecond, managers...)
+	if time.Since(started) > time.Second {
+		t.Fatal("shared deadline was not bounded")
+	}
+	if strings.Count(logs.String(), "background compaction drain failed") != 2 {
+		t.Fatalf("expected two structured warnings: %s", logs.String())
+	}
+	for _, s := range stores {
+		close(s.release)
+	}
+	for i, mgr := range managers {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		err := mgr.WaitForBackgroundCompactions(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("join after release: %v", err)
+		}
+		if _, err := store.LoadLatest(context.Background(), fmt.Sprintf("join-%d", i)); err != nil {
+			t.Fatalf("store unavailable after timed-out join: %v", err)
+		}
 	}
 }

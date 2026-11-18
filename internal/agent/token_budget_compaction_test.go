@@ -1314,3 +1314,45 @@ func TestDispatchRetainedTokensSQLite(t *testing.T) {
 		}
 	}
 }
+
+// Registration and shutdown compete under the same lock: every accepted worker
+// must finish before a successful join, and no worker may register afterward.
+func TestCompactionRegistrationJoinRace(t *testing.T) {
+	t.Parallel()
+	for i := 0; i < 100; i++ {
+		mgr := NewSessionManager(&compactionRunner{}, nil, "mock")
+		start := make(chan struct{})
+		registered := make(chan bool, 1)
+		release := make(chan struct{})
+		go func() {
+			<-start
+			ok := mgr.registerCompaction()
+			registered <- ok
+			if ok {
+				<-release
+				mgr.compactionWorkers.Done()
+			}
+		}()
+		joined := make(chan error, 1)
+		go func() {
+			<-start
+			joined <- mgr.WaitForBackgroundCompactions(context.Background())
+		}()
+		close(start)
+		if <-registered {
+			select {
+			case err := <-joined:
+				t.Fatalf("join returned with registered worker: %v", err)
+			default:
+			}
+		}
+		close(release)
+		if err := <-joined; err != nil {
+			t.Fatal(err)
+		}
+		if mgr.registerCompaction() {
+			mgr.compactionWorkers.Done()
+			t.Fatal("registration succeeded after join")
+		}
+	}
+}
