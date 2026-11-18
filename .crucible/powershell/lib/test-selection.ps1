@@ -1,3 +1,4 @@
+# Known limit: wildcard pathspec may be expanded by PowerShell on Unix if the path contains a glob character; not reproduced 2026-11-17; see TODO item 411.
 if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Path $PSScriptRoot "config-helpers.ps1") }
 
 . (Join-Path $PSScriptRoot 'platform.ps1')

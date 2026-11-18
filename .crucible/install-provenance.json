@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "c53699464b2aceb22354a38cf5b1da627680208d",
+  "source_commit": "e14582b0cfecfdaaeb8c42cf29186ba496f6cc68",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -263,8 +263,8 @@
       "base_hash": "e392df2d1d33df20d9e3d5d9b5670706e40e927bf7272da3587e035dd70bc9b9"
     },
     "powershell/lib/gitignore-conformance.ps1": {
-      "hash": "0f010b0ff7f7c53028079b37afbf83e8aed468b7233bd9d23f180cc53762961c",
-      "base_hash": "0f010b0ff7f7c53028079b37afbf83e8aed468b7233bd9d23f180cc53762961c"
+      "hash": "b3c7c21a7dfe0403a341efbe6c9b780ff86da69d4f72faa99a08854526a875c5",
+      "base_hash": "b3c7c21a7dfe0403a341efbe6c9b780ff86da69d4f72faa99a08854526a875c5"
     },
     "powershell/lib/handoff.ps1": {
       "hash": "8b121ced668a8d231a3f500ac22fd50fb2d2e398d2532ca92d7af48020c2b4c7",
@@ -339,8 +339,8 @@
       "base_hash": "f22dbc2624302281ff128fea8496910097ca5e8f53f441f6afd4b20e9d26ba91"
     },
     "powershell/lib/test-selection.ps1": {
-      "hash": "17d2218fb09edac6fb709b08b3323bacf012e8b50cd5a33407a7276a8b4704fd",
-      "base_hash": "17d2218fb09edac6fb709b08b3323bacf012e8b50cd5a33407a7276a8b4704fd"
+      "hash": "73adf5c6f0652bd5e4eb7a6fb85d59f7c788f4541e5ef7e6416c182638b5abb9",
+      "base_hash": "73adf5c6f0652bd5e4eb7a6fb85d59f7c788f4541e5ef7e6416c182638b5abb9"
     },
     "powershell/lib/time.ps1": {
       "hash": "e8da15d58591e5eaa03e8c87a09c13f0bcefb7743790d533acb24e89e22b1b2a",
