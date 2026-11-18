@@ -152,9 +152,9 @@ func StartTelegramBot(ctx context.Context, api bot.API, gateHandler bot.Handler,
 }
 
 // StartCron starts the modular cron scheduler in a separate goroutine.
-func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bot.Bot, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer, wg *sync.WaitGroup) {
+func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bot.Bot, tmgr *reporter.TemplateManager, tracer *observability.DispatchTracer, wg *sync.WaitGroup) *agent.SessionManager {
 	if !cfg.Cron.Enabled {
-		return
+		return nil
 	}
 	mgr := stack.NewSessionManager(cfg, nil, tracer)
 	cd := NewCronDispatcher(cfg, mgr, stack, b, tmgr)
@@ -165,6 +165,7 @@ func StartCron(ctx context.Context, cfg *config.Config, stack *AgentStack, b *bo
 		cd.Run(ctx)
 	}()
 	slog.Info("gobot: cron dispatcher started")
+	return mgr
 }
 
 // alertSenderFromAPI adapts the concrete *TgAPI to the AlertSender interface while

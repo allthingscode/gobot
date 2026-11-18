@@ -159,6 +159,10 @@ func initializeStartupTelegram(cfg *config.Config, newTelegram func(string, []st
 }
 
 func runInitializedAgentLoop(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager, startupStart time.Time, api *TgAPI) error {
+	return runInitializedAgentLoopWithReady(ctx, cfg, stack, otelProvider, hub, tracer, tmgr, startupStart, api, nil)
+}
+
+func runInitializedAgentLoopWithReady(ctx context.Context, cfg *config.Config, stack *AgentStack, otelProvider *observability.Provider, hub *dashboard.Hub, tracer *observability.DispatchTracer, tmgr *reporter.TemplateManager, startupStart time.Time, api *TgAPI, ready func(context.Context, *agent.SessionManager, *agent.SessionManager)) (runErr error) {
 	var wg sync.WaitGroup
 	// Derive a cancellable context so a critical subsystem failure can trigger
 	// shutdown of the rest. startErr collects the first non-graceful failure from
@@ -172,6 +176,13 @@ func runInitializedAgentLoop(ctx context.Context, cfg *config.Config, stack *Age
 	store := runtimeCheckpointStore(cfg.StorageRoot())
 
 	mgr := stack.NewSessionManager(cfg, store, tracer)
+	var cronMgr *agent.SessionManager
+	var owned *consolidator.Consolidator
+	defer func() {
+		cancel()
+		joinSessionCompactions(5*time.Second, mgr, cronMgr)
+		runErr = shutdownConsolidation(owned, runErr, 5*time.Second)
+	}()
 	_, hitl, err := SetupHooks(cfg, stack.Runner, mgr, api, store)
 	if err != nil {
 		return fmt.Errorf("run agent: %w", err)
@@ -179,8 +190,8 @@ func runInitializedAgentLoop(ctx context.Context, cfg *config.Config, stack *Age
 	InitIdempotency(ctx, cfg, stack.Runner, store, &wg)
 
 	handler := &DispatchHandler{Mgr: mgr, Memory: stack.MemStore, Hitl: hitl}
-	owned := SetupConsolidator(ctx, cfg, stack, mgr, handler, otelProvider, tracer)
-	return runOwnedConsolidation(owned, cancel, 5*time.Second, func() error {
+	owned = SetupConsolidator(ctx, cfg, stack, mgr, handler, otelProvider, tracer)
+	return func() error {
 
 		gateHandler := SetupGateHandler(store, handler)
 		ReconcileAuthorizedFromAllowFrom(cfg, store)
@@ -201,11 +212,28 @@ func runInitializedAgentLoop(ctx context.Context, cfg *config.Config, stack *Age
 
 		publishStartupReady(ctx, cfg, readiness, startupStart, api, os.Stdout, 2*time.Second)
 
-		StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
+		cronMgr = StartCron(ctx, cfg, stack, b, tmgr, tracer, &wg)
 		StartHeartbeat(ctx, cfg, cfg.TelegramToken(), alertSenderFromAPI(api), &wg)
+		if ready != nil {
+			ready(ctx, mgr, cronMgr)
+		}
 
 		return waitForShutdown(ctx, cancel, &wg, startErr, readiness)
-	})
+	}()
+}
+
+// joinSessionCompactions bounds the total best-effort drain across runtime managers.
+func joinSessionCompactions(timeout time.Duration, managers ...*agent.SessionManager) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	for i, mgr := range managers {
+		if mgr == nil {
+			continue
+		}
+		if err := mgr.WaitForBackgroundCompactions(ctx); err != nil {
+			slog.Warn("gobot: background compaction drain failed", "manager", i, "err", err)
+		}
+	}
 }
 
 // runtimeCheckpointStore preserves optional checkpoint storage during startup.
