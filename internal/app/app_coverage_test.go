@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/agent"
@@ -840,25 +842,14 @@ func (s *shutdownCompactionStore) LoadLatest(ctx context.Context, key string) (*
 	return s.CheckpointStore.LoadLatest(ctx, key)
 }
 
-type drainSignalHandler struct {
-	slog.Handler
-	drained chan struct{}
-	once    sync.Once
-}
-
-func (h *drainSignalHandler) Enabled(context.Context, slog.Level) bool { return true }
-
-func (h *drainSignalHandler) Handle(ctx context.Context, record slog.Record) error {
-	if record.Message == "gobot: drain complete, proceeding to shutdown" {
-		h.once.Do(func() { close(h.drained) })
-	}
-	return h.Handler.Handle(ctx, record)
-}
-
 func TestRuntimeJoinsScheduledCompaction(t *testing.T) {
+	// Start the process-wide signal listener outside the synctest bubble.
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals)
+	signal.Stop(signals)
 	for _, cron := range []bool{false, true} {
 		t.Run(map[bool]string{false: "primary", true: "cron per-user"}[cron], func(t *testing.T) {
-			testRuntimeJoinsScheduledCompaction(t, cron)
+			synctest.Test(t, func(t *testing.T) { testRuntimeJoinsScheduledCompaction(t, cron) })
 		})
 	}
 }
@@ -885,19 +876,15 @@ func testRuntimeJoinsScheduledCompaction(t *testing.T, cron bool) {
 	})
 	wrapped := &shutdownCompactionStore{CheckpointStore: store, entered: make(chan struct{}), release: make(chan struct{})}
 	var releaseOnce sync.Once
-	t.Cleanup(func() { releaseOnce.Do(func() { close(wrapped.release) }) })
+	defer releaseOnce.Do(func() { close(wrapped.release) })
 	prov := &mockChatProvider{resp: "a sufficiently long response to exceed the token budget"}
 	stack := &AgentStack{Runner: NewAgentRunner(prov, "mock", "", cfg), Model: "mock"}
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	defer cancel()
 	managers := make(chan *agent.SessionManager, 1)
-	old := slog.Default()
-	handler := &drainSignalHandler{Handler: slog.DiscardHandler, drained: make(chan struct{})}
-	slog.SetDefault(slog.New(handler))
-	t.Cleanup(func() { slog.SetDefault(old) })
 	done := make(chan error, 1)
 	exited := make(chan struct{})
-	t.Cleanup(func() {
+	defer func() {
 		cancel()
 		releaseOnce.Do(func() { close(wrapped.release) })
 		select {
@@ -905,7 +892,7 @@ func testRuntimeJoinsScheduledCompaction(t *testing.T, cron bool) {
 		case <-time.After(10 * time.Second):
 			t.Error("runtime did not exit during cleanup")
 		}
-	})
+	}()
 	go func() {
 		defer close(exited)
 		done <- runInitializedAgentLoopWithReady(ctx, cfg, stack, nil, nil, nil, nil, time.Now(), nil, func(_ context.Context, primary, cronMgr *agent.SessionManager) {
@@ -916,11 +903,11 @@ func testRuntimeJoinsScheduledCompaction(t *testing.T, cron bool) {
 			managers <- mgr
 		})
 	}()
-	assertRuntimeJoinsCompaction(t, ctx, cancel, managers, wrapped, handler.drained, done, &releaseOnce)
+	assertRuntimeJoinsCompaction(t, ctx, cancel, managers, wrapped, done, &releaseOnce)
 }
 
 //nolint:cyclop // Each barrier reports a distinct runtime failure.
-func assertRuntimeJoinsCompaction(t *testing.T, ctx context.Context, cancel context.CancelFunc, managers <-chan *agent.SessionManager, wrapped *shutdownCompactionStore, drained <-chan struct{}, done <-chan error, releaseOnce *sync.Once) {
+func assertRuntimeJoinsCompaction(t *testing.T, ctx context.Context, cancel context.CancelFunc, managers <-chan *agent.SessionManager, wrapped *shutdownCompactionStore, done <-chan error, releaseOnce *sync.Once) {
 	t.Helper()
 	var mgr *agent.SessionManager
 	select {
@@ -931,6 +918,12 @@ func assertRuntimeJoinsCompaction(t *testing.T, ctx context.Context, cancel cont
 	if mgr == nil {
 		t.Fatal("missing runtime manager")
 	}
+	defer func() {
+		releaseOnce.Do(func() { close(wrapped.release) })
+		if err := mgr.WaitForBackgroundCompactions(context.Background()); err != nil {
+			t.Errorf("join worker during cleanup: %v", err)
+		}
+	}()
 	mgr.SetCheckpointStoreProvider(func(string) (agent.CheckpointStore, error) { return wrapped, nil })
 	if _, err := mgr.Dispatch(ctx, t.Name(), "user", "words that exceed the tiny token budget"); err != nil {
 		t.Fatal(err)
@@ -941,15 +934,14 @@ func assertRuntimeJoinsCompaction(t *testing.T, ctx context.Context, cancel cont
 		t.Fatal("worker did not enter store")
 	}
 	cancel()
-	select {
-	case <-drained:
-	case <-time.After(10 * time.Second):
-		t.Fatal("subsystems did not drain")
-	}
+	// Wait for shutdown to run until all bubble goroutines are blocked. The
+	// fake clock cannot advance while Wait is pending, so the join deadline
+	// cannot mask an early return.
+	synctest.Wait()
 	select {
 	case err := <-done:
 		t.Fatalf("shutdown returned before worker release: %v", err)
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 	releaseOnce.Do(func() { close(wrapped.release) })
 	select {
