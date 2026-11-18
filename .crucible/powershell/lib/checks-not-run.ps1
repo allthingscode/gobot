@@ -215,7 +215,7 @@ function Format-ChecksNotRunSection {
     $lines = @(Get-ChecksNotRun -SessionDir $SessionDir -TaskId $TaskId)
     if ($lines.Count -eq 0) { return "" }
     return "## Checks Not Run`n`n" +
-        "These pipeline checks did not run for this task. They are not passes. List every one under ``### Checks Not Run`` in the review report and in the deployment handoff reason:`n`n" +
+        "These pipeline checks did not run for this task. They are not passes. The record reaches subsequent prompts and the Human Gate:`n`n" +
         (($lines | ForEach-Object { "- " + $_ }) -join "`n") + "`n`n" +
         "Recorded in " + (Get-ChecksNotRunPath -SessionDir $SessionDir -TaskId $TaskId) + "."
 }

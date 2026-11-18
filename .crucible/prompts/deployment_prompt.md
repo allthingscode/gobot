@@ -1,4 +1,4 @@
-<!-- prompt_version: deployment_prompt-v38 -->
+<!-- prompt_version: deployment_prompt-v39 -->
 Deployment: {task_id}
 
 {prev_session_summary}

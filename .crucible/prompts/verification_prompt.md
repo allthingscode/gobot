@@ -1,4 +1,4 @@
-<!-- prompt_version: verification_prompt-v37 -->
+<!-- prompt_version: verification_prompt-v38 -->
 Verification: {task_id}
 
 {prev_session_summary}

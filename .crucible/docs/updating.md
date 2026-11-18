@@ -225,25 +225,11 @@ When `update-bundle.ps1` runs:
 
 Use manual copying only when you intentionally want a single upstream file outside the normal updater flow. Read the upstream diff first, copy only the file you want, re-apply any local customization, and run verification before committing.
 
-> **Gotcha: a no-op `update-bundle` run does NOT re-stamp `crucible_install_commit`
-> unless you pass `-Restamp`.**
-> The updater only rewrites `crucible_install_commit` and `install-provenance.json`
-> when it actually applies or prunes at least one file. If you hand-copy upstream
-> files into the bundle yourself (manual fallback above) and then run
-> `update-bundle` to "record" them, the run classifies everything as `no-op`, so the
-> re-stamp block never fires and the recorded commit stays behind. The bundle then
-> reports stale via the `bundle.staleness` advisory even though its content is
-> current. Pass `-Restamp` to advance `crucible_install_commit` and regenerate
-> `install-provenance.json` to the framework HEAD on an otherwise all-no-op run:
->
-> ```powershell
-> .crucible/powershell/update-bundle.ps1 -FrameworkSource <crucible> -AdopterRoot . -Mode auto-safe -Restamp
-> ```
->
-> `-Restamp` is refused (with a message, no write) if any file still needs
-> apply/prune/merge - run a normal update first so it cannot mark a bundle current
-> while it is missing real upstream changes. Prefer letting `update-bundle` apply
-> upstream files in the first place rather than hand-copying.
+> An all-no-op update whose post-apply steps succeed restamps
+> `crucible_install_commit` and `install-provenance.json` to framework HEAD,
+> including after a manual copy; a refused run never writes the new stamp.
+> When `sync-claude-agents.ps1` needs a merge, `update-bundle` refuses before the
+> hook installer runs, so hooks are activated on the rerun after the merge.
 
 ---
 

@@ -553,6 +553,10 @@ function Invoke-UpdateBundle {
     # and bundles with unapplied changes must not activate hooks. Item 109.
     $pendingWork = $results["safe-overwrite"].Count + $results["add"].Count + $results["needs-merge"].Count + $results["retired"].Count + $results["review-removal"].Count
     $isAllNoOp = ($pendingWork -eq 0)
+    if (-not $effectiveDryRun -and @($results["needs-merge"].ToArray() | Where-Object { (ConvertTo-RelativeSlashPath -Path $_.AdopterPath) -eq 'powershell/sync-claude-agents.ps1' }).Count -gt 0) {
+        Write-Host "Cannot regenerate agents: powershell/sync-claude-agents.ps1 has a pending merge." -ForegroundColor Yellow
+        return 2
+    }
     if (-not $effectiveDryRun -and ($shouldApply -or $shouldPrune -or $isAllNoOp)) {
         $hookInstaller = Join-Path $adopterCrucibleRoot "powershell/install-hooks.ps1"
         if ((Test-Path -LiteralPath (Join-Path $adopterRootResolved ".git")) -and
@@ -587,7 +591,40 @@ function Invoke-UpdateBundle {
         }
     }
 
-    if ($appliedCount -gt 0 -or $prunedCount -gt 0 -or $retiredCount -gt 0 -or $agentsChanged) {
+    $shouldRestamp = $false
+    if ($shouldApply -or $shouldPrune) {
+        $remainingRemovals = $results["review-removal"].Count
+        if ($shouldPrune) {
+            $remainingRemovals -= $prunedCount
+        }
+        $remainingRetired = $retireItems.Count - $retiredCount
+        if ($results["needs-merge"].Count -eq 0 -and $remainingRemovals -eq 0 -and $remainingRetired -eq 0) {
+            $shouldRestamp = $true
+        }
+    } elseif (-not $effectiveDryRun -and $isAllNoOp) {
+        # Post-apply steps succeeded and all bundle files already match HEAD.
+        $shouldRestamp = $true
+        Write-Host "Re-stamping bundle provenance to framework HEAD (content already current)." -ForegroundColor Cyan
+    } elseif ($Restamp -and -not $effectiveDryRun) {
+        Write-Host ("Cannot -Restamp: " + $pendingWork + " file(s) still need apply/prune/merge. Run a normal update first.") -ForegroundColor Yellow
+    }
+
+    if ($shouldRestamp) {
+        Write-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit" -Value $frameworkHead
+        $versionFile = Join-Path $frameworkRoot "VERSION"
+        if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
+            $version = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+            Write-ConfigScalar -ConfigPath $configPath -Key "crucible_version" -Value $version
+        }
+        try {
+            $provenance = New-ProvenanceManifest -FrameworkRoot $frameworkRoot -Commit $frameworkHead -Manifest $manifest
+            $null = Write-ProvenanceManifest -BundleRoot $adopterCrucibleRoot -ProvenanceManifest $provenance
+        } catch {
+            Write-Host ("Warning: could not write provenance manifest: " + $_.Exception.Message) -ForegroundColor Yellow
+        }
+    }
+
+    if ($appliedCount -gt 0 -or $prunedCount -gt 0 -or $retiredCount -gt 0 -or $agentsChanged -or $shouldRestamp) {
         $isGitRepo = $false
         $checkDir = $adopterRootResolved
         while (-not [string]::IsNullOrEmpty($checkDir)) {
@@ -626,45 +663,6 @@ function Invoke-UpdateBundle {
             } catch {
                 Write-Warning ('Could not check in-flight task branches: ' + $_.Exception.Message)
             }
-        }
-    }
-
-    $shouldRestamp = $false
-    if ($shouldApply -or $shouldPrune) {
-        $remainingRemovals = $results["review-removal"].Count
-        if ($shouldPrune) {
-            $remainingRemovals -= $prunedCount
-        }
-        $remainingRetired = $retireItems.Count - $retiredCount
-        if ($results["needs-merge"].Count -eq 0 -and $remainingRemovals -eq 0 -and $remainingRetired -eq 0) {
-            $shouldRestamp = $true
-        }
-    } elseif ($Restamp -and -not $effectiveDryRun) {
-        # No content delta to apply or prune, but -Restamp was requested: advance the
-        # provenance only when the bundle is genuinely all-no-op. Any safe-overwrite,
-        # add, needs-merge, or review-removal item means content is NOT current, so
-        # stamping HEAD would lie about what is installed - refuse and tell the caller
-        # to run a normal update first.
-        if ($pendingWork -eq 0) {
-            $shouldRestamp = $true
-            Write-Host "Re-stamping bundle provenance to framework HEAD (content already current)." -ForegroundColor Cyan
-        } else {
-            Write-Host ("Cannot -Restamp: " + $pendingWork + " file(s) still need apply/prune/merge. Run a normal update first.") -ForegroundColor Yellow
-        }
-    }
-
-    if ($shouldRestamp) {
-        Write-ConfigScalar -ConfigPath $configPath -Key "crucible_install_commit" -Value $frameworkHead
-        $versionFile = Join-Path $frameworkRoot "VERSION"
-        if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
-            $version = (Get-Content -LiteralPath $versionFile -Raw).Trim()
-            Write-ConfigScalar -ConfigPath $configPath -Key "crucible_version" -Value $version
-        }
-        try {
-            $provenance = New-ProvenanceManifest -FrameworkRoot $frameworkRoot -Commit $frameworkHead -Manifest $manifest
-            $null = Write-ProvenanceManifest -BundleRoot $adopterCrucibleRoot -ProvenanceManifest $provenance
-        } catch {
-            Write-Host ("Warning: could not write provenance manifest: " + $_.Exception.Message) -ForegroundColor Yellow
         }
     }
 

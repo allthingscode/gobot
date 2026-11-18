@@ -1,4 +1,4 @@
-<!-- prompt_version: implementation_prompt-v42 -->
+<!-- prompt_version: implementation_prompt-v43 -->
 Implementation: {task_id}
 
 {prev_session_summary}

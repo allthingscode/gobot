@@ -1,4 +1,4 @@
-<!-- prompt_version: research_prompt-v23 -->
+<!-- prompt_version: research_prompt-v24 -->
 Research: {task_id}
 
 {prev_session_summary}

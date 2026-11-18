@@ -277,6 +277,8 @@ try {
         $promptText2 = if (Test-Path -LiteralPath $reviewerPrompt) { Get-Content -LiteralPath $reviewerPrompt -Raw -Encoding UTF8 } else { "(no prompt at $reviewerPrompt)" }
         Assert-Result -Name "I12 Reviewer prompt lists the skipped scope check and its reason" `
             -Condition ($promptText2.Contains("## Checks Not Run") -and $promptText2.Contains("- " + $scopeLine)) -FailureMessage $promptText2
+        Assert-Result -Name "Recorded checks are not copied into handoff reasons" `
+            -Condition ($promptText2 -notmatch '(?i)list every one[^\r\n]*handoff reason') -FailureMessage $promptText2
 
         # Isolated verification, as the Reviewer runs it: one check runs, one is host-gated.
         $pwshCmd2 = Get-PwshCommand

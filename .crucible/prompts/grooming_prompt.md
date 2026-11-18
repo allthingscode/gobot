@@ -1,4 +1,4 @@
-<!-- prompt_version: grooming_prompt-v31 -->
+<!-- prompt_version: grooming_prompt-v32 -->
 Grooming: {task_id}
 
 {prev_session_summary}
