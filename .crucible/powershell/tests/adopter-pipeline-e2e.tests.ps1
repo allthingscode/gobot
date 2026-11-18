@@ -194,6 +194,44 @@ $tempRoot = New-TestFixtureRoot -NameHint "pipeline-e2e"
 
 $savedCycleEnv = $env:CRUCIBLE_CYCLE_ID
 try {
+    foreach ($target in @('verification', 'deployment')) {
+        $results += Run-Test -Name "Item 407 rebaselined $target returns to implementation" -Body {
+            $task = 'F-407'
+            $cycle = "cycle-407-$target"
+            $env:CRUCIBLE_CYCLE_ID = $cycle
+            $projectRoot = New-AdopterProject -Root (Join-Path $tempRoot "item407-$target") -TaskId $task -Title 'Rebaseline Task' -Status 'Ready' -StatusTarget 'Groomer'
+            $oldBase = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim()
+            git -C $projectRoot branch "task/$task" $oldBase
+            git -C $projectRoot -c user.name=Test -c user.email=test@example.com commit --allow-empty -m 'bundle update' --quiet
+            $newBase = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim()
+            $source = if ($target -eq 'verification') { 'implementation' } else { 'verification' }
+            $worktree = Join-Path (Get-ConfiguredPath -Key 'workspaces' -ProjectRoot $projectRoot) "implementation-$task"
+            git -C $projectRoot worktree add --quiet $worktree "task/$task"
+            Complete-PhaseChecklist -ProjectRoot $projectRoot -TaskId $task -Phase $source
+            if ($target -eq 'deployment') {
+                $vdir = Join-Path $projectRoot ".crucible/session/$task/verification"
+                New-Item -ItemType Directory -Path $vdir -Force | Out-Null
+                [IO.File]::WriteAllText((Join-Path $vdir 'review_report.md'), "---`nreview_decision: APPROVED`nacceptance_criteria_met: true`n---`n`nAPPROVED.`n", [Text.UTF8Encoding]::new($false))
+            }
+            $checks = @('tests_pass','vet_pass','acceptance_criteria_met','scope_bounded','no_regressions','no_hard_mandates_violated')
+            $extra = @{ artifacts = @('src/feature.txt'); base_commit = $oldBase; review_strike_count = 1; handoff_retry_count = 1 }
+            if ($target -eq 'deployment') { $extra.reviewer_checks_passed = $checks }
+            Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source $source -Target $target -Cycle $cycle -Count 1 -Extra $extra | Out-Null
+            $rebaseline = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $NEWHANDOFF_SCRIPT -TaskId $task -Rebaseline -BaseCommit $newBase -ProjectRoot $projectRoot }
+            Assert-Result 'rebaseline succeeds' ($rebaseline.ExitCode -eq 0) ($rebaseline.Output -join "`n")
+            $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet }
+            $output = $run.Output -join "`n"
+            Assert-Result 'reroute is visible' ($run.ExitCode -eq 0 -and $output -match $task -and $output -match $newBase -and $output -match 'implementation') $output
+            $promptPath = Join-Path $projectRoot ".crucible/session/$task/implementation/prompt.md"
+            Assert-Result 'implementation prompt requests rebase' ((Test-Path -LiteralPath $promptPath) -and (Get-Content -LiteralPath $promptPath -Raw) -match '## Rebase Workflow') $output
+            $handoffs = @(Get-ChildItem (Join-Path $projectRoot '.crucible/session/handoffs') -Filter "$task-*.json" | Sort-Object Name -Descending)
+            $routed = Get-Content -LiteralPath $handoffs[0].FullName -Raw | ConvertFrom-Json
+            Assert-Result 'reroute is recorded without rejection counters' ($routed.target_phase -eq 'implementation' -and $routed.review_strike_count -eq 1 -and $routed.handoff_retry_count -eq 1 -and $routed.base_commit -eq $newBase) ($handoffs[0].FullName)
+            $repeat = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet }
+            Assert-Result 'recorded reroute can be resumed' ($repeat.ExitCode -eq 0) ($repeat.Output -join "`n")
+        }
+    }
+
     $results += Run-Test -Name "crucible -Init drives a deployment->done handoff to the human gate" -Body {
         $cycle = "cycle-e2e-1"
         $env:CRUCIBLE_CYCLE_ID = $cycle

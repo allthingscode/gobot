@@ -23,6 +23,15 @@ $AdopterRoot = Resolve-ConfigProjectRoot -ProjectRoot $AdopterRoot
 # further back than anyone has ever needed to look and still a bounded directory.
 $UpdateLogRetentionCount = 20
 
+function Test-UpdateTaskTerminal {
+    param([string]$TaskId, [string]$ProjectRoot)
+    . (Join-Path $PSScriptRoot 'lib/backlog-io.ps1')
+    $status = Get-BacklogTaskStatus -Task $TaskId -ProjectRoot $ProjectRoot
+    $spec = Get-BacklogItemPathForTaskProjectRoot -Task $TaskId -ProjectRoot $ProjectRoot
+    return ((Test-BacklogTaskTerminal $status.Status) -or $status.Status -eq 'Abandoned' -or
+        (-not [string]::IsNullOrWhiteSpace($spec) -and $spec -match '[/\\]archived[/\\]'))
+}
+
 function ConvertTo-RelativeSlashPath {
     param([Parameter(Mandatory=$true)][string]$Path)
     return $Path.Replace("\", "/").TrimStart("/")
@@ -649,10 +658,16 @@ function Invoke-UpdateBundle {
             # current primary tip so the operator can identify already-stale tasks.
             try {
                 $primary = Get-ConfiguredPrimaryBranch -ProjectRoot $adopterRootResolved
+                $primaryRef = Invoke-Git -Directory $adopterRootResolved show-ref --verify --quiet ('refs/heads/' + $primary)
                 $branches = Invoke-Git -Directory $adopterRootResolved for-each-ref '--format=%(refname:short)' refs/heads/task/
-                if ($branches.ExitCode -eq 0) {
+                if ($primaryRef.ExitCode -ne 0) {
+                    Write-Host "Cannot check in-flight task branches: local primary branch '$primary' is missing."
+                } elseif ($branches.ExitCode -eq 0) {
                     $staleTasks = @($branches.Lines | Where-Object {
-                        -not [string]::IsNullOrWhiteSpace($_) -and
+                        $taskId = $_ -replace '^task/', ''
+                        $activeHandoffs = @(Get-ChildItem -LiteralPath (Join-Path $sessionDir 'handoffs') -Filter ($taskId + '-*.json') -File -ErrorAction SilentlyContinue)
+                        -not [string]::IsNullOrWhiteSpace($_) -and $activeHandoffs.Count -gt 0 -and
+                        -not (Test-UpdateTaskTerminal -TaskId $taskId -ProjectRoot $adopterRootResolved) -and
                         (Invoke-Git -Directory $adopterRootResolved merge-base --is-ancestor $primary $_).ExitCode -eq 1
                     })
                     if ($staleTasks.Count -gt 0) {

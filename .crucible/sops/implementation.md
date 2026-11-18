@@ -64,7 +64,7 @@ git rebase {primary_branch}
 if ($LASTEXITCODE -ne 0) { throw 'Rebase stopped; inspect conflicts before continuing.' }
 ```
 
-Resolve the files in conflict_report.json, mark resolutions with `git add`, then `git rebase --continue`. Run the full test suite, set the task status to Ready for Review, and hand off to verification with the rebase result in the reason. The tool carries `rebase_count` forward; do not edit handoff JSON.
+If the rebase stops, resolve the reported conflicts, mark resolutions with `git add`, then `git rebase --continue`. A rebaseline does not produce a conflict_report.json; use Git's conflict output instead. Run the full test suite, set the task status to Ready for Review, and hand off to verification with the rebase result in the reason. The tool carries `rebase_count` forward; do not edit handoff JSON.
 
 ## Decision Tree (For New Features/Bugs - Not Review Fixes)
 

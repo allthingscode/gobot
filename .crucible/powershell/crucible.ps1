@@ -471,6 +471,42 @@ Test-CompletionArtifactGate -Context $crucibleContext
 Normalize-CrucibleInputState -Context $crucibleContext
 $handoff = $crucibleContext.Handoff
 
+if ($Init -and $handoff.target_phase -in @('verification', 'deployment') -and
+    $handoff.PSObject.Properties['base_commit'] -and -not [string]::IsNullOrWhiteSpace([string]$handoff.base_commit)) {
+    $taskRef = 'refs/heads/task/' + $handoff.task_id
+    $ancestry = $null
+    try {
+        $branchCheck = Invoke-Git -Directory $REPO_ROOT show-ref --verify --quiet $taskRef
+        if ($branchCheck.ExitCode -eq 0) {
+            $ancestry = Invoke-Git -Directory $REPO_ROOT merge-base --is-ancestor ([string]$handoff.base_commit) $taskRef
+        }
+    } catch {
+        $ancestry = $null
+    }
+    if ($null -eq $ancestry -or $ancestry.ExitCode -notin @(0, 1)) {
+        Write-Warning "Could not check base_commit '$($handoff.base_commit)' for task '$($handoff.task_id)'."
+    } elseif ($ancestry.ExitCode -eq 1) {
+        $reason = "Task $($handoff.task_id) lacks base_commit $($handoff.base_commit); rebase onto the primary branch and rerun full checks."
+        $params = @{
+            TaskId = $handoff.task_id; Source = $handoff.target_phase; Target = 'implementation'
+            Reason = $reason; ProjectRoot = $REPO_ROOT
+            ReviewStrikeCount = $(if ($handoff.PSObject.Properties['review_strike_count']) { [int]$handoff.review_strike_count } else { 0 })
+            HandoffRetryCount = [int]$handoff.handoff_retry_count
+        }
+        if ($handoff.PSObject.Properties['artifacts'] -and $null -ne $handoff.artifacts) { $params.Artifacts = @($handoff.artifacts) }
+        if ($handoff.target_phase -eq 'deployment') {
+            $params.RebaseCount = $(if ($handoff.PSObject.Properties['rebase_count']) { [int]$handoff.rebase_count + 1 } else { 1 })
+        }
+        $global:LASTEXITCODE = 0
+        & (Join-Path $FRAMEWORK_POWERSHELL 'new-handoff.ps1') @params | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not record rebase reroute for $($handoff.task_id)." }
+        Write-Host "[REBASE] $reason Routing to implementation."
+        Resolve-CrucibleInputHandoff -Context $crucibleContext
+        Read-CrucibleHandoffContext -Context $crucibleContext
+        $handoff = $crucibleContext.Handoff
+    }
+}
+
 Invoke-CircuitBreakerGates -Context $crucibleContext
 
 # Run integrity checks before the Human Gate, which exits on every deployment path,
