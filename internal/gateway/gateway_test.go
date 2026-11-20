@@ -207,18 +207,26 @@ func validateChatHandlerError(t *testing.T, srv *Server, text, expectedError str
 
 func TestGateway_ListenAndServe(t *testing.T) {
 	t.Parallel()
-	cfg := config.GatewayConfig{Host: "localhost", Port: 0}
+	cfg := config.GatewayConfig{Host: "127.0.0.1", Port: 0}
 	h := &mockHandler{}
 	srv := NewServer(cfg, h, dash.Resources{})
+	bound := make(chan struct{})
+	srv.SetReadiness(nil, func() { close(bound) })
 
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- srv.ListenAndServe(ctx)
 	}()
 
-	// Wait a bit for it to start
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-bound:
+	case err := <-errChan:
+		t.Fatalf("ListenAndServe returned before binding: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for ListenAndServe to bind")
+	}
 	cancel()
 
 	select {
@@ -226,7 +234,7 @@ func TestGateway_ListenAndServe(t *testing.T) {
 		if err != nil {
 			t.Errorf("ListenAndServe failed: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Error("timed out waiting for ListenAndServe to stop")
 	}
 }
