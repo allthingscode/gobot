@@ -59,6 +59,67 @@ foreach ($lockName in @("Invoke-FileLock", "Invoke-WithBacklogLock")) {
     }
 }
 
+$results += Run-Test -Name "Windows abandoned denial does not consume a later budget" -Body {
+    if (-not $IsWindows) { return }
+    $tempDir = New-TestFixtureRoot -NameHint "file-lock-stale-denial"
+    $lockPath = Join-Path $tempDir "denied.lock"
+    try {
+        New-Item -ItemType Directory -Path $lockPath | Out-Null
+        $null = Open-FileLockHandle -LockPath $lockPath -AccessDeniedBudgetMs 200
+        Start-Sleep -Milliseconds 1200
+        $message = $null
+        try { $null = Open-FileLockHandle -LockPath $lockPath -AccessDeniedBudgetMs 200 } catch { $message = $_.Exception.Message }
+        Assert-Result -Name "a stale denial starts a fresh budget" -Condition ($null -eq $message) -FailureMessage ([string]$message)
+    } finally {
+        $script:FileLockDenials.Remove($lockPath)
+        Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$results += Run-Test -Name "Windows access denials have a separate consecutive budget" -Body {
+    if (-not $IsWindows) { return }
+    $tempDir = New-TestFixtureRoot -NameHint "file-lock-denial"
+    $lockPath = Join-Path $tempDir "denied.lock"
+    try {
+        New-Item -ItemType Directory -Path $lockPath | Out-Null
+        $clock = [System.Diagnostics.Stopwatch]::StartNew()
+        $message = $null
+        do {
+            try { $handle = Open-FileLockHandle -LockPath $lockPath -AccessDeniedBudgetMs 200 } catch { $message = $_.Exception.Message }
+            if ($null -eq $message) { Start-Sleep -Milliseconds 25 }
+        } while ($null -eq $message -and $clock.ElapsedMilliseconds -lt 30000)
+        Assert-Result -Name "lasting denial is retried before refusal" -Condition ($null -ne $message -and $clock.ElapsedMilliseconds -ge 200 -and $clock.ElapsedMilliseconds -lt 30000) -FailureMessage ("elapsed " + $clock.ElapsedMilliseconds + ": " + $message)
+        Assert-Result -Name "refusal names the lock" -Condition ($message.Contains($lockPath)) -FailureMessage $message
+
+        # A successful open clears an earlier denial for the same path.
+        $null = Open-FileLockHandle -LockPath $lockPath -AccessDeniedBudgetMs 200
+        Start-Sleep -Milliseconds 250
+        Remove-Item -LiteralPath $lockPath
+        $handle = Open-FileLockHandle -LockPath $lockPath -AccessDeniedBudgetMs 200
+        $handle.Dispose()
+        New-Item -ItemType Directory -Path $lockPath | Out-Null
+        Start-Sleep -Milliseconds 250
+        $message = $null
+        try { $null = Open-FileLockHandle -LockPath $lockPath -AccessDeniedBudgetMs 200 } catch { $message = $_.Exception.Message }
+        Assert-Result -Name "success resets the denial budget" -Condition ($null -eq $message) -FailureMessage ([string]$message)
+
+        # A sharing violation also clears the earlier denial.
+        Start-Sleep -Milliseconds 250
+        Remove-Item -LiteralPath $lockPath
+        $held = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        try { $null = Open-FileLockHandle -LockPath $lockPath -AccessDeniedBudgetMs 200 } finally { $held.Dispose() }
+        Remove-Item -LiteralPath $lockPath
+        New-Item -ItemType Directory -Path $lockPath | Out-Null
+        Start-Sleep -Milliseconds 250
+        $message = $null
+        try { $null = Open-FileLockHandle -LockPath $lockPath -AccessDeniedBudgetMs 200 } catch { $message = $_.Exception.Message }
+        Assert-Result -Name "sharing violation resets the denial budget" -Condition ($null -eq $message) -FailureMessage ([string]$message)
+    } finally {
+        $script:FileLockDenials.Remove($lockPath)
+        Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # Contenders retry Open-FileLockHandle back to back, without Invoke-FileLock's 100 ms backoff,
 # and each holder claims an occupancy marker with CreateNew, so two holders at once is an
 # observed collision rather than an inference. On Linux this is the .NET 6 race: a waiter that
@@ -66,9 +127,8 @@ foreach ($lockName in @("Invoke-FileLock", "Invoke-WithBacklogLock")) {
 # path. With FileMode.Create in the opener, which the runtime does not recheck, WSL on .NET 10
 # collided 6 to 15 times in each of five runs; the opener's OpenOrCreate never did.
 $results += Run-Test -Name "Contending processes never hold the lock at the same time" -Body {
-    # Windows enforces the share mode on the path, so there is no inode recheck to exercise, and
-    # back-to-back retries there meet a closing lock as access denied (item 380).
-    if (Test-PlatformIsWindows) { Skip-Test "the inode recheck is Unix-only; Windows retries without backoff hit item 380" }
+    # Item 380: on Windows, back-to-back retries meet a closing DeleteOnClose lock as access
+    # denied; the opener must wait that out as contention, so this case runs on every platform.
     $tempDir = New-TestFixtureRoot -NameHint "file-lock-contention"
     $workers = @()
     try {
@@ -80,6 +140,7 @@ $results += Run-Test -Name "Contending processes never hold the lock at the same
             'param([string]$FileLock, [string]$LockPath, [string]$Marker, [string]$Go, [string]$ReadyPath, [string]$ResultPath, [int]$DurationMs)',
             '$ErrorActionPreference = "Stop"',
             '. $FileLock',
+            'trap { [System.IO.File]::WriteAllText($ResultPath, "error: " + $_.Exception.Message); exit 1 }',
             '[System.IO.File]::WriteAllText($ReadyPath, "$PID")',
             'while (-not (Test-Path -LiteralPath $Go)) { Start-Sleep -Milliseconds 10 }',
             '$acquired = 0',
@@ -122,7 +183,7 @@ $results += Run-Test -Name "Contending processes never hold the lock at the same
         $acquired = 0
         $collisions = 0
         foreach ($worker in $workers) {
-            Assert-Result -Name "contender exits successfully" -Condition ($worker.Process.ExitCode -eq 0 -and (Test-Path -LiteralPath $worker.Result)) -FailureMessage ("exit " + $worker.Process.ExitCode)
+            Assert-Result -Name "contender exits successfully" -Condition ($worker.Process.ExitCode -eq 0 -and (Test-Path -LiteralPath $worker.Result)) -FailureMessage ("exit " + $worker.Process.ExitCode + $(if (Test-Path -LiteralPath $worker.Result) { ": " + [System.IO.File]::ReadAllText($worker.Result) } else { "" }))
             $fields = ([System.IO.File]::ReadAllText($worker.Result)).Split(" ")
             $acquired += [int]$fields[0]
             $collisions += [int]$fields[1]

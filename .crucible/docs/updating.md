@@ -104,7 +104,7 @@ pwsh -ExecutionPolicy Bypass -File ".crucible/powershell/crucible-status.ps1" -D
 
    A file you have edited is never retired, whatever the rename says. It is reported as `needs-merge` so you can move your changes to the new path yourself.
 
-5. **Manually merge anything flagged.** For each `needs-merge` item, compare your local file against upstream HEAD, then edit the adopter file by hand.
+5. **Manually merge anything flagged.** For each `needs-merge` item, compare your local file against upstream HEAD, then edit the adopter file by hand. Resolve `review-removal` items too. Rerun the update with `-Mode auto-safe -MarkMerged` followed by the merged bundle-relative paths, for example `-MarkMerged 'powershell/tool.ps1'`. For multiple paths with `pwsh -File`, pass a comma-separated string such as `-MarkMerged 'powershell/tool.ps1,docs/guide.md'`. The updater records their new baselines and advances the stamp once no work remains. Commit once after the update is complete.
 
 6. **Verify.** Run your bundle's test suite from your project root:
 

@@ -4,10 +4,12 @@ param(
     [Parameter(Mandatory=$false)][switch]$DryRun,
     [Parameter(Mandatory=$false)][ValidateSet("interactive", "auto-safe", "report-only")][string]$Mode = "interactive",
     [Parameter(Mandatory=$false)][switch]$Prune,
-    [Parameter(Mandatory=$false)][switch]$Restamp
+    [Parameter(Mandatory=$false)][switch]$Restamp,
+    [Parameter(Mandatory=$false)][string[]]$MarkMerged
 )
 
 $ErrorActionPreference = "Stop"
+$MarkMerged = @($MarkMerged | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 # I11: translate helper failures at the command boundary, after helper cleanup.
 trap {
     [Console]::Error.WriteLine($_.Exception.Message)
@@ -129,6 +131,17 @@ function Write-Report {
     }
 }
 
+function Write-PendingUpdateAdvice {
+    param($Results, [object[]]$Removals, [string]$BaselineCommit, [string]$FrameworkHead, [bool]$AgentsChanged = $false)
+    foreach ($item in @($Results['needs-merge'].ToArray()) + $Removals) { Write-Host ('  ' + $item.AdopterPath) }
+    Write-Host 'NEXT STEP (required): merge or resolve them, then rerun with -MarkMerged <paths>, then commit once.'
+    if ($AgentsChanged) {
+        Write-Host 'When the update is complete, also stage the regenerated agents:'
+        Write-Host '  git add .claude/agents'
+    }
+    Write-Host ('If you must stop midway: git commit -m "chore(crucible): partial bundle update toward ' + $FrameworkHead.Substring(0, 7) + ' (stamp stays ' + $BaselineCommit.Substring(0, 7) + ')"')
+}
+
 function Read-Confirmation {
     param([Parameter(Mandatory=$true)][string]$Prompt)
     # Empty or closed stdin makes Read-Host return an empty array; normalize before
@@ -229,6 +242,9 @@ function Copy-FrameworkFileToAdopter {
 }
 
 function Invoke-UpdateBundle {
+    if ($MarkMerged.Count -gt 0 -and ($DryRun -or $Mode -eq 'report-only')) {
+        throw 'Cannot use -MarkMerged with a dry run or report-only mode.'
+    }
     $frameworkRoot = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $FrameworkSource))
     $adopterRootResolved = (Resolve-FilesystemPath -Path (Resolve-Path -LiteralPath $AdopterRoot))
     $adopterCrucibleRoot = Join-Path $adopterRootResolved ".crucible"
@@ -336,7 +352,7 @@ function Invoke-UpdateBundle {
                     $hManifestBase = $provManifest.files.$adopterPath.base_hash
                 }
             }
-            if ($null -eq $hManifest) {
+            if (-not $inProvenance) {
                 $hManifest = $baselineHashes[$sourcePath].Hash
             }
             if ($null -eq $hManifestBase) {
@@ -401,6 +417,44 @@ function Invoke-UpdateBundle {
             Add-ClassifiedItem -Results $results -Category $orphanCategory -SourcePath "" -AdopterPath $rel
             [void]$classifiedAdopterPaths.Add($rel)
         }
+    }
+
+    # Validate the entire request before writing the manifest or even the run log.
+    $markedItems = @()
+    foreach ($requested in $MarkMerged) {
+        $normalized = ConvertTo-RelativeSlashPath -Path $requested
+        $matchingItems = @($results['needs-merge'] | Where-Object {
+            (ConvertTo-RelativeSlashPath -Path $_.AdopterPath) -eq $normalized
+        })
+        if ($matchingItems.Count -ne 1 -or -not $headHashes[$matchingItems[0].SourcePath].Hash) {
+            throw "Cannot mark '$requested': it is not a needs-merge file with a framework HEAD version."
+        }
+        if ($markedItems.AdopterPath -contains $matchingItems[0].AdopterPath) {
+            throw "Cannot mark '$requested' more than once."
+        }
+        $markedItems += $matchingItems[0]
+    }
+    if ($markedItems.Count -gt 0) {
+        foreach ($item in $markedItems) {
+            $path = $item.AdopterPath
+            $entry = [pscustomobject]@{ hash = $headHashes[$item.SourcePath].Hash; base_hash = $headHashes[$item.SourcePath].BaseHash }
+            $provManifest.files | Add-Member -NotePropertyName $path -NotePropertyValue $entry -Force
+            $adopterFile = Resolve-PathFromRoot -Root $adopterCrucibleRoot -Path $path
+            $verdict = Get-BundleFileClassification `
+                -HeadHash $entry.hash `
+                -AdopterHash (Get-FileNormalizedHash -Path $adopterFile) `
+                -AdopterBaseHash (Get-FileNormalizedHash -Path $adopterFile -WithoutCustomRegions) `
+                -BaselineHash $entry.hash -BaselineBaseHash $entry.base_hash `
+                -IsExpectedPath ($expected.Contains((ConvertTo-RelativeSlashPath -Path $path))) `
+                -InProvenance $true `
+                -SourceIsScaffoldSnapshot (Test-ScaffoldSnapshotPath -RelativePath $item.SourcePath -Manifest $manifest) `
+                -AdopterIsScaffoldSnapshot (Test-ScaffoldSnapshotPath -RelativePath $path -Manifest $manifest) `
+                -IsSupersededRename (Test-SupersededRename -RelativePath $path -RenameMap $renameMap -Expected $expected)
+            [void]$results['needs-merge'].Remove($item)
+            if ($verdict.Category -ne 'skip') { $results[$verdict.Category].Add($item) }
+        }
+        $null = Write-ProvenanceManifest -BundleRoot $adopterCrucibleRoot -ProvenanceManifest $provManifest
+        foreach ($item in $markedItems) { Write-Host ("Marked merged: " + $item.AdopterPath) }
     }
 
     # Item 188: update reports are adopter runtime state too.
@@ -564,6 +618,8 @@ function Invoke-UpdateBundle {
     $isAllNoOp = ($pendingWork -eq 0)
     if (-not $effectiveDryRun -and @($results["needs-merge"].ToArray() | Where-Object { (ConvertTo-RelativeSlashPath -Path $_.AdopterPath) -eq 'powershell/sync-claude-agents.ps1' }).Count -gt 0) {
         Write-Host "Cannot regenerate agents: powershell/sync-claude-agents.ps1 has a pending merge." -ForegroundColor Yellow
+        $remaining = @($results['review-removal'].ToArray() | Where-Object { -not $shouldPrune -or (Test-Path -LiteralPath (Resolve-PathFromRoot -Root $adopterCrucibleRoot -Path $_.AdopterPath)) })
+        Write-PendingUpdateAdvice -Results $results -Removals $remaining -BaselineCommit $baselineCommit -FrameworkHead $frameworkHead
         return 2
     }
     if (-not $effectiveDryRun -and ($shouldApply -or $shouldPrune -or $isAllNoOp)) {
@@ -633,7 +689,12 @@ function Invoke-UpdateBundle {
         }
     }
 
-    if ($appliedCount -gt 0 -or $prunedCount -gt 0 -or $retiredCount -gt 0 -or $agentsChanged -or $shouldRestamp) {
+    $outstandingRemovals = @($results['review-removal'].ToArray() | Where-Object { -not $shouldPrune -or (Test-Path -LiteralPath (Resolve-PathFromRoot -Root $adopterCrucibleRoot -Path $_.AdopterPath)) })
+    if (-not $effectiveDryRun -and -not $shouldRestamp -and ($results['needs-merge'].Count -gt 0 -or $outstandingRemovals.Count -gt 0)) {
+        Write-PendingUpdateAdvice -Results $results -Removals $outstandingRemovals -BaselineCommit $baselineCommit -FrameworkHead $frameworkHead -AgentsChanged $agentsChanged
+    }
+
+    if ($shouldRestamp -and ($appliedCount -gt 0 -or $prunedCount -gt 0 -or $retiredCount -gt 0 -or $agentsChanged -or $shouldRestamp)) {
         $isGitRepo = $false
         $checkDir = $adopterRootResolved
         while (-not [string]::IsNullOrEmpty($checkDir)) {

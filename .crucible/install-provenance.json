@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "965e663c14db804ac5a05dcd2db83ab3704a9233",
+  "source_commit": "e19de02c1edc6a0032e1615e780f551e0ae3c9bf",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -87,8 +87,8 @@
       "base_hash": "1209d426a3b540504e78622ffcfc84fd4c5aadc7f501f18d732c3975754f03c5"
     },
     "docs/updating.md": {
-      "hash": "143a2990c5074bc1ebb7f2004e1c4e198ccdf4ac25178594a5fbb7b7d0a42e81",
-      "base_hash": "523efc96bec063384c48c0ec901b6e134dbe419f0763f2ddd7db55ecfc6d5921"
+      "hash": "6f2dca4b8e830fc02a217d27440bc4982e56bac115ec2cc64930a0e447e39e7e",
+      "base_hash": "4a6562810aabefd1a8df0cd3f7707397ab6f5e495bd57c5b4388ab35590e764d"
     },
     "docs/when-to-use.md": {
       "hash": "93658420336c8e0c5205d5325b81b261f98550ded74598886e2f0e4c33c097a2",
@@ -251,8 +251,8 @@
       "base_hash": "e482fe6c8a9d62593776e492664a8ad3f05ac4452492aeb5950f8a21987212af"
     },
     "powershell/lib/file-lock.ps1": {
-      "hash": "ddd773db10069f8975a3a3f1121526c5db8e4beebb6e249016109ba3a4c4e30e",
-      "base_hash": "ddd773db10069f8975a3a3f1121526c5db8e4beebb6e249016109ba3a4c4e30e"
+      "hash": "a78f047a64e025b7e7f6994c3c619bcf83d047d9712ff32a13d76366ca0cd642",
+      "base_hash": "a78f047a64e025b7e7f6994c3c619bcf83d047d9712ff32a13d76366ca0cd642"
     },
     "powershell/lib/forward-entrypoint.ps1": {
       "hash": "1c80c18c5a79fecc7ceff94c02eefe33293c2d065f41b4767e3e9ebf718c1af8",
@@ -591,8 +591,8 @@
       "base_hash": "f36535ce33be05fc618cb12a22f642ea2fa1532dc0e1fa8eedb6a30004cd5f93"
     },
     "powershell/tests/file-lock.tests.ps1": {
-      "hash": "b9bcf87a0fa2e084b36673ee288674c388eef3a663bcaa2bcfbb6e5c50e40eaa",
-      "base_hash": "b9bcf87a0fa2e084b36673ee288674c388eef3a663bcaa2bcfbb6e5c50e40eaa"
+      "hash": "52ff1f2c3b12ad5fe07d45bae1971ccaeb781711f7ddf223a22434ad2dde127f",
+      "base_hash": "52ff1f2c3b12ad5fe07d45bae1971ccaeb781711f7ddf223a22434ad2dde127f"
     },
     "powershell/tests/filesystem-qualification.tests.ps1": {
       "hash": "77991a5cee95b9aa3a72434d5b38f468cb4aee568594cfbcf76c2b427a060909",
@@ -899,8 +899,8 @@
       "base_hash": "3e38263fd08dd7eae7e2084aa3e4c88ab920effbf6cb30707923c89dc8e9b7ba"
     },
     "powershell/update-bundle.ps1": {
-      "hash": "00a6eeadd6fd1a0d11013165c6302938831dffb56346a68e13c9016d127e47e6",
-      "base_hash": "00a6eeadd6fd1a0d11013165c6302938831dffb56346a68e13c9016d127e47e6"
+      "hash": "2cacfc93bb0e00dec7fc5d68134a2a8b9c18137d6c1c40f53ccda5eebdc143f2",
+      "base_hash": "2cacfc93bb0e00dec7fc5d68134a2a8b9c18137d6c1c40f53ccda5eebdc143f2"
     },
     "powershell/update-session-state.ps1": {
       "hash": "c904a441993d2d9378b2405e1215057aae488b3284c2cec4b7444bb562092773",

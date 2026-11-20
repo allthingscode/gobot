@@ -2,6 +2,8 @@ if (-not (Test-Path -LiteralPath Function:Resolve-FilesystemPath)) { . (Join-Pat
 
 # The exclusive-handle file lock (I5), shared by crucible-lib.ps1 and scripts that do not load it,
 # such as run-isolated-checks.ps1. Item 258.
+if (-not (Test-Path variable:script:FileLockDenials)) { $script:FileLockDenials = @{} }
+$script:FileLockDenialStaleMs = 1000
 
 # On Unix, FileShare.None is a flock on the opened inode and DeleteOnClose unlinks the path
 # when the owner closes, so a waiter that opened the old inode can lock it after the unlink
@@ -25,7 +27,8 @@ function Assert-FileLockRuntime {
 function Open-FileLockHandle {
     param(
         [Parameter(Mandatory = $true)][string]$LockPath,
-        [string]$Description = ""
+        [string]$Description = "",
+        [int]$AccessDeniedBudgetMs = 2000
     )
 
     Assert-FileLockRuntime
@@ -38,7 +41,7 @@ function Open-FileLockHandle {
         # an orphaned pathname, such as one a dead holder left on Unix, immediately acquirable:
         # a file without an open handle holds no lock. The runtime's inode recheck applies
         # only to this exact mode, share and option.
-        return New-Object System.IO.FileStream(
+        $handle = New-Object System.IO.FileStream(
             (Resolve-FilesystemPath -Path $LockPath),
             [System.IO.FileMode]::OpenOrCreate,
             [System.IO.FileAccess]::ReadWrite,
@@ -46,12 +49,30 @@ function Open-FileLockHandle {
             1,
             [System.IO.FileOptions]::DeleteOnClose
         )
+        $script:FileLockDenials.Remove($LockPath)
+        return $handle
+    } catch [System.UnauthorizedAccessException] {
+        $denial = $_.Exception
+        while ($null -ne $denial.InnerException) { $denial = $denial.InnerException }
+        if (-not $IsWindows -or ($denial.HResult -band 0xFFFF) -ne 5) { throw }
+        # A closing DeleteOnClose lock can disappear before the denied open returns.
+        if (-not $script:FileLockDenials.ContainsKey($LockPath) -or
+            $script:FileLockDenials[$LockPath].LastDenial.ElapsedMilliseconds -gt $script:FileLockDenialStaleMs) {
+            $script:FileLockDenials[$LockPath] = @{ Budget = [System.Diagnostics.Stopwatch]::StartNew(); LastDenial = [System.Diagnostics.Stopwatch]::StartNew() }
+        }
+        $script:FileLockDenials[$LockPath].LastDenial.Restart()
+        if ($script:FileLockDenials[$LockPath].Budget.ElapsedMilliseconds -ge $AccessDeniedBudgetMs) {
+            $script:FileLockDenials.Remove($LockPath)
+            throw [System.UnauthorizedAccessException]::new("Cannot acquire " + $Description + ": " + $denial.Message, $denial)
+        }
+        return $null
     } catch [System.IO.IOException] {
         # .NET wraps native sharing/lock violations as IOExceptions. Other IO
         # failures (missing directory, full disk, bad path) cannot be waited out.
         $ioError = $_.Exception
         while ($null -ne $ioError.InnerException) { $ioError = $ioError.InnerException }
         $nativeCode = $ioError.HResult -band 0xFFFF
+        $script:FileLockDenials.Remove($LockPath)
         # FileStream's Unix flock failure carries EWOULDBLOCK directly:
         # EAGAIN (11) on Linux, EWOULDBLOCK (35) on macOS.
         $isContention = ($IsWindows -and $nativeCode -in @(32, 33)) -or
