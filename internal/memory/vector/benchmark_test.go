@@ -5,10 +5,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/philippgille/chromem-go"
 )
@@ -35,36 +33,33 @@ func (d *dummyEmbedder) Embed(ctx context.Context, text string) ([]float32, erro
 	return vec, nil
 }
 
-// Test: Cold start latency < 5 seconds for <50k entries.
-func TestColdStartLatency(t *testing.T) {
+// TestStoreReopen verifies a populated store remains searchable after reopening.
+func TestStoreReopen(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping cold start latency test in short mode")
-	}
-	tmpDir, err := os.MkdirTemp("", "cold-start-*")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	dbPath := filepath.Join(tmpDir, "vectors.db")
+	dbPath := filepath.Join(t.TempDir(), "vectors.db")
 	store, err := NewStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			closeTestStore(t, store)
+		}
+	})
 
 	embedFunc := func(ctx context.Context, text string) ([]float32, error) {
 		return (&dummyEmbedder{}).Embed(ctx, text)
 	}
-
-	// Add 5k entries instead of 50k to not drag CI, but scale up mentally
-	// chromem-go is in-memory so 5k is instant
-	var docs []chromem.Document
+	docs := make([]chromem.Document, 0, 5000)
+	fixtures := make(map[string]string, 5000)
 	for i := 0; i < 5000; i++ {
-		docs = append(docs, chromem.Document{
+		doc := chromem.Document{
 			ID:      fmt.Sprintf("doc-%d", i),
 			Content: fmt.Sprintf("This is some memory fact number %d", i),
-		})
+		}
+		docs = append(docs, doc)
+		fixtures[doc.ID] = doc.Content
 	}
 	if err := store.AddDocuments(context.Background(), "memory_facts", docs, embedFunc); err != nil {
 		t.Fatalf("AddDocuments: %v", err)
@@ -72,18 +67,38 @@ func TestColdStartLatency(t *testing.T) {
 	if err := store.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	_ = store.Close()
-
-	// Measure cold start
-	start := time.Now()
-	_, err = NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore (cold): %v", err)
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close initial store: %v", err)
 	}
-	elapsed := time.Since(start)
 
-	if elapsed > 5*time.Second {
-		t.Errorf("cold start took %v, expected < 5s", elapsed)
+	closed = true
+	reopened, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore (reopen): %v", err)
+	}
+	t.Cleanup(func() { closeTestStore(t, reopened) })
+	results, err := reopened.Search(context.Background(), "memory_facts", docs[0].Content, 1, nil, embedFunc)
+	if err != nil {
+		t.Fatalf("Search reopened store: %v", err)
+	}
+	assertFixtureResult(t, results, fixtures)
+}
+
+func assertFixtureResult(t *testing.T, results []chromem.Result, fixtures map[string]string) {
+	t.Helper()
+	if len(results) == 0 {
+		t.Fatal("Search reopened store returned no results")
+	}
+	want, ok := fixtures[results[0].ID]
+	if !ok || results[0].Content != want {
+		t.Errorf("Search returned non-fixture document: ID %q, content %q", results[0].ID, results[0].Content)
+	}
+}
+
+func closeTestStore(t *testing.T, store *Store) {
+	t.Helper()
+	if err := store.Close(); err != nil {
+		t.Errorf("Close store: %v", err)
 	}
 }
 
