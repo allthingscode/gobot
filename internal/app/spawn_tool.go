@@ -110,6 +110,7 @@ func (s *SpawnTool) Declaration() provider.ToolDeclaration {
 }
 
 func (t *SpawnTool) Execute(ctx context.Context, sessionKey, userID string, args map[string]any) (string, error) {
+	ctx = withoutReminderCapability(ctx)
 	agentType, _ := args["agent_type"].(string)
 	objective, _ := args["objective"].(string)
 
