@@ -194,6 +194,30 @@ $tempRoot = New-TestFixtureRoot -NameHint "pipeline-e2e"
 
 $savedCycleEnv = $env:CRUCIBLE_CYCLE_ID
 try {
+    $results += Run-Test -Name 'Item 414 branchless handoff to verification skips base_commit check' -Body {
+        $task = 'R-414'
+        $cycle = 'cycle-414'
+        $env:CRUCIBLE_CYCLE_ID = $cycle
+        $projectRoot = New-AdopterProject -Root (Join-Path $tempRoot 'item414') -TaskId $task -Title 'Stub Close Out' -Status 'Ready' -StatusTarget 'Groomer'
+        $baseCommit = (Invoke-ExternalCommand -AsLines { git -C $projectRoot rev-parse HEAD }).Trim()
+        $branch = Invoke-ExternalCommand { git -C $projectRoot show-ref --verify --quiet "refs/heads/task/$task" }
+        Assert-Result 'item 414 fixture has no task branch' ($branch.ExitCode -eq 1) ($branch.Output -join "`n")
+        $stubPath = '.crucible/backlog/features/active/F-414_Filed_Stub.md'
+        [IO.File]::WriteAllText((Join-Path $projectRoot $stubPath), "---`nitem_id: F-414`ntitle: Filed Stub`ntype: feature`nstatus: Stub`n---`n`n## Summary`nFiled follow-up.`n", [Text.UTF8Encoding]::new($false))
+        $backlogPath = Join-Path $projectRoot '.crucible/backlog/BACKLOG.md'
+        $backlog = [IO.File]::ReadAllText($backlogPath).TrimEnd()
+        $backlog = $backlog -replace '(?m)^(\| \[R-414\][^\r\n]*)', ('$1' + "`n| [F-414](features/active/F-414_Filed_Stub.md) | P1 | Stub | Filed Stub | Groomer |")
+        [IO.File]::WriteAllText($backlogPath, ($backlog + "`n"), [Text.UTF8Encoding]::new($false))
+        Write-PipelineHandoff -ProjectRoot $projectRoot -TaskId $task -Source grooming -Target verification -Cycle $cycle -Count 1 -Extra @{
+            artifacts = @($stubPath); stub_specs_created = @($stubPath); base_commit = $baseCommit
+        } | Out-Null
+        $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $CRUCIBLE_SCRIPT -Init -TaskId $task -ProjectRoot $projectRoot -Quiet }
+        $output = $run.Output -join "`n"
+        Assert-Result 'item 414 branchless verification Init succeeds' ($run.ExitCode -eq 0) $output
+        Assert-Result 'item 414 verification prompt is created' (Test-Path -LiteralPath (Join-Path $projectRoot ".crucible/session/$task/verification/prompt.md")) $output
+        Assert-Result 'item 414 absent task branch emits no base_commit warning' ($output -notmatch 'Could not check base_commit') $output
+    }
+
     foreach ($target in @('verification', 'deployment')) {
         $results += Run-Test -Name "Item 407 rebaselined $target returns to implementation" -Body {
             $task = 'F-407'

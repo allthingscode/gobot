@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "87715e9901151ed76512ae5726772cec6e400bf4",
+  "source_commit": "46299ae4d33e2c0f41b18e1f8fbc8dfeb5c69a12",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
@@ -147,8 +147,8 @@
       "base_hash": "79f3f4dedaae6ae1bf49f4d3a5073e824dfd8d7c84419bc6cf2d1a429e0ba514"
     },
     "powershell/crucible-doctor.ps1": {
-      "hash": "99db87db5fe100e92fc67b446a4097e747cdf9d2a5b2311898fba8b9d0eb6a4f",
-      "base_hash": "99db87db5fe100e92fc67b446a4097e747cdf9d2a5b2311898fba8b9d0eb6a4f"
+      "hash": "72657bf4e2cd5dadc8a8152d39299b9b0f9af470876112c07157bd3f17f1c7ba",
+      "base_hash": "72657bf4e2cd5dadc8a8152d39299b9b0f9af470876112c07157bd3f17f1c7ba"
     },
     "powershell/crucible-health.ps1": {
       "hash": "61ebf386849432a69f836d3175ef8f2eeb1d2893755c4140ce43ac4670be7b3f",
@@ -163,8 +163,8 @@
       "base_hash": "bb7169cc1f51e0ab7d7428813e09c71de6c25324cc5b0b3575f091048aa16122"
     },
     "powershell/crucible.ps1": {
-      "hash": "a7497eda1771e870604d6f7e97ed4d9a01759847ffc890b74bc0bb5aca5fa0b9",
-      "base_hash": "a7497eda1771e870604d6f7e97ed4d9a01759847ffc890b74bc0bb5aca5fa0b9"
+      "hash": "7999af1ef897e37b9ba7332e086b02b8d355e8fdb9414a35461283ad46b41ab2",
+      "base_hash": "7999af1ef897e37b9ba7332e086b02b8d355e8fdb9414a35461283ad46b41ab2"
     },
     "powershell/factory.ps1": {
       "hash": "40ce5e3de387ae81a090d5216da24090149c40e340cbe50dedbf9f60150c8f21",
@@ -275,8 +275,8 @@
       "base_hash": "626cde3dcce599ca841514b4a0518241f0e4c33a3361ec58545cd056918dfdc8"
     },
     "powershell/lib/install-manifest.ps1": {
-      "hash": "9c58cb96038239796f5fa788de4762bb1f38baa152c6de654845e450a2fa31f6",
-      "base_hash": "9c58cb96038239796f5fa788de4762bb1f38baa152c6de654845e450a2fa31f6"
+      "hash": "80f550627630eec6478feb7e4d0671d8275465a10d925b2f59a7e4d87cbf230a",
+      "base_hash": "80f550627630eec6478feb7e4d0671d8275465a10d925b2f59a7e4d87cbf230a"
     },
     "powershell/lib/instruction-blocks.ps1": {
       "hash": "96aa3030e51fab4a889c23e487cecf07c7c4ec672629e875dbf20a9d74819d0c",
@@ -407,8 +407,8 @@
       "base_hash": "536a27bc71c6d7947aa150506d072e515078fb758f695d49b2fc0e4cf7293c4c"
     },
     "powershell/tests/adopter-pipeline-e2e.tests.ps1": {
-      "hash": "f953762ada267062bc7f3cc821707f06a6dec2e3ef6c70099e773919d81cebb1",
-      "base_hash": "f953762ada267062bc7f3cc821707f06a6dec2e3ef6c70099e773919d81cebb1"
+      "hash": "6740e7d780a5975416d999124a0179080ea250e60b2af85174777e48c7dd0449",
+      "base_hash": "6740e7d780a5975416d999124a0179080ea250e60b2af85174777e48c7dd0449"
     },
     "powershell/tests/adopter-smoke.tests.ps1": {
       "hash": "675f136fd4ee78731d7656fdfbdad0e22ea053641599a03f5edd802c576c9dd2",
@@ -499,8 +499,8 @@
       "base_hash": "4d8eeede5515f4484bfddb890c26ce5634c4db38b9c2b3276e38d04c34267e3b"
     },
     "powershell/tests/crucible-doctor.tests.ps1": {
-      "hash": "904cfaf595980a3b26029f35055b6d78106855a8fe2ae90c82f7c5c7bfd2a88b",
-      "base_hash": "904cfaf595980a3b26029f35055b6d78106855a8fe2ae90c82f7c5c7bfd2a88b"
+      "hash": "246feed09bc61ae06285bec6c8519d8800bc1b911c9ab5cc9fff68fdcb8159cf",
+      "base_hash": "246feed09bc61ae06285bec6c8519d8800bc1b911c9ab5cc9fff68fdcb8159cf"
     },
     "powershell/tests/crucible-gates-affinity.tests.ps1": {
       "hash": "48e283d0420a2198afef6955c55679c3e4009787fa34b1ff8e75ad8459b0a0d3",
@@ -663,8 +663,8 @@
       "base_hash": "997249444a9926230a59ecd2a84281110da226b67018b76de3ae7260a9909cc0"
     },
     "powershell/tests/install-manifest.tests.ps1": {
-      "hash": "9e2e7bcbafae282c1ef8b474972c1bc509d02c02ecad3e5c5159fa2d1582910f",
-      "base_hash": "9e2e7bcbafae282c1ef8b474972c1bc509d02c02ecad3e5c5159fa2d1582910f"
+      "hash": "6d0f296bf2ec801951198c5d41e5e4fe528fadc87bd4e41f7582f0e626f08822",
+      "base_hash": "6d0f296bf2ec801951198c5d41e5e4fe528fadc87bd4e41f7582f0e626f08822"
     },
     "powershell/tests/item284-review.tests.ps1": {
       "hash": "c4f92b1965607aa4b4a1e3cd62a0e18fb0c2574f8bda664a68b230821a316e10",

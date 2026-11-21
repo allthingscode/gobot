@@ -470,7 +470,7 @@ try {
     # .crucible bundle dir (no .git, no `main`), so leaning on it makes these
     # tests pass only in the framework repo. A throwaway repo makes them portable.
     function Initialize-FrameworkFixture {
-        param([string]$Path, [int]$Commits = 3)
+        param([string]$Path, [int]$Commits = 3, [switch]$DevOnly)
         New-Item -ItemType Directory -Path $Path -Force | Out-Null
         Push-Location $Path
         try {
@@ -478,9 +478,15 @@ try {
             git config user.name "Test"
             git config user.email "test@example.com"
             git config commit.gpgSign false
+            Copy-Item -LiteralPath (Join-Path $REPO_ROOT "install-manifest.json") -Destination $Path
             $shas = @()
             for ($i = 1; $i -le $Commits; $i++) {
-                git commit --allow-empty -m "commit $i" --quiet
+                $changedFile = if ($DevOnly -and $i -gt 1) { "powershell/gates/check-ascii.ps1" } else { "VERSION" }
+                $changedPath = Join-Path $Path $changedFile
+                New-Item -ItemType Directory -Path (Split-Path -Parent $changedPath) -Force | Out-Null
+                [IO.File]::WriteAllText($changedPath, "$i`n")
+                git add -- install-manifest.json $changedFile
+                git commit -m "commit $i" --quiet
                 $shas += (Invoke-ExternalCommand -AsLines { git rev-parse HEAD }).Trim()
             }
             return [pscustomobject]@{ Head = $shas[-1]; OlderCommit = $shas[0] }
@@ -588,6 +594,37 @@ try {
 
         Assert-Result -Name "staleness check warn status" -Condition ($output -match "\[bundle\.staleness\].*lags framework HEAD") -FailureMessage "doctor did not warn about staleness. Output:`n$output"
         Assert-Result -Name "entrypoint staleness follows the configured framework branch" -Condition ($banner.Output -match 'Installed Crucible bundle lags framework HEAD') -FailureMessage ($banner.Output -join "`n")
+        foreach ($warningOutput in @($output, ($banner.Output -join "`n"))) {
+            Assert-Result -Name "Item 415 stale warning includes mid-task rebaseline" -Condition ($warningOutput -match 'step 8 of docs/updating\.md' -and $warningOutput -match 'before updating') -FailureMessage $warningOutput
+        }
+    }
+
+    foreach ($consumer in @("entrypoint", "doctor")) {
+        $results += Run-Test -Name "Item 415 $consumer ignores dev-only framework commits" -Body {
+            $projectRoot = Join-Path $tempRoot "dev-only-$consumer"
+            Write-DoctorFixture -ProjectRoot $projectRoot
+            $fwPath = Join-Path $tempRoot "fw-dev-only-$consumer"
+            $fw = Initialize-FrameworkFixture -Path $fwPath -DevOnly
+            $configPath = Join-Path $projectRoot ".crucible/config.yaml"
+            $config = Get-Content -LiteralPath $configPath -Raw
+            $config = $config.Replace('crucible_version: "test"', 'crucible_version: "1.0.0"').Replace('crucible_install_commit: "test"', "crucible_install_commit: `"$($fw.OlderCommit)`"")
+            [IO.File]::WriteAllText($configPath, $config)
+            $oldDevRoot = $env:CRUCIBLE_DEV_ROOT
+            $env:CRUCIBLE_DEV_ROOT = $fwPath
+            try {
+                $scriptPath = if ($consumer -eq "doctor") { $DOCTOR_SCRIPT } else { Join-Path $REPO_ROOT "powershell/crucible.ps1" }
+                $res = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $scriptPath -ProjectRoot $projectRoot }
+            } finally {
+                $env:CRUCIBLE_DEV_ROOT = $oldDevRoot
+            }
+            $output = $res.Output -join "`n"
+            if ($consumer -eq "doctor") {
+                $passSection = ($output -split 'WARN \(')[0]
+                Assert-Result "Item 415 doctor passes TODO-only staleness" ($passSection -match '\[bundle\.staleness\]') $output
+            } else {
+                Assert-Result "Item 415 entrypoint suppresses TODO-only warning" ($output -match 'Crucible v1\.0\.0' -and $output -notmatch 'Installed Crucible bundle lags framework HEAD') $output
+            }
+        }
     }
 
     $results += Run-Test -Name "Doctor checks for bundle staleness and stays silent when up-to-date" -Body {

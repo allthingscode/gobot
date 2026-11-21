@@ -468,19 +468,34 @@ if ($frameworkMode) {
                 $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitHeadResult) { ($gitHeadResult | Out-String).Trim() } else { "" }
             }
             if ($frameworkHead -match '^[0-9a-f]{40}$') {
+                $bundleBehind = $false
+                if ($bannerCommit -ne $frameworkHead) {
+                    $null = git -C (Resolve-FilesystemPath -Path $frameworkSource) merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
+                    $bundleBehind = ($LASTEXITCODE -eq 0)
+                }
+                $bundleStale = $bundleBehind
+                if ($bundleBehind) {
+                    try {
+                        . (Join-Path $PSScriptRoot "lib/install-manifest.ps1")
+                        $bundleStale = Test-FrameworkBundleStale -FrameworkRoot $frameworkSource -InstalledCommit $bannerCommit -FrameworkHead $frameworkHead
+                    } catch {
+                        # Content comparison is optional; keep the ancestry warning if unavailable.
+                        $bundleStale = $true
+                    }
+                }
                 if ($bannerCommit -eq $frameworkHead) {
                     Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
                         -Details ("Bundle is up-to-date with framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")
+                } elseif (-not $bundleBehind) {
+                    Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
+                        -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") is not stale relative to framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")
+                } elseif (-not $bundleStale) {
+                    Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
+                        -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") ships the same content as framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")
                 } else {
-                    $null = git -C (Resolve-FilesystemPath -Path $frameworkSource) merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
-                    if ($LASTEXITCODE -eq 0) {
-                        Add-DoctorResult -Check "bundle.staleness" -Status "warn" -Severity "advisory" `
-                            -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") lags framework HEAD (" + $frameworkHead.Substring(0, 7) + ").") `
-                            -Remediation ("Run " + (New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Transport PowerShell -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource) + " to bring it current.")
-                    } else {
-                        Add-DoctorResult -Check "bundle.staleness" -Status "pass" -Severity "advisory" `
-                            -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") is not stale relative to framework HEAD (" + $frameworkHead.Substring(0, 7) + ").")
-                    }
+                    Add-DoctorResult -Check "bundle.staleness" -Status "warn" -Severity "advisory" `
+                        -Details ("Installed bundle (commit " + $bannerCommit.Substring(0, 7) + ") lags framework HEAD (" + $frameworkHead.Substring(0, 7) + ").") `
+                        -Remediation ("Run " + (New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Transport PowerShell -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource) + " to bring it current. For a mid-task update, see step 8 of docs/updating.md before updating.")
                 }
             } else {
                 Add-DoctorResult -Check "bundle.staleness" -Status "warn" -Severity "advisory" `

@@ -15,6 +15,63 @@ $tempRoot = New-TestFixtureRoot -NameHint "manifest-test"
 $expectedScaffoldCount = @(Invoke-ExternalCommand -AsLines { git -C $REPO_ROOT ls-files templates/project/.crucible }).Count
 
 try {
+    $results += Run-Test -Name "Item 415 bundle comparison follows committed shipped content" -Body {
+        $framework = Join-Path $tempRoot "staleness-framework"
+        New-Item -ItemType Directory -Path $framework -Force | Out-Null
+        $null = Invoke-ExternalCommand { git -C $framework init --quiet }
+        $null = Invoke-ExternalCommand { git -C $framework config user.name Test }
+        $null = Invoke-ExternalCommand { git -C $framework config user.email test@example.com }
+        Copy-Item -LiteralPath (Join-Path $REPO_ROOT "install-manifest.json") -Destination $framework
+
+        # Build only this disposable repo's index and commits with plumbing; never
+        # stage or commit anything in the framework worktree under test.
+        function Set-StalenessFixtureFile {
+            param([string]$Path, [string]$Content)
+            $file = Join-Path $framework $Path
+            $null = New-Item -ItemType Directory -Path (Split-Path -Parent $file) -Force
+            [IO.File]::WriteAllText($file, $Content)
+            $blob = (Invoke-ExternalCommand -AsLines { git -C $framework hash-object -w -- $file }).Trim()
+            $null = Invoke-ExternalCommand { git -C $framework update-index --add --cacheinfo "100644,$blob,$Path" }
+        }
+        function New-StalenessFixtureCommit {
+            param([string]$Parent = "")
+            $tree = (Invoke-ExternalCommand -AsLines { git -C $framework write-tree }).Trim()
+            $parents = if ($Parent) { @('-p', $Parent) } else { @() }
+            return (Invoke-ExternalCommand -AsLines { git -C $framework -c commit.gpgSign=false commit-tree $tree @parents -m fixture }).Trim()
+        }
+
+        Set-StalenessFixtureFile "install-manifest.json" (Get-Content -LiteralPath (Join-Path $framework "install-manifest.json") -Raw)
+        Set-StalenessFixtureFile "VERSION" "1.0.0`n"
+        Set-StalenessFixtureFile "docs/shipped.md" "original`n"
+        $installed = New-StalenessFixtureCommit
+        Assert-Result "Item 415 identical commits are current" (-not (Test-FrameworkBundleStale $framework $installed $installed)) "identical content warned"
+
+        Set-StalenessFixtureFile "powershell/gates/check-ascii.ps1" "maintainer change`n"
+        Set-StalenessFixtureFile "powershell/sync-example-mirror.ps1" "dev-only`n"
+        Set-StalenessFixtureFile "docs/investigations/note.md" "dev-only`n"
+        $unshipped = New-StalenessFixtureCommit $installed
+        Assert-Result "Item 415 unshipped commits are current" (-not (Test-FrameworkBundleStale $framework $installed $unshipped)) "unshipped content warned"
+
+        Set-StalenessFixtureFile "docs/shipped.md" "changed`n"
+        $modified = New-StalenessFixtureCommit $unshipped
+        Assert-Result "Item 415 shipped modification warns" (Test-FrameworkBundleStale $framework $installed $modified) "shipped modification was missed"
+        Set-StalenessFixtureFile "docs/shipped.md" "original`n"
+        $reverted = New-StalenessFixtureCommit $modified
+        Assert-Result "Item 415 reverted content is current" (-not (Test-FrameworkBundleStale $framework $installed $reverted)) "net identical content warned"
+
+        Set-StalenessFixtureFile "docs/added.md" "new`n"
+        $added = New-StalenessFixtureCommit $reverted
+        Assert-Result "Item 415 shipped addition warns" (Test-FrameworkBundleStale $framework $installed $added) "shipped addition was missed"
+        $null = Invoke-ExternalCommand { git -C $framework update-index --force-remove -- docs/shipped.md docs/added.md }
+        $deleted = New-StalenessFixtureCommit $added
+        Assert-Result "Item 415 shipped deletion warns" (Test-FrameworkBundleStale $framework $installed $deleted) "shipped deletion was missed"
+        [IO.File]::WriteAllText((Join-Path $framework "VERSION"), "dirty`n")
+        Assert-Result "Item 415 comparison ignores working tree" (-not (Test-FrameworkBundleStale $framework $installed $unshipped)) "working-tree content affected commit comparison"
+        Assert-Result "Item 415 missing installed commit warns" (Test-FrameworkBundleStale $framework ('0' * 40) $installed) "missing commit suppressed warning"
+        Assert-Result "Item 415 missing head warns" (Test-FrameworkBundleStale $framework $installed "") "missing HEAD suppressed warning"
+        Assert-Result "Item 415 git error warns" (Test-FrameworkBundleStale $tempRoot $installed $unshipped) "non-repository suppressed warning"
+    }
+
     # Guards the counts below against vacuous green: if the scaffold tree ever reads as
     # empty, every count comparison would agree at 0 and prove nothing.
     $results += Run-Test -Name "Expected scaffold count derived from framework tree is non-zero" -Body {

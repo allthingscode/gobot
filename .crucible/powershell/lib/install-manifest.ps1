@@ -304,6 +304,37 @@ function Get-FrameworkOwnedFiles {
     return @($files | Where-Object { -not (Test-FrameworkDevOnlyFile -Path $_) } | Sort-Object -Unique)
 }
 
+# Compare committed install content, not ancestry or working-tree edits. Include both
+# trees so a removed shipped file still counts. Any failed comparison keeps the warning.
+function Test-FrameworkBundleStale {
+    param(
+        [Parameter(Mandatory=$true)][string]$FrameworkRoot,
+        [AllowEmptyString()][string]$InstalledCommit,
+        [AllowEmptyString()][string]$FrameworkHead
+    )
+
+    try {
+        if ([string]::IsNullOrWhiteSpace($InstalledCommit) -or [string]::IsNullOrWhiteSpace($FrameworkHead)) {
+            return $true
+        }
+        $owned = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($commit in @($InstalledCommit, $FrameworkHead)) {
+            foreach ($path in @(Get-FrameworkOwnedFiles -FrameworkRoot $FrameworkRoot -AtCommit $commit)) {
+                $null = $owned.Add($path)
+            }
+        }
+        $roots = @(Get-InstallSourceRoot -Manifest (Get-InstallManifest -FrameworkRoot $FrameworkRoot))
+        $changed = @(git -C (Resolve-FilesystemPath -Path $FrameworkRoot) -c core.quotepath=false diff --no-ext-diff --no-textconv --name-only --no-renames $InstalledCommit $FrameworkHead -- @roots 2>$null)
+        if ($LASTEXITCODE -ne 0) { return $true }
+        foreach ($path in $changed) {
+            if ($owned.Contains([string]$path)) { return $true }
+        }
+        return $false
+    } catch {
+        return $true
+    }
+}
+
 function Convert-FrameworkPathToAdopter {
     param(
         [Parameter(Mandatory=$true)][string]$SourcePath,

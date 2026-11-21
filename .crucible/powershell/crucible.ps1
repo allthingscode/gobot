@@ -195,13 +195,25 @@ if (-not $Quiet) {
                             $gitHeadResult = git -C (Resolve-FilesystemPath -Path $frameworkSource) rev-parse HEAD 2>$null
                             $frameworkHead = if ($LASTEXITCODE -eq 0 -and $gitHeadResult) { ($gitHeadResult | Out-String).Trim() } else { "" }
                         }
+                        $bundleBehind = $false
                         if ($frameworkHead -match '^[0-9a-f]{40}$' -and $bannerCommit -ne $frameworkHead) {
                             $null = git -C (Resolve-FilesystemPath -Path $frameworkSource) merge-base --is-ancestor $bannerCommit $frameworkHead 2>$null
-                            if ($LASTEXITCODE -eq 0) {
-                                Write-Host ("WARNING: Installed Crucible bundle lags framework HEAD. Installed: " + $bannerCommit.Substring(0, 7) + " | Upstream HEAD: " + $frameworkHead.Substring(0, 7)) -ForegroundColor Yellow
-                                $updateCommand = New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Transport PowerShell -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource
-                                Write-Host ("  Run " + $updateCommand + " to bring it current.") -ForegroundColor Yellow
+                            $bundleBehind = ($LASTEXITCODE -eq 0)
+                        }
+                        $bundleStale = $bundleBehind
+                        if ($bundleBehind) {
+                            try {
+                                . (Join-Path $PSScriptRoot "lib/install-manifest.ps1")
+                                $bundleStale = Test-FrameworkBundleStale -FrameworkRoot $frameworkSource -InstalledCommit $bannerCommit -FrameworkHead $frameworkHead
+                            } catch {
+                                # Content comparison is optional; keep the ancestry warning if unavailable.
+                                $bundleStale = $true
                             }
+                        }
+                        if ($bundleStale) {
+                            Write-Host ("WARNING: Installed Crucible bundle lags framework HEAD. Installed: " + $bannerCommit.Substring(0, 7) + " | Upstream HEAD: " + $frameworkHead.Substring(0, 7)) -ForegroundColor Yellow
+                            $updateCommand = New-CrucibleCommand -Script "powershell/update-bundle.ps1" -Transport PowerShell -Parameters ([ordered]@{ FrameworkSource = $frameworkSource; AdopterRoot = $REPO_ROOT }) -CrucibleRoot $frameworkSource
+                            Write-Host ("  Run " + $updateCommand + " to bring it current. For a mid-task update, see step 8 of docs/updating.md before updating.") -ForegroundColor Yellow
                         }
                     }
                 } else {
@@ -475,17 +487,19 @@ if ($Init -and $handoff.target_phase -in @('verification', 'deployment') -and
     $handoff.PSObject.Properties['base_commit'] -and -not [string]::IsNullOrWhiteSpace([string]$handoff.base_commit)) {
     $taskRef = 'refs/heads/task/' + $handoff.task_id
     $ancestry = $null
+    $taskBranchMissing = $false
     try {
         $branchCheck = Invoke-Git -Directory $REPO_ROOT show-ref --verify --quiet $taskRef
+        $taskBranchMissing = $branchCheck.ExitCode -eq 1
         if ($branchCheck.ExitCode -eq 0) {
             $ancestry = Invoke-Git -Directory $REPO_ROOT merge-base --is-ancestor ([string]$handoff.base_commit) $taskRef
         }
     } catch {
         $ancestry = $null
     }
-    if ($null -eq $ancestry -or $ancestry.ExitCode -notin @(0, 1)) {
+    if (-not $taskBranchMissing -and ($null -eq $ancestry -or $ancestry.ExitCode -notin @(0, 1))) {
         Write-Warning "Could not check base_commit '$($handoff.base_commit)' for task '$($handoff.task_id)'."
-    } elseif ($ancestry.ExitCode -eq 1) {
+    } elseif ($null -ne $ancestry -and $ancestry.ExitCode -eq 1) {
         $reason = "Task $($handoff.task_id) lacks base_commit $($handoff.base_commit); rebase onto the primary branch and rerun full checks."
         $params = @{
             TaskId = $handoff.task_id; Source = $handoff.target_phase; Target = 'implementation'
