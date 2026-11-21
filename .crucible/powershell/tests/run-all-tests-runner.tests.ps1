@@ -737,6 +737,7 @@ exit 3
         $testsDir = Join-Path $psDir "tests"
 
         $holderPidFile = Join-Path $scratchDir "holder-pid.txt"
+        $holderCleanupPidFile = Join-Path $scratchDir "holder-cleanup-pid.txt"
 
         # Same leak as the serial case, and the reason the pool cannot simply wait for its
         # reads once a child is gone: killing the test does not close pipes a grandchild
@@ -745,11 +746,18 @@ exit 3
         # regression here hangs the runner, and must not hang the suite with it.
         $syntheticContent = @'
 $holder = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 90' -NoNewWindow -PassThru
-Set-Content -LiteralPath "__PID_FILE__" -Value $holder.Id -Encoding ASCII
+# Keep a separate cleanup PID while forcing the real PID write to be interrupted.
+Set-Content -LiteralPath "__CLEANUP_PID_FILE__" -Value $holder.Id -Encoding ASCII
+$pidStream = [IO.File]::Open("__PID_FILE__", [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+[Console]::Out.WriteLine('PID-FILE-CREATED-BEFORE-WRITE')
+Start-Sleep -Seconds 90
+$pidBytes = [Text.Encoding]::ASCII.GetBytes([string]$holder.Id)
+$pidStream.Write($pidBytes, 0, $pidBytes.Length)
+$pidStream.Dispose()
 Start-Sleep -Seconds 90
 exit 0
 '@
-        $syntheticContent = $syntheticContent.Replace("__PID_FILE__", $holderPidFile)
+        $syntheticContent = $syntheticContent.Replace("__PID_FILE__", $holderPidFile).Replace("__CLEANUP_PID_FILE__", $holderCleanupPidFile)
         Set-Content -LiteralPath (Join-Path $testsDir "parallel-orphan.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -778,13 +786,30 @@ exit 0
         $exitCode = $p.ExitCode
         $p.Dispose()
 
-        if (Test-Path -LiteralPath $holderPidFile) {
-            # Empty when the runner killed the child between creating the file and writing it.
-            $holderPid = ([string](Get-Content -LiteralPath $holderPidFile -Raw)).Trim()
-            if ($holderPid -match '^\d+$') {
-                $holderProc = Get-Process -Id ([int]$holderPid) -ErrorAction SilentlyContinue
-                if ($null -ne $holderProc) { try { $holderProc.Kill() } catch {} }
+        # Reap the holder before exercising the production fixture's fallible read,
+        # so the intended regression failure cannot skip its cleanup.
+        if (Test-Path -LiteralPath $holderCleanupPidFile) {
+            $cleanupPidText = [IO.File]::ReadAllText($holderCleanupPidFile).Trim()
+            if ($cleanupPidText -match '^\d+$') {
+                $cleanupProc = Get-Process -Id ([int]$cleanupPidText) -ErrorAction SilentlyContinue
+                if ($null -ne $cleanupProc) { try { $cleanupProc.Kill() } catch {} }
             }
+        }
+
+        Assert-Result -Name "parallel leaked-pipe fixture reached PID write window" -Condition ($output -match 'PID-FILE-CREATED-BEFORE-WRITE') -FailureMessage ("fixture did not reach the forced write window. Output: " + $output)
+        Assert-Result -Name "parallel leaked-pipe PID file exists but is empty" -Condition ((Test-Path -LiteralPath $holderPidFile) -and (Get-Item -LiteralPath $holderPidFile).Length -eq 0) -FailureMessage "expected timeout to interrupt the PID write after file creation"
+        $rawHolderPid = Get-Content -LiteralPath $holderPidFile -Raw
+        Assert-Result -Name "parallel leaked-pipe empty PID read returns null" -Condition ($null -eq $rawHolderPid) -FailureMessage "expected the forced empty PID file to reproduce the null read"
+        Write-Host ("Forced PID write window: file exists, length=0, raw read is null=" + ($null -eq $rawHolderPid))
+
+        # The runner has already killed the writer, so the file is final: it holds a PID, or
+        # it is empty because the kill landed between creating it and writing it. An empty
+        # file reads as null, so parse it null-safely instead of calling Trim on it.
+        $holderPid = 0
+        $holderPidText = Get-Content -LiteralPath $holderPidFile -Raw -ErrorAction SilentlyContinue
+        if ([int]::TryParse([string]$holderPidText, [ref]$holderPid) -and $holderPid -gt 0) {
+            $holderProc = Get-Process -Id $holderPid -ErrorAction SilentlyContinue
+            if ($null -ne $holderProc) { try { $holderProc.Kill() } catch {} }
         }
 
         Assert-Result -Name "parallel leaked-pipe runner exits" -Condition ($exited) -FailureMessage ("runner did not exit within 60s after killing a timed-out child that leaked its pipes. Output: " + $output)

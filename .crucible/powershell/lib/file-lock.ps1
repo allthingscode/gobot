@@ -84,6 +84,12 @@ function Open-FileLockHandle {
     }
 }
 
+# The lock wait reads its clock through this function so a test can supply the elapsed time.
+function Get-FileLockElapsedMs {
+    param([Parameter(Mandatory=$true)][System.Diagnostics.Stopwatch]$Clock)
+    return $Clock.ElapsedMilliseconds
+}
+
 function Invoke-FileLock {
     param(
         [Parameter(Mandatory = $true)][string]$LockPath,
@@ -92,23 +98,22 @@ function Invoke-FileLock {
         [string]$TimeoutMessage = "[LOCK] Timeout reached; waiting for the exclusive lock holder."
     )
 
-    $lockWaitTime = 0
-    $totalWaitMs = 0
+    $waitClock = [System.Diagnostics.Stopwatch]::StartNew()
+    $lastReportMs = 0
     $fileStream = $null
     while ($null -eq ($fileStream = Open-FileLockHandle -LockPath $LockPath)) {
-        if ($lockWaitTime -ge $TimeoutMs) {
+        $totalWaitMs = Get-FileLockElapsedMs -Clock $waitClock
+        if (($totalWaitMs - $lastReportMs) -ge $TimeoutMs) {
             # The wait is deliberately unbounded: a crashed holder's handle is closed by the
             # OS, which frees the lock, so anything still held after this long is a live holder
             # that is stuck. That is worth waiting out rather than corrupting the
             # file, but it has to be diagnosable - name the lock and the elapsed wait, because
             # this message repeats forever and a bare one says nothing about which lock.
-            $totalWaitMs += $lockWaitTime
             $waitMessage = $TimeoutMessage + " Lock: " + $LockPath + ". Waited " + [int]($totalWaitMs / 1000) + "s so far; a holder still present has not crashed, it is stuck."
             if (Test-Path -LiteralPath Function:Write-Quiet) { Write-Quiet $waitMessage -ForegroundColor Yellow } else { Write-Host $waitMessage -ForegroundColor Yellow }
-            $lockWaitTime = 0
+            $lastReportMs = $totalWaitMs
         } else {
             Start-Sleep -Milliseconds 100
-            $lockWaitTime += 100
         }
     }
 

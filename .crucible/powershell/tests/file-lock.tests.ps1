@@ -196,4 +196,52 @@ $results += Run-Test -Name "Contending processes never hold the lock at the same
     }
 }
 
+$results += Run-Test -Name "Slow sleeps report elapsed lock wait before acquisition" -Body {
+    $tempDir = New-TestFixtureRoot -NameHint "file-lock-slow-sleep"
+    try {
+        $fixture = Join-Path $tempDir "slow-sleep.ps1"
+        # Two denied attempts keep the holder present after the first slow sleep.
+        # Acquisition on attempt three bounds the fixture independently of reporting.
+        $fixtureText = @'
+param([string]$FileLock, [string]$LockPath)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+. $FileLock
+$script:attempts = 0
+$script:sleeps = 0
+$script:fakeElapsedMs = 0
+function Get-FileLockElapsedMs {
+    param($Clock)
+    return $script:fakeElapsedMs
+}
+function Open-FileLockHandle {
+    param([string]$LockPath)
+    $script:attempts++
+    if ($script:attempts -le 2) { return $null }
+    return ,([System.IO.MemoryStream]::new())
+}
+function Start-Sleep {
+    param([int]$Milliseconds)
+    $script:sleeps++
+    # Model a loaded scheduler with a fake clock: one nominal 100 ms sleep advances the
+    # elapsed time past the 1000 ms threshold. No real time passes.
+    $script:fakeElapsedMs += 1100
+}
+Invoke-FileLock -LockPath $LockPath -TimeoutMs 1000 -TimeoutMessage '[SESSION STATE] Waiting' -ScriptBlock {
+    Write-Host 'BODY_RAN'
+}
+Write-Host "attempts=$script:attempts sleeps=$script:sleeps"
+'@
+        [System.IO.File]::WriteAllText($fixture, $fixtureText + "`n", $utf8)
+        $lockPath = Join-Path $tempDir "slow.lock"
+        $shell = Get-PwshCommand
+        $run = Invoke-ExternalCommand { & $shell -NoProfile -File $fixture -FileLock $FILE_LOCK -LockPath $lockPath 2>&1 }
+        Assert-Result -Name "slow sleeps: fixture acquires the lock and runs the body" -Condition ($run.ExitCode -eq 0 -and $run.Output.Contains('BODY_RAN')) -FailureMessage $run.Output
+        Assert-Result -Name "slow sleeps: contention ends before ten nominal sleeps" -Condition ($run.Output -match 'attempts=3 sleeps=[12]') -FailureMessage $run.Output
+        Assert-Result -Name "slow sleeps: elapsed threshold reports the wait while the holder is present" -Condition ($run.Output.Contains('[SESSION STATE] Waiting Lock: ' + $lockPath + '. Waited ')) -FailureMessage $run.Output
+    } finally {
+        Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-TestFileSummary -Results $results

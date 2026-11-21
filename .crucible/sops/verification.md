@@ -1,4 +1,4 @@
-<!-- prompt_version: reviewer-sop-v11 -->
+<!-- prompt_version: reviewer-sop-v13 -->
 # SOP: Verification
 
 Before writing files, read the [Specialist Workspace SOP](specialist-workspace.md).
@@ -74,7 +74,7 @@ Include `### Checks Not Run` in `review_report.md`, listing checks you could not
 Review the diff for:
 - Project language idioms and repository mandates declared in `.crucible/config.yaml` and agent instructions
 - Security (no hardcoded secrets, parameterized SQL, input validation at boundaries)
-- Test quality (table-driven, no `time.Sleep`, race detector would pass)
+- Test quality (table-driven; no assertion on real time: time-dependent code takes an injected clock or timeout the test controls, a wait on another process polls an observable condition under a generous deadline that is never the thing asserted, no fixed sleep in place of a signal, performance only in benchmarks; race detector would pass)
 - No regressions outside the stated scope
 
 ### Mid-Session Progress (Checkpointing)
