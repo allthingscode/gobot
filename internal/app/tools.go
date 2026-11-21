@@ -122,6 +122,9 @@ func wireSubTools(tools []Tool) {
 		if t.Name() == spawnToolName {
 			continue
 		}
+		if _, telegramOnly := t.(*reminderTool); telegramOnly {
+			continue
+		}
 		if t.Declaration().SideEffecting {
 			continue
 		}

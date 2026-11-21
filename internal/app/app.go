@@ -174,6 +174,11 @@ func runInitializedAgentLoopWithReady(ctx context.Context, cfg *config.Config, s
 	readiness := NewReadiness()
 
 	store := runtimeCheckpointStore(cfg.StorageRoot())
+	reminders, err := setupReminders(ctx, cfg, stack.Runner, store, api)
+	if err != nil {
+		return fmt.Errorf("run agent: %w", err)
+	}
+	defer reminders.close()
 
 	mgr := stack.NewSessionManager(cfg, store, tracer)
 	var cronMgr *agent.SessionManager
@@ -195,6 +200,7 @@ func runInitializedAgentLoopWithReady(ctx context.Context, cfg *config.Config, s
 
 		gateHandler := SetupGateHandler(store, handler)
 		ReconcileAuthorizedFromAllowFrom(cfg, store)
+		reminders.start(ctx, startErr)
 		if cfg.Gateway.Enabled {
 			StartGateway(ctx, cfg, store, stack.MemStore, gateHandler, hub, &wg, startErr, readiness)
 		}
@@ -206,7 +212,7 @@ func runInitializedAgentLoopWithReady(ctx context.Context, cfg *config.Config, s
 		var b *bot.Bot
 		if cfg.Channels.Telegram.Enabled {
 			if api != nil {
-				b = StartTelegramBot(ctx, api, gateHandler, tracer, &wg)
+				b = StartTelegramBot(ctx, api, reminderTelegramHandler{Handler: gateHandler, auth: reminders.auth}, tracer, &wg)
 			}
 		}
 

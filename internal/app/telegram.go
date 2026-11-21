@@ -399,6 +399,22 @@ func (api *TgAPI) Send(ctx context.Context, msg bot.OutboundMessage) error {
 	return nil
 }
 
+// SendPlainText delivers exact stored text without markup or an agent dispatch.
+func (api *TgAPI) SendPlainText(ctx context.Context, msg bot.OutboundMessage) error {
+	params := &telego.SendMessageParams{
+		ChatID: telego.ChatID{ID: msg.ChatID},
+		Text:   msg.Text,
+	}
+	if msg.ThreadID > 0 {
+		params.MessageThreadID = int(msg.ThreadID)
+	}
+	// A single call here keeps the durable worker's three-attempt budget exact.
+	if _, err := api.client.SendMessage(ctx, params); err != nil {
+		return fmt.Errorf("telegram plain text send: %w", err)
+	}
+	return nil
+}
+
 // SendWithButtons delivers a message with an inline keyboard markup.
 func (api *TgAPI) SendWithButtons(ctx context.Context, msg bot.OutboundMessage, buttons [][]bot.Button) error {
 	rows := make([][]telego.InlineKeyboardButton, len(buttons))
