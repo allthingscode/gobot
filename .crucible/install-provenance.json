@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "source_commit": "266cc76498c162101ba1c2e8e8f48a9d81463405",
+  "source_commit": "4109a50f5a98c650a6a8aa6d19c7c1c94c029bef",
   "files": {
     "docs/agent-discovery.md": {
       "hash": "8867cdbfac9a02236c68b090a09b0a2f4b740de47caf8c00f864c58a1a9174c8",
