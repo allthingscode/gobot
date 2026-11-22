@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +15,322 @@ import (
 	"testing"
 	"time"
 )
+
+const (
+	calendarLookupLimit      = "limit"
+	calendarLookupCancelled  = "cancelled"
+	calendarTransportFailure = "transport"
+)
+
+func rescheduleFixture() PrimaryCalendarEvent {
+	return PrimaryCalendarEvent{
+		CalendarID: "primary", ID: "selected", ETag: `"version-1"`, Summary: "Planning", Status: "confirmed",
+		Start: PrimaryEventTime{DateTime: "2026-11-01T01:15:00-05:00"},
+		End:   PrimaryEventTime{DateTime: "2026-11-01T01:45:00-05:00"},
+	}
+}
+
+func TestPrimaryCalendarLookup(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"multiple pages", "cycle", "denied", calendarLookupCancelled, "empty query", calendarLookupLimit} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			runPrimaryLookupCase(t, mode)
+		})
+	}
+}
+
+func runPrimaryLookupCase(t *testing.T, mode string) {
+	t.Helper()
+	var calls atomic.Int32
+	srv := httptest.NewServer(primaryLookupHandler(t, mode, &calls))
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	query := "Planning"
+	if mode == "empty query" {
+		query = ""
+	}
+	if mode == calendarLookupCancelled {
+		cancel()
+	}
+	events, err := findPrimaryCalendarEventsWithClient(ctx, setupTestToken(t), query, redirectClient(calendarBaseURL, srv.URL))
+	assertPrimaryLookupResult(t, mode, events, err, calls.Load())
+}
+
+func assertPrimaryLookupResult(t *testing.T, mode string, events []PrimaryCalendarEvent, err error, calls int32) {
+	t.Helper()
+	want := map[string]int{"multiple pages": 2, calendarLookupLimit: 50}[mode]
+	if want > 0 {
+		if err != nil || len(events) != want || events[0].CalendarID != primaryCalendarID {
+			t.Fatalf("lookup events=%+v err=%v", events, err)
+		}
+		return
+	}
+	if err == nil || events != nil || calls > 2 {
+		t.Fatalf("lookup must fail without partial results/loops: events=%v err=%v calls=%d", events, err, calls)
+	}
+	if mode == calendarLookupCancelled && !errors.Is(err, context.Canceled) {
+		t.Fatalf("lost lookup cancellation: %v", err)
+	}
+}
+
+func primaryLookupHandler(t *testing.T, mode string, calls *atomic.Int32) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/calendars/primary/events" || r.URL.Query().Get("q") != "Planning" {
+			t.Errorf("lookup targeted wrong identity/query: %s", r.URL)
+		}
+		if mode == "denied" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		event, next := rescheduleFixture(), "next"
+		if r.URL.Query().Get("pageToken") != "" {
+			event.ID = "second-match"
+		}
+		if r.URL.Query().Get("pageToken") != "" && mode != "cycle" {
+			next = ""
+		}
+		items := []PrimaryCalendarEvent{event}
+		if mode == calendarLookupLimit {
+			items = make([]PrimaryCalendarEvent, 60)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "nextPageToken": next})
+	}
+}
+
+func TestRescheduleEventTimes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, start, end string
+		valid            bool
+	}{
+		{"fall DST", "2026-11-01T01:50:00-05:00", "2026-11-01T01:10:00-06:00", true},
+		{"spring DST", "2026-03-08T01:50:00-06:00", "2026-03-08T03:10:00-05:00", true},
+		{"equal instants", "2026-11-01T01:00:00-05:00", "2026-11-01T02:00:00-04:00", false},
+		{"reversed instants", "2026-11-01T01:00:00-06:00", "2026-11-01T01:30:00-05:00", false},
+		{"missing start", "", "2026-11-01T01:00:00Z", false},
+		{"missing end", "2026-11-01T01:00:00Z", "", false},
+		{"no offset", "2026-11-01T01:00:00", "2026-11-01T02:00:00Z", false},
+		{"invalid end", "2026-11-01T01:00:00Z", "tomorrow", false},
+		{"offset hour", "2026-11-01T01:00:00+24:00", "2026-11-02T02:00:00Z", false},
+		{"offset minute", "2026-11-01T01:00:00+00:60", "2026-11-02T02:00:00Z", false},
+		{"single digit hour", "2026-11-01T1:00:00Z", "2026-11-02T02:00:00Z", false},
+		{"comma fraction", "2026-11-01T01:00:00,1Z", "2026-11-02T02:00:00Z", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := ValidateEventTimes(tc.start, tc.end); (err == nil) != tc.valid {
+				t.Fatalf("validation = %v, valid = %v", err, tc.valid)
+			}
+		})
+	}
+}
+
+func TestRescheduleUnsupportedEvent(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		change func(*PrimaryCalendarEvent)
+	}{
+		{"wrong ID", func(e *PrimaryCalendarEvent) { e.ID = "other" }},
+		{"missing ID", func(e *PrimaryCalendarEvent) { e.ID = "" }},
+		{"missing ETag", func(e *PrimaryCalendarEvent) { e.ETag = "" }},
+		{"wildcard ETag", func(e *PrimaryCalendarEvent) { e.ETag = "*" }},
+		{"weak ETag", func(e *PrimaryCalendarEvent) { e.ETag = `W/"v1"` }},
+		{"multiple ETags", func(e *PrimaryCalendarEvent) { e.ETag = `"v1", "v2"` }},
+		{"cancelled", func(e *PrimaryCalendarEvent) { e.Status = "cancelled" }},
+		{"master", func(e *PrimaryCalendarEvent) { e.Recurrence = []string{"RRULE:FREQ=DAILY"} }},
+		{"instance", func(e *PrimaryCalendarEvent) { e.RecurringEventID = "master" }},
+		{"original start", func(e *PrimaryCalendarEvent) { e.OriginalStartTime = &PrimaryEventTime{} }},
+		{"all day", func(e *PrimaryCalendarEvent) { e.Start.Date = "2026-11-01" }},
+		{"all day end", func(e *PrimaryCalendarEvent) { e.End.Date = "2026-11-02" }},
+		{"missing end", func(e *PrimaryCalendarEvent) { e.End.DateTime = "" }},
+		{"unspecified end", func(e *PrimaryCalendarEvent) { e.EndTimeUnspecified = true }},
+		{"special shape", func(e *PrimaryCalendarEvent) { e.EventType = "outOfOffice" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			event := rescheduleFixture()
+			tc.change(&event)
+			var patches atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPatch {
+					patches.Add(1)
+				}
+				_ = json.NewEncoder(w).Encode(event)
+			}))
+			defer srv.Close()
+			approved := false
+			err := reschedulePrimaryEventWithClient(context.Background(), setupTestToken(t), "selected",
+				"2026-11-02T10:00:00-06:00", "2026-11-02T11:00:00-06:00",
+				func(context.Context, PrimaryCalendarEvent) error { approved = true; return nil }, redirectClient(calendarBaseURL, srv.URL))
+			if err == nil || approved || patches.Load() != 0 {
+				t.Fatalf("unsafe event reached approval/write: err=%v approved=%v patches=%d", err, approved, patches.Load())
+			}
+		})
+	}
+}
+
+func TestRescheduleConditionalPatch(t *testing.T) {
+	t.Parallel()
+	for _, status := range []int{http.StatusOK, http.StatusPreconditionFailed, http.StatusForbidden, http.StatusInternalServerError, http.StatusTemporaryRedirect} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			t.Parallel()
+			runConditionalPatchCase(t, status)
+		})
+	}
+}
+
+func runConditionalPatchCase(t *testing.T, status int) {
+	t.Helper()
+	var patches atomic.Int32
+	approved := atomic.Bool{}
+	original := rescheduleFixture()
+	fields := map[string]any{"id": original.ID, "summary": original.Summary, "description": "keep", "attendees": []string{"guest"}, "location": "Room"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/calendars/primary/events/selected" {
+			t.Errorf("wrong event path %s", r.URL.Path)
+		}
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(original)
+			return
+		}
+		patches.Add(1)
+		assertCalendarPatch(t, r, original.ETag, approved.Load(), fields)
+		if status == http.StatusTemporaryRedirect {
+			w.Header().Set("Location", "/calendars/shared/events/other")
+		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(fields)
+	}))
+	defer srv.Close()
+	err := reschedulePrimaryEventWithClient(context.Background(), setupTestToken(t), original.ID,
+		"2026-11-02T10:00:00-06:00", "2026-11-02T11:00:00-06:00", func(_ context.Context, got PrimaryCalendarEvent) error {
+			assertCalendarFetchedIdentity(t, got, original)
+			approved.Store(true)
+			return nil
+		}, redirectClient(calendarBaseURL, srv.URL))
+	if (err != nil) != (status != http.StatusOK) || patches.Load() != 1 {
+		t.Fatalf("status=%d err=%v patches=%d", status, err, patches.Load())
+	}
+	assertCalendarPreservedFields(t, original, fields)
+}
+
+func assertCalendarFetchedIdentity(t *testing.T, got, original PrimaryCalendarEvent) {
+	t.Helper()
+	if got.ID != original.ID || got.ETag != original.ETag || got.CalendarID != primaryCalendarID || got.Start != original.Start {
+		t.Errorf("approval did not receive fetched identity: %+v", got)
+	}
+}
+
+func assertCalendarPreservedFields(t *testing.T, original PrimaryCalendarEvent, fields map[string]any) {
+	t.Helper()
+	if fields["id"] != original.ID || fields["description"] != "keep" || fields["location"] != "Room" || fields["summary"] != original.Summary {
+		t.Fatal("unrelated fields changed")
+	}
+}
+
+func assertCalendarPatch(t *testing.T, r *http.Request, etag string, approved bool, fields map[string]any) {
+	t.Helper()
+	if !approved || r.Method != http.MethodPatch || r.Header.Get("If-Match") != etag || r.URL.Query().Get("sendUpdates") != "all" {
+		t.Errorf("unsafe PATCH: approved=%v method=%s headers=%v query=%s", approved, r.Method, r.Header, r.URL.RawQuery)
+	}
+	var body map[string]PrimaryEventTime
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Error(err)
+	}
+	if len(body) != 2 || body["start"].DateTime != "2026-11-02T10:00:00-06:00" || body["end"].DateTime != "2026-11-02T11:00:00-06:00" {
+		t.Errorf("unexpected patch body: %+v", body)
+	}
+	for key, value := range body {
+		fields[key] = value
+	}
+}
+
+type rescheduleTransportFunc func(*http.Request) (*http.Response, error)
+
+func (f rescheduleTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestRescheduleFailures(t *testing.T) {
+	t.Parallel()
+	for _, action := range []string{"reject", "cancel after approval", calendarTransportFailure, "fetch forbidden", "fetch not found", "fetch malformed", "missing identity", "missing approval", "invalid times", "auth"} {
+		t.Run(action, func(t *testing.T) {
+			t.Parallel()
+			runRescheduleFailure(t, action)
+		})
+	}
+}
+
+func runRescheduleFailure(t *testing.T, action string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var patches int
+	client := calendarFailureClient(action, &patches)
+	approve := func(context.Context, PrimaryCalendarEvent) error {
+		if action == "reject" {
+			return fmt.Errorf("rejected")
+		}
+		cancel()
+		return nil
+	}
+	if action == calendarTransportFailure {
+		approve = func(context.Context, PrimaryCalendarEvent) error { return nil }
+	}
+	id, start, root := "selected", "2026-11-02T10:00:00-06:00", setupTestToken(t)
+	switch action {
+	case "missing identity":
+		id = ""
+	case "missing approval":
+		approve = nil
+	case "invalid times":
+		start = "tomorrow"
+	case "auth":
+		root = t.TempDir()
+	}
+	err := reschedulePrimaryEventWithClient(ctx, root, id, start, "2026-11-02T11:00:00-06:00", approve, client)
+	assertRescheduleFailure(t, action, err, patches)
+}
+
+func calendarFailureClient(action string, patches *int) *http.Client {
+	return &http.Client{Transport: rescheduleTransportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPatch {
+			*patches += 1
+			return nil, fmt.Errorf("connection lost after dispatch")
+		}
+		body, _ := json.Marshal(rescheduleFixture())
+		status := http.StatusOK
+		switch action {
+		case "fetch forbidden":
+			status = http.StatusForbidden
+		case "fetch not found":
+			status = http.StatusNotFound
+		case "fetch malformed":
+			body = []byte("{")
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(string(body))), Header: make(http.Header)}, nil
+	})}
+}
+
+func assertRescheduleFailure(t *testing.T, action string, err error, patches int) {
+	t.Helper()
+	wantPatches := 0
+	if action == calendarTransportFailure {
+		wantPatches = 1
+		if err == nil || !strings.Contains(err.Error(), "outcome unknown") {
+			t.Fatalf("transport outcome misrepresented: %v", err)
+		}
+	}
+	if err == nil || patches != wantPatches {
+		t.Fatalf("action=%s err=%v patches=%d want=%d", action, err, patches, wantPatches)
+	}
+	if action == "cancel after approval" && !errors.Is(err, context.Canceled) {
+		t.Fatalf("lost cancellation: %v", err)
+	}
+}
 
 func TestFormatEventsMarkdown_Empty(t *testing.T) {
 	t.Parallel()

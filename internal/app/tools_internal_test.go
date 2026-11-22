@@ -99,7 +99,17 @@ func TestAppendCalendarTaskTools(t *testing.T) {
 	t.Parallel()
 	var tools []Tool
 	got := appendCalendarTaskTools("root", tools, nil)
-	if len(got) != 6 {
-		t.Errorf("expected 6 calendar/task tools, got %d", len(got))
+	if len(got) != 8 {
+		t.Errorf("expected 8 calendar/task tools, got %d", len(got))
+	}
+	registered := make(map[string]bool)
+	for _, tool := range got {
+		registered[tool.Name()] = tool.Declaration().SideEffecting
+	}
+	if write, ok := registered[lookupPrimaryCalendarToolName]; !ok || write {
+		t.Fatal("primary lookup must be registered without side effects")
+	}
+	if !registered[rescheduleCalendarToolName] {
+		t.Fatal("reschedule must be registered as side-effecting")
 	}
 }

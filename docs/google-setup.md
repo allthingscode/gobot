@@ -95,6 +95,46 @@ The scopes you list here must also be added to your OAuth Consent Screen in the 
 
 ## Troubleshooting & FAQ
 
+### Rescheduling an existing event
+
+Use `lookup_primary_calendar_events` to find identity-bearing matches, then
+`reschedule_calendar_event` with `calendar_id: primary`, an exact `event_id`,
+and explicit RFC3339 `start_time` and `end_time` (including offsets, such as
+`2026-11-02T10:00:00-06:00`). End must be later than start as an instant.
+Lookup returns up to 50 matches and can include unsupported events; use a more
+specific query if needed. Titles alone never identify an event.
+
+Rescheduling supports one non-recurring timed event on the authenticated primary
+calendar. Shared calendars, recurring masters and instances, all-day events,
+special event types, attendee changes and deletion are unsupported.
+
+Enable `channels.telegram.hitl` and use an interactive Telegram session. The bot
+fetches the exact event and displays its ID, primary calendar, title, location,
+original offset-bearing times and proposed times. **Approve explicitly selects
+that exact event and authorizes that time change**, including when several lookup
+matches have the same title. Reject if the displayed event is not the one you
+intended. Disabled or unavailable approval, unsupported channels, scheduled jobs,
+policy denial, rejection and timeout prevent the write. Existing Telegram
+whitelist and pairing requirements still apply.
+
+Every reschedule sends update notifications to **all guests** (`sendUpdates=all`).
+Only start and end are patched; other event fields are preserved. A concurrent
+change causes an ETag conflict (HTTP 412): stop, fetch the event again and obtain
+a new approval. There is no automatic retry. A transport error after dispatch
+can leave the outcome unknown; inspect Calendar before attempting another
+freshly approved change. Each operation needs its own approval.
+
+Read-only or otherwise narrow OAuth grants and event permissions may deny lookup
+or mutation (HTTP 401/403); the bot surfaces the failure without attempting to
+reauthorize. The default Calendar scope allows writes, but custom grants may not.
+A human must review scopes and run `gobot reauth` when appropriate; agents must
+not run reauthorization or live smoke tests. Live testing, including checking
+guest notification effects, is human-only.
+
+The API's [patch contract](https://developers.google.com/workspace/calendar/api/v3/reference/events/patch)
+and [conditional modification guide](https://developers.google.com/workspace/calendar/api/guides/version-resources)
+describe field preservation, notifications and ETags.
+
 ### "Google hasn't verified this app" Warning
 When you first authorize Gobot, you will likely see a warning screen from Google. Since you are running a private instance, this is expected.
 1. Click **Advanced**.
