@@ -24,7 +24,8 @@ type mockRunner struct {
 	textCalls   []string
 	activeCalls map[string]int
 	maxActive   map[string]int
-	delay       time.Duration
+	entered     chan<- string
+	release     <-chan struct{}
 	mu          sync.Mutex
 }
 
@@ -46,11 +47,13 @@ func (r *mockRunner) Run(_ context.Context, sessionKey, _ string, messages []age
 	if r.activeCalls[sessionKey] > r.maxActive[sessionKey] {
 		r.maxActive[sessionKey] = r.activeCalls[sessionKey]
 	}
-	delay := r.delay
 	r.mu.Unlock()
 
-	if delay > 0 {
-		time.Sleep(delay)
+	if r.entered != nil {
+		r.entered <- sessionKey
+	}
+	if r.release != nil {
+		<-r.release
 	}
 
 	defer func() {
@@ -88,6 +91,7 @@ type mockStore struct {
 	createErr   error
 	createCalls []string
 	saveCalls   int
+	iterations  map[string][]int
 	mu          sync.Mutex
 }
 
@@ -112,6 +116,10 @@ func (s *mockStore) SaveSnapshot(_ context.Context, threadID string, iteration i
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.saveCalls++
+	if s.iterations == nil {
+		s.iterations = make(map[string][]int)
+	}
+	s.iterations[threadID] = append(s.iterations[threadID], iteration)
 	if s.saveErr != nil {
 		return false, s.saveErr
 	}

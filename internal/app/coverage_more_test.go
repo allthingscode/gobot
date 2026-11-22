@@ -387,7 +387,7 @@ func TestMCPServerHelperProcess(t *testing.T) {
 	// GO_MCP_BEHAVIOR selects a fixture mode: "" (normal), "silent_init" (never
 	// answers), "silent_list" (ignores tools/list), "stall_after_init" (stops
 	// reading stdin after the handshake), "notify" (emits a notification before
-	// each response). Requests may carry params.delay_ms and params.tag.
+	// each response). Requests may carry params.hold and params.tag.
 	behavior := os.Getenv("GO_MCP_BEHAVIOR")
 	var outMu sync.Mutex
 	emit := func(v any) {
@@ -403,16 +403,23 @@ func TestMCPServerHelperProcess(t *testing.T) {
 			ID     int    `json:"id"`
 			Method string `json:"method"`
 			Params struct {
-				DelayMS int    `json:"delay_ms"`
-				Tag     string `json:"tag"`
+				Hold bool   `json:"hold"`
+				Tag  string `json:"tag"`
 			} `json:"params"`
 		}
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
 			continue
 		}
 		if req.Method == "notifications/initialized" && behavior == "stall_after_init" {
-			time.Sleep(time.Minute)
-			os.Exit(0)
+			// The parent owns this fixture's lifetime. Leave stdin unread until
+			// it removes the gate or terminates us through MCPServer.stop.
+			ticker := time.NewTicker(10 * time.Millisecond)
+			for range ticker.C {
+				if _, err := os.Stat(os.Getenv("GO_MCP_LIFETIME")); errors.Is(err, os.ErrNotExist) { //nolint:gosec // parent-owned test fixture path
+					ticker.Stop()
+					os.Exit(0)
+				}
+			}
 		}
 		if req.ID == 0 || behavior == "silent_init" || (behavior == "silent_list" && req.Method == coverageToolsList) {
 			continue
@@ -435,12 +442,7 @@ func TestMCPServerHelperProcess(t *testing.T) {
 			}
 			emit(resp)
 		}
-		if req.Params.DelayMS > 0 {
-			delay := time.Duration(req.Params.DelayMS) * time.Millisecond
-			go func() {
-				time.Sleep(delay)
-				send()
-			}()
+		if req.Params.Hold {
 			continue
 		}
 		send()

@@ -171,20 +171,11 @@ func TestServer_Auth_AllowsWithToken(t *testing.T) {
 func TestServer_NoWildcardCORS(t *testing.T) {
 	t.Parallel()
 	h := NewHub(10)
-	defer h.Close()
 	s := NewServer(h, "127.0.0.1:0", "")
 
+	h.Emit(&LogEntry{Message: "buffered"})
 	req := httptest.NewRequest("GET", "/events", http.NoBody) //nolint:noctx // test request
-	ctx, cancel := context.WithCancel(req.Context())
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
-
-	s.handler().ServeHTTP(w, req)
+	w := streamTestEvents(t, h, req, s.handler().ServeHTTP)
 
 	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Errorf("expected no Access-Control-Allow-Origin header, got %q", got)

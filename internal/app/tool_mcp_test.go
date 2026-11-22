@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -453,6 +454,14 @@ func newHelperMCPServer(t *testing.T, behavior string) *MCPServer {
 		cfg:  helperMCPServerConfig(),
 		env:  map[string]string{"GO_WANT_MCP_HELPER": "1", "GO_MCP_BEHAVIOR": behavior},
 	}
+	if behavior == "stall_after_init" {
+		lifetime := filepath.Join(t.TempDir(), "lifetime")
+		if err := os.WriteFile(lifetime, []byte("live"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		srv.env["GO_MCP_LIFETIME"] = lifetime
+		t.Cleanup(func() { _ = os.Remove(lifetime) })
+	}
 	t.Cleanup(func() { _ = srv.stop() })
 	return srv
 }
@@ -597,7 +606,7 @@ func TestMCPServer_SilentToolsListDiscoveryFailsFinite(t *testing.T) {
 	if err := srv.start(context.Background()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	type result struct {
@@ -609,10 +618,12 @@ func TestMCPServer_SilentToolsListDiscoveryFailsFinite(t *testing.T) {
 		p, err := enumerateMCPTools(ctx, srv)
 		ch <- result{p, err}
 	}()
+	awaitResponseWait(t, srv)
+	cancel()
 	select {
 	case r := <-ch:
-		if !errors.Is(r.err, context.DeadlineExceeded) || !strings.Contains(r.err.Error(), "tools/list call failed") {
-			t.Fatalf("want wrapped tools/list deadline error, got %v", r.err)
+		if !errors.Is(r.err, context.Canceled) || !strings.Contains(r.err.Error(), "tools/list call failed") {
+			t.Fatalf("want wrapped tools/list cancellation error, got %v", r.err)
 		}
 	case <-time.After(mcpTestBound):
 		t.Fatal("silent tools/list discovery did not finish")
@@ -669,15 +680,19 @@ func TestMCPServer_CancelWhileQueuedBehindHolder(t *testing.T) {
 	holder := callAsync(ctx1, srv, "tools/list", nil)
 	waitFor(t, "holder admitted", func() bool { return admissionHeld(srv) })
 
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
-	start := time.Now()
-	o := awaitOutcome(t, callAsync(ctx2, srv, "tools/list", nil), 3*time.Second)
-	if !errors.Is(o.err, context.DeadlineExceeded) || !strings.Contains(o.err.Error(), "waiting for transport") {
-		t.Fatalf("want wrapped queued deadline error, got %v", o.err)
+	observed := &observedDoneContext{Context: ctx2, entered: make(chan struct{})}
+	queued := callAsync(observed, srv, "tools/list", nil)
+	select {
+	case <-observed.entered:
+	case <-time.After(mcpTestBound):
+		t.Fatal("queued caller never reached admission")
 	}
-	if time.Since(start) > 3*time.Second {
-		t.Fatalf("queued caller waited %s", time.Since(start))
+	cancel2()
+	o := awaitOutcome(t, queued, mcpTestBound)
+	if !errors.Is(o.err, context.Canceled) || !strings.Contains(o.err.Error(), "waiting for transport") {
+		t.Fatalf("want wrapped queued cancellation error, got %v", o.err)
 	}
 	select {
 	case <-holder:
@@ -701,7 +716,7 @@ func TestMCPServer_CancelDuringResponseWait(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": "slow", "delay_ms": 30000})
+	ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": "slow", "hold": true})
 	awaitResponseWait(t, srv)
 	cancel()
 	o := awaitOutcome(t, ch, mcpTestBound)
@@ -791,21 +806,29 @@ func TestMCPServer_ConcurrentCallersGetOwnResponses(t *testing.T) {
 
 func TestMCPServer_ResponsesRoutedByIDWithNotifications(t *testing.T) {
 	t.Parallel()
-	srv := newHelperMCPServer(t, "notify")
-	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			tag := fmt.Sprintf("n%d", i)
-			resp, err := srv.Call(context.Background(), "tools/call", map[string]any{"tag": tag, "delay_ms": 20 * (4 - i)})
-			if err != nil || !strings.Contains(resp, fmt.Sprintf("%q", tag)) {
-				t.Errorf("caller %d got %q err=%v", i, resp, err)
-			}
-		}(i)
+	p := newPipeMCP(t)
+	outcomes := make([]<-chan mcpCallOutcome, 4)
+	ids := make([]int, 4)
+	tags := make([]string, 4)
+	for i := range outcomes {
+		outcomes[i] = callAsync(context.Background(), p.srv, "tools/call", map[string]any{"tag": fmt.Sprintf("n%d", i)})
 	}
-	wg.Wait()
-	if n := srv.activeReaders.Load(); n != 1 {
+	for i := range ids {
+		ids[i], tags[i] = p.readRequest(t)
+	}
+	for i := len(ids) - 1; i >= 0; i-- {
+		if _, err := io.WriteString(p.out, `{"jsonrpc":"2.0","method":"notifications/progress","params":{}}`+"\n"); err != nil {
+			t.Fatal(err)
+		}
+		p.respond(t, ids[i], tags[i])
+	}
+	for i, ch := range outcomes {
+		o := awaitOutcome(t, ch, mcpTestBound)
+		if o.err != nil || !strings.Contains(o.resp, fmt.Sprintf(`"n%d"`, i)) {
+			t.Errorf("caller %d got %q err=%v", i, o.resp, o.err)
+		}
+	}
+	if n := p.srv.activeReaders.Load(); n != 1 {
 		t.Fatalf("readers=%d", n)
 	}
 }
@@ -818,7 +841,7 @@ func TestMCPServer_RepeatedCancelKeepsSingleReaderAndStopJoins(t *testing.T) {
 	}
 	for i := 0; i < 5; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
-		ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": "late", "delay_ms": 30000})
+		ch := callAsync(ctx, srv, "tools/call", map[string]any{"tag": "late", "hold": true})
 		awaitResponseWait(t, srv)
 		cancel()
 		o := awaitOutcome(t, ch, mcpTestBound)
@@ -896,27 +919,24 @@ func TestMCPServer_DeadTransportRestartsOnNextCall(t *testing.T) {
 func TestAppendMCPTools_DiscoveryBoundedAndStopsFailedServer(t *testing.T) {
 	t.Setenv("GO_WANT_MCP_HELPER", "1")
 	t.Setenv("GO_MCP_BEHAVIOR", "silent_list")
-	origTimeout, origFn := mcpDiscoveryTimeout, enumerateMCPToolsFunc
-	t.Cleanup(func() { mcpDiscoveryTimeout, enumerateMCPToolsFunc = origTimeout, origFn })
-	mcpDiscoveryTimeout = 400 * time.Millisecond
+	origFn := enumerateMCPToolsFunc
+	t.Cleanup(func() { enumerateMCPToolsFunc = origFn })
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var started *MCPServer
 	enumerateMCPToolsFunc = func(ctx context.Context, srv mcpCaller) ([]*mcpProxyTool, error) {
 		started, _ = srv.(*MCPServer)
-		// Start outside the short bound so the timeout lands on the silent tools/list.
+		// Start before observing and cancelling the silent tools/list request.
 		if err := srv.start(context.Background()); err != nil {
 			return nil, err
 		}
-		return enumerateMCPTools(ctx, srv)
+		return enumerateUntilCancelled(t, ctx, cancel, started)
 	}
 	cfg := &config.Config{Tools: config.ToolsConfig{MCPServers: map[string]config.MCPServerConfig{"silent": helperMCPServerConfig()}}}
 	cfg.Runtime.StorageRoot = t.TempDir()
 
-	begin := time.Now()
-	tools, cleanup := appendMCPtools(context.Background(), cfg, nil)
-	if time.Since(begin) > mcpTestBound {
-		t.Fatalf("discovery took %s", time.Since(begin))
-	}
+	tools, cleanup := appendMCPtools(ctx, cfg, nil)
 	if len(tools) != 1 {
 		t.Fatalf("tools=%#v", tools)
 	}
@@ -955,4 +975,44 @@ func TestAppendMCPTools_CleanupStopsServersIdempotently(t *testing.T) {
 	if cmd.ProcessState == nil || srv.cmd != nil || srv.activeReaders.Load() != 0 {
 		t.Fatalf("cleanup did not stop and join: state=%v readers=%d", cmd.ProcessState, srv.activeReaders.Load())
 	}
+}
+
+// Done is observed only once acquire has passed its initial Err check and is
+// evaluating the blocking admission select while the holder owns the transport.
+type observedDoneContext struct {
+	context.Context
+	once    sync.Once
+	entered chan struct{}
+}
+
+func (c *observedDoneContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
+}
+
+func enumerateUntilCancelled(t *testing.T, ctx context.Context, cancel context.CancelFunc, srv *MCPServer) ([]*mcpProxyTool, error) {
+	t.Helper()
+	type result struct {
+		proxies []*mcpProxyTool
+		err     error
+	}
+	results := make(chan result, 1)
+	go func() {
+		proxies, err := enumerateMCPTools(ctx, srv)
+		results <- result{proxies, err}
+	}()
+	awaitResponseWait(t, srv)
+	cancel()
+	var proxies []*mcpProxyTool
+	var err error
+	select {
+	case r := <-results:
+		proxies, err = r.proxies, r.err
+	case <-time.After(mcpTestBound):
+		t.Fatal("discovery did not stop after cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("discovery error=%v", err)
+	}
+	return proxies, err
 }

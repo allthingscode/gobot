@@ -120,9 +120,10 @@ func UserID(chatID, senderID int64) string {
 
 // Bot is the Telegram polling runtime.
 type Bot struct {
-	api     API
-	handler Handler
-	tracer  *observability.DispatchTracer
+	api        API
+	handler    Handler
+	tracer     *observability.DispatchTracer
+	retryTimer func(time.Duration) (<-chan time.Time, func())
 }
 
 // New creates a Bot backed by the given API and Handler.
@@ -295,10 +296,19 @@ func (b *Bot) drainUpdates(ctx context.Context, updates <-chan InboundMessage) e
 
 func (b *Bot) waitRetry(ctx context.Context, op string, err error, delay *time.Duration, maxDelay time.Duration) error {
 	slog.Error("bot: "+op+" failed", logattr.Err(err), slog.Duration("retry_in", *delay))
+	newTimer := b.retryTimer
+	if newTimer == nil {
+		newTimer = func(d time.Duration) (<-chan time.Time, func()) {
+			timer := time.NewTimer(d)
+			return timer.C, func() { timer.Stop() }
+		}
+	}
+	tick, stop := newTimer(*delay)
+	defer stop()
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("wait retry: %w", ctx.Err())
-	case <-time.After(*delay):
+	case <-tick:
 	}
 	*delay *= 2
 	if *delay > maxDelay {

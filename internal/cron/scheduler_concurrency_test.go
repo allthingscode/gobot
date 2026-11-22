@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // int64Ptr returns a pointer to the given int64 value.
@@ -38,14 +40,10 @@ func writeJobsJSON(t *testing.T, dir string, jobs []Job) string {
 type concDispatcher struct {
 	mu      sync.Mutex
 	calls   []Payload
-	delay   time.Duration // artificial per-dispatch latency
 	failIDs map[string]bool
 }
 
 func (m *concDispatcher) Dispatch(_ context.Context, p Payload) error {
-	if m.delay > 0 {
-		time.Sleep(m.delay)
-	}
 	m.mu.Lock()
 	m.calls = append(m.calls, p)
 	m.mu.Unlock()
@@ -55,32 +53,25 @@ func (m *concDispatcher) Dispatch(_ context.Context, p Payload) error {
 	return nil
 }
 
-// peakConcDispatcher tracks the maximum number of concurrently active
-// Dispatch calls without relying on wall-clock timing.
-type peakConcDispatcher struct {
-	active atomic.Int64
-	peak   atomic.Int64
-	calls  atomic.Int64
-	delay  time.Duration
+// heldDispatcher reports entry before blocking every due job on one release gate.
+type heldDispatcher struct {
+	entered chan Payload
+	release chan struct{}
+	active  atomic.Int64
+	calls   atomic.Int64
 }
 
-func (d *peakConcDispatcher) Dispatch(_ context.Context, _ Payload) error {
-	cur := d.active.Add(1)
-	for {
-		old := d.peak.Load()
-		if cur <= old {
-			break
-		}
-		if d.peak.CompareAndSwap(old, cur) {
-			break
-		}
+func (d *heldDispatcher) Dispatch(ctx context.Context, p Payload) error {
+	d.active.Add(1)
+	defer d.active.Add(-1)
+	d.entered <- p
+	select {
+	case <-d.release:
+		d.calls.Add(1)
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("held dispatch: %w", ctx.Err())
 	}
-	if d.delay > 0 {
-		time.Sleep(d.delay)
-	}
-	d.active.Add(-1)
-	d.calls.Add(1)
-	return nil
 }
 
 // atomicCountDispatcher counts dispatches using an atomic counter.
@@ -156,8 +147,7 @@ func TestScheduler_DispatchesDueJob(t *testing.T) {
 
 // TestScheduler_ConcurrentDispatch_MultipleDueJobs verifies that when
 // multiple jobs are due at the same tick they are dispatched concurrently.
-// It measures peak concurrent active dispatches rather than wall-clock
-// elapsed time to avoid spurious failures on slow or loaded CI runners.
+// Every job must enter while all previously entered jobs remain held.
 func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -175,20 +165,47 @@ func TestScheduler_ConcurrentDispatch_MultipleDueJobs(t *testing.T) {
 		}
 	}
 	storePath := writeJobsJSON(t, dir, jobs)
-	disp := &peakConcDispatcher{delay: 50 * time.Millisecond}
+	disp := &heldDispatcher{entered: make(chan Payload, n), release: make(chan struct{})}
 	s := NewScheduler(storePath, "", disp)
 	s.pollInterval = 1 * time.Millisecond
 	s.store = loadStore(t, storePath)
 
-	if err := s.poll(context.Background()); err != nil {
-		t.Fatalf("poll error: %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	joined := make(chan struct{})
+	var release sync.Once
+	go func() { defer close(joined); done <- s.poll(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		release.Do(func() { close(disp.release) })
+		select {
+		case <-joined:
+		case <-time.After(30 * time.Second):
+			t.Error("poll cleanup did not complete")
+		}
+	})
+	watchdog := time.NewTimer(30 * time.Second)
+	defer watchdog.Stop()
+	seen := awaitHeldDispatches(t, disp.entered, n, watchdog.C)
+	if got := disp.active.Load(); got != n {
+		t.Errorf("active=%d, want %d", got, n)
 	}
-
+	release.Do(func() { close(disp.release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-watchdog.C:
+		t.Fatal("poll did not complete after releasing dispatches")
+	}
 	if got := disp.calls.Load(); got != n {
-		t.Fatalf("expected %d dispatch calls, got %d", n, got)
+		t.Fatalf("completions=%d, want %d", got, n)
 	}
-	if peak := disp.peak.Load(); peak < 2 {
-		t.Errorf("expected concurrent dispatch (peak active >= 2), got peak=%d", peak)
+	for i, job := range s.store.Jobs {
+		assert.True(t, seen[fmt.Sprintf("msg%d", i)], "missing message %d", i)
+		assert.EqualValues(t, 1, job.State.RunCount, job.ID)
+		assert.EqualValues(t, 1, job.State.SuccessCount, job.ID)
 	}
 }
 
@@ -286,4 +303,21 @@ func TestScheduler_AtomicDispatchCounter(t *testing.T) {
 	if got := callCount.Load(); got != n {
 		t.Errorf("expected %d atomic dispatch calls, got %d", n, got)
 	}
+}
+
+func awaitHeldDispatches(t *testing.T, entered <-chan Payload, n int, watchdog <-chan time.Time) map[string]bool {
+	t.Helper()
+	seen := make(map[string]bool, n)
+	for len(seen) < n {
+		select {
+		case p := <-entered:
+			if seen[p.Message] {
+				t.Fatalf("duplicate dispatch: %s", p.Message)
+			}
+			seen[p.Message] = true
+		case <-watchdog:
+			t.Fatalf("concurrent dispatch hung: entered=%d of %d", len(seen), n)
+		}
+	}
+	return seen
 }

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/config"
@@ -32,7 +33,7 @@ func TestWaitForShutdown_TriggerOrderingAndSubscription(t *testing.T) {
 	for _, trigger := range []string{"signal", "parent", subsystemTrigger} {
 		t.Run(trigger, func(t *testing.T) {
 			t.Parallel()
-			checkShutdownTrigger(t, trigger)
+			synctest.Test(t, func(t *testing.T) { checkShutdownTrigger(t, trigger) })
 		})
 	}
 }
@@ -126,10 +127,11 @@ func checkShutdownDrain(t *testing.T, cleanupStarted <-chan bool, result <-chan 
 	case <-time.After(2 * time.Second):
 		t.Fatal("runtime cancellation did not start worker cleanup within drain window")
 	}
+	synctest.Wait()
 	select {
 	case err := <-result:
 		t.Fatalf("shutdown returned before worker release: %v", err)
-	case <-time.After(20 * time.Millisecond):
+	default:
 	}
 	if len(stopped) != 0 {
 		t.Error("subscription stopped before wait returned")

@@ -96,17 +96,30 @@ func TestStartDashboard_NoTokenForcesLoopback(t *testing.T) {
 }
 
 func TestDrainGoroutines(t *testing.T) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		time.Sleep(50 * time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		var wg sync.WaitGroup
+		release := make(chan struct{})
+		var once sync.Once
+		unblock := func() { once.Do(func() { close(release) }) }
+		defer func() { unblock(); wg.Wait(); synctest.Wait() }()
+		wg.Add(1)
+		go func() { defer wg.Done(); <-release }()
+		done := make(chan struct{})
+		go func() { DrainGoroutines(&wg, time.Hour); close(done) }()
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("drain did not wait for worker")
+		default:
+		}
+		unblock()
+		<-done
+		wg.Wait()
+		wg.Add(1)
+		DrainGoroutines(&wg, time.Hour) // Virtual timeout while the test owns the unfinished work.
 		wg.Done()
-	}()
-	DrainGoroutines(&wg, 500*time.Millisecond)
-
-	wg.Add(1)
-	DrainGoroutines(&wg, 10*time.Millisecond)
-	wg.Done()
+		synctest.Wait()
+	})
 }
 
 func TestStartCron_Disabled(t *testing.T) {
@@ -999,10 +1012,22 @@ func TestJoinSessionCompactionsSharedDeadline(t *testing.T) {
 	old := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(old) })
-	started := time.Now()
-	joinSessionCompactions(20*time.Millisecond, managers...)
-	if time.Since(started) > time.Second {
-		t.Fatal("shared deadline was not bounded")
+	expired, cancel := context.WithDeadline(context.Background(), time.Time{})
+	defer cancel()
+	var seen []context.Context
+	waiters := make([]func(context.Context) error, len(managers))
+	for i, mgr := range managers {
+		waiters[i] = func(ctx context.Context) error {
+			seen = append(seen, ctx)
+			if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Errorf("join received live context: %v", ctx.Err())
+			}
+			return mgr.WaitForBackgroundCompactions(ctx)
+		}
+	}
+	joinSessionCompactionsWithContext(expired, waiters...)
+	if len(seen) != 2 || seen[0] != expired || seen[1] != expired {
+		t.Fatal("managers did not share the same expired context")
 	}
 	if strings.Count(logs.String(), "background compaction drain failed") != 2 {
 		t.Fatalf("expected two structured warnings: %s", logs.String())

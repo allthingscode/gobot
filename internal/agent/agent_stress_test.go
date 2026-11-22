@@ -7,103 +7,125 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 // TestDispatch_Concurrent_SameSession verifies that 10 concurrent calls
 // with the same session key are correctly serialized (no overlaps).
 func TestDispatch_Concurrent_SameSession(t *testing.T) {
 	t.Parallel()
-	runner := &mockRunner{
-		response: "ok",
-		delay:    50 * time.Millisecond, // Increase chance of seeing overlaps if locking failed
-	}
-	mgr := NewSessionManager(runner, nil, "model")
+	synctest.Test(t, func(t *testing.T) {
+		entered := make(chan string, 10)
+		release := make(chan struct{})
+		var once sync.Once
+		unblock := func() { once.Do(func() { close(release) }) }
+		defer unblock()
+		runner := &mockRunner{response: "ok", entered: entered, release: release}
+		mgr := NewSessionManager(runner, nil, "model")
 
-	const n = 10
-	var wg sync.WaitGroup
-	errs := make([]error, n)
-	var mu sync.Mutex
+		const n = 10
+		var wg sync.WaitGroup
+		errs := make([]error, n)
+		var mu sync.Mutex
 
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			_, err := mgr.Dispatch(context.Background(), "shared-key", "", "msg")
-			mu.Lock()
-			errs[idx] = err
-			mu.Unlock()
-		}(i)
-	}
-	wg.Wait()
-
-	mu.Lock()
-	for i, err := range errs {
-		if err != nil {
-			t.Errorf("goroutine %d: unexpected error: %v", i, err)
+		launch := func(idx int) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := mgr.Dispatch(context.Background(), t.Name(), "", "msg")
+				mu.Lock()
+				errs[idx] = err
+				mu.Unlock()
+			}()
 		}
-	}
-	mu.Unlock()
+		launch(0)
+		<-entered // Establish the holder before launching its contenders.
+		for i := 1; i < n; i++ {
+			launch(i)
+		}
+		synctest.Wait()
+		if got := GetLockMetrics()[t.Name()].WaitCount; got != n-1 {
+			t.Errorf("waiters = %d, want %d", got, n-1)
+		}
+		if len(entered) != 0 {
+			t.Error("same-session runner entered while first call held")
+		}
+		unblock()
+		wg.Wait()
 
-	runner.mu.Lock()
-	maxActive := runner.maxActive["shared-key"]
-	callCount := len(runner.calls)
-	runner.mu.Unlock()
+		mu.Lock()
+		for i, err := range errs {
+			if err != nil {
+				t.Errorf("goroutine %d: unexpected error: %v", i, err)
+			}
+		}
+		mu.Unlock()
 
-	if callCount != n {
-		t.Errorf("expected %d runner calls, got %d", n, callCount)
-	}
-	if maxActive > 1 {
-		t.Errorf("detected %d concurrent calls for the same session; expected serialized execution (max 1)", maxActive)
-	}
+		runner.mu.Lock()
+		maxActive := runner.maxActive[t.Name()]
+		callCount := len(runner.calls)
+		runner.mu.Unlock()
+
+		if callCount != n {
+			t.Errorf("expected %d runner calls, got %d", n, callCount)
+		}
+		if maxActive > 1 {
+			t.Errorf("detected %d concurrent calls for the same session; expected serialized execution (max 1)", maxActive)
+		}
+	})
 }
 
 // TestDispatch_Concurrent_DifferentSessions verifies that 10 concurrent calls
 // with unique session keys proceed in parallel.
 func TestDispatch_Concurrent_DifferentSessions(t *testing.T) {
 	t.Parallel()
-	runner := &mockRunner{
-		response: "ok",
-		delay:    100 * time.Millisecond,
-	}
-	mgr := NewSessionManager(runner, nil, "model")
+	synctest.Test(t, func(t *testing.T) {
+		entered := make(chan string, 10)
+		release := make(chan struct{})
+		var once sync.Once
+		unblock := func() { once.Do(func() { close(release) }) }
+		defer unblock()
+		runner := &mockRunner{response: "ok", entered: entered, release: release}
+		mgr := NewSessionManager(runner, nil, "model")
 
-	const n = 10
-	var wg sync.WaitGroup
-	errs := make([]error, n)
+		const n = 10
+		var wg sync.WaitGroup
+		errs := make([]error, n)
 
-	start := time.Now()
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			key := fmt.Sprintf("session-%d", idx)
-			_, err := mgr.Dispatch(context.Background(), key, "", "msg")
-			errs[idx] = err
-		}(i)
-	}
-	wg.Wait()
-	duration := time.Since(start)
-
-	for i, err := range errs {
-		if err != nil {
-			t.Errorf("goroutine %d: unexpected error: %v", i, err)
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				key := fmt.Sprintf("%s/session-%d", t.Name(), idx)
+				_, err := mgr.Dispatch(context.Background(), key, "", "msg")
+				errs[idx] = err
+			}(i)
 		}
-	}
+		for i := 0; i < n; i++ {
+			<-entered
+		}
+		runner.mu.Lock()
+		if len(runner.activeCalls) != n {
+			t.Errorf("active sessions = %d, want %d", len(runner.activeCalls), n)
+		}
+		runner.mu.Unlock()
+		unblock()
+		wg.Wait()
 
-	// If they were serialized, duration would be >= n * delay (10 * 100ms = 1s).
-	// If parallel, it should be slightly more than 100ms.
-	if duration >= 500*time.Millisecond {
-		t.Errorf("execution took %v; expected parallel execution (< 500ms for 10x100ms parallel tasks)", duration)
-	}
+		for i, err := range errs {
+			if err != nil {
+				t.Errorf("goroutine %d: unexpected error: %v", i, err)
+			}
+		}
 
-	runner.mu.Lock()
-	callCount := len(runner.calls)
-	runner.mu.Unlock()
+		runner.mu.Lock()
+		callCount := len(runner.calls)
+		runner.mu.Unlock()
 
-	if callCount != n {
-		t.Errorf("expected %d runner calls, got %d", n, callCount)
-	}
+		if callCount != n {
+			t.Errorf("expected %d runner calls, got %d", n, callCount)
+		}
+	})
 }
 
 // TestDispatch_LockMap_Stability verifies that after 1000 sequential unique sessions,

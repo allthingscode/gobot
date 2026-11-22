@@ -1,6 +1,7 @@
 //go:build windows
 
-package sandbox_test
+//nolint:testpackage // injects the private executor timeout factory
+package sandbox
 
 import (
 	"context"
@@ -14,17 +15,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allthingscode/gobot/internal/sandbox"
 	"golang.org/x/sys/windows"
 )
 
 const sandboxHelperEnv = "GOBOT_SANDBOX_HELPER"
-const sandboxStartupDelayEnv = "GOBOT_SANDBOX_STARTUP_DELAY"
+const sandboxStartupGateEnv = "GOBOT_SANDBOX_STARTUP_GATE"
 
 func TestExecutorCancelsProcessTree(t *testing.T) { //nolint:paralleltest // manipulates inherited helper env and process tree state
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	helper := sandboxProcessTreeHelper(t, ctx, sandbox.Config{SandboxRoot: t.TempDir()})
+	helper := sandboxProcessTreeHelper(t, ctx, Config{SandboxRoot: t.TempDir()})
 
 	grandchildPID := waitForHelperPID(t, helper)
 	cancel()
@@ -33,27 +33,25 @@ func TestExecutorCancelsProcessTree(t *testing.T) { //nolint:paralleltest // man
 }
 
 func TestExecutorTimeoutKillsProcessTree(t *testing.T) { //nolint:paralleltest // manipulates inherited helper env and process tree state
-	// Controlled startup pressure exceeds the old 750ms budget. This delay
-	// exercises helper startup, rather than sleeping in an assertion loop.
-	t.Setenv(sandboxStartupDelayEnv, "1s")
-	helper := sandboxProcessTreeHelper(t, context.Background(), sandbox.Config{
-		SandboxRoot: t.TempDir(),
-		// Startup shares this budget. Concurrent suite/coverage load measured
-		// 8.74s to observe readiness. Allow 10s for readiness and 5s for
-		// observing a live grandchild before the configured timeout fires.
-		Timeout: 15 * time.Second,
-	})
-
+	timeoutFactory, expire := controlledTreeTimeout(t)
+	helper := sandboxProcessTreeHelper(t, context.Background(), Config{
+		SandboxRoot: t.TempDir(), Timeout: time.Hour,
+	}, timeoutFactory)
 	grandchildPID := waitForHelperPID(t, helper)
-	waitForProcessExit(t, grandchildPID, 20*time.Second)
+	expire()
+	waitForProcessExit(t, grandchildPID, 5*time.Second)
 	helper.wait(t, "Run after configured timeout")
 }
 
 func TestExecutorProcessTreeStartupConsumesTimeout(t *testing.T) { //nolint:paralleltest // inherited helper env
-	t.Setenv(sandboxStartupDelayEnv, "1s")
-	helper := sandboxProcessTreeHelper(t, context.Background(), sandbox.Config{
-		SandboxRoot: t.TempDir(), Timeout: 750 * time.Millisecond,
-	})
+	gate := filepath.Join(t.TempDir(), "startup")
+	t.Setenv(sandboxStartupGateEnv, gate)
+	timeoutFactory, expire := controlledTreeTimeout(t)
+	helper := sandboxProcessTreeHelper(t, context.Background(), Config{
+		SandboxRoot: t.TempDir(), Timeout: time.Hour,
+	}, timeoutFactory)
+	waitForStartupEntry(t, helper, gate+".entered")
+	expire()
 	helper.wait(t, "configured timeout before readiness")
 	select {
 	case <-helper.done:
@@ -68,7 +66,7 @@ func TestExecutorProcessTreeStartupConsumesTimeout(t *testing.T) { //nolint:para
 func TestExecutorEnforcesMemoryLimit(t *testing.T) {
 	t.Setenv(sandboxHelperEnv, "1")
 
-	runner := sandbox.New(sandbox.Config{
+	runner := New(Config{
 		SandboxRoot: t.TempDir(),
 		MaxMemoryMB: 32,
 		Timeout:     10 * time.Second,
@@ -87,14 +85,17 @@ func TestExecutorEnforcesMemoryLimit(t *testing.T) {
 	}
 }
 
-func sandboxProcessTreeHelper(t *testing.T, ctx context.Context, cfg sandbox.Config) *treeHelper {
+func sandboxProcessTreeHelper(t *testing.T, ctx context.Context, cfg Config, timeoutFactory ...func(context.Context, time.Duration) (context.Context, context.CancelFunc)) *treeHelper {
 	t.Helper()
 	t.Setenv(sandboxHelperEnv, "1")
 
 	pidFile := t.TempDir() + `\grandchild.pid`
 	ctx, cancel := context.WithCancel(ctx)
 	helper := &treeHelper{pidFile: pidFile, done: make(chan struct{}), started: time.Now()}
-	runner := sandbox.New(cfg)
+	runner := New(cfg)
+	if len(timeoutFactory) > 0 {
+		runner.(*winExecutor).withTimeout = timeoutFactory[0]
+	}
 	go func() {
 		output, err := runner.Run(ctx, os.Args[0], []string{
 			"-test.run=^TestSandboxHelperProcess$",
@@ -196,14 +197,16 @@ func runTreeParentHelper(args []string) {
 		fmt.Fprintln(os.Stderr, "tree-parent requires pid file path")
 		os.Exit(2)
 	}
-	if delayText := os.Getenv(sandboxStartupDelayEnv); delayText != "" {
-		delay, err := time.ParseDuration(delayText)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "parse startup delay: %v\n", err)
+	if gate := os.Getenv(sandboxStartupGateEnv); gate != "" {
+		if err := os.WriteFile(gate+".entered", []byte("entered"), 0o600); err != nil { //nolint:gosec // parent-owned helper gate path
 			os.Exit(2)
 		}
-		fmt.Printf("tree-parent startup delay %s\n", delay)
-		time.Sleep(delay)
+		for {
+			if _, err := os.Stat(gate + ".release"); err == nil { //nolint:gosec // parent-owned helper gate path
+				break
+			}
+			time.Sleep(10 * time.Millisecond) // Poll an explicit parent-owned gate.
+		}
 	}
 
 	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestSandboxHelperProcess$", "--", "tree-grandchild") //nolint:gosec // test helper executes current test binary
@@ -385,4 +388,48 @@ func isProcessAlive(pid uint32) (bool, error) {
 		return false, fmt.Errorf("WaitForSingleObject: %w", err)
 	}
 	return waitResult == uint32(windows.WAIT_TIMEOUT), nil
+}
+
+func waitForStartupEntry(t *testing.T, helper *treeHelper, path string) {
+	t.Helper()
+	watchdog := time.NewTimer(treeWaitBound(t, 30*time.Second, false))
+	defer watchdog.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		select {
+		case <-helper.done:
+			t.Fatalf("helper exited before startup gate: %v", helper.result.err)
+		case <-watchdog.C:
+			t.Fatal("helper never entered startup gate")
+		case <-ticker.C:
+		}
+	}
+}
+
+// A controlled timeout retains parent cancellation and reports deadline expiry.
+type treeTimeoutContext struct{ context.Context }
+
+func (c treeTimeoutContext) Err() error {
+	if errors.Is(context.Cause(c.Context), context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	return c.Context.Err()
+}
+func controlledTreeTimeout(t *testing.T) (factory func(context.Context, time.Duration) (context.Context, context.CancelFunc), expire context.CancelFunc) {
+	t.Helper()
+	trigger, expire := context.WithCancel(context.Background())
+	t.Cleanup(expire)
+	factory = func(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+		if timeout != time.Hour {
+			t.Errorf("timeout=%v, want 1h", timeout)
+		}
+		ctx, cancel := context.WithCancelCause(parent)
+		stop := context.AfterFunc(trigger, func() { cancel(context.DeadlineExceeded) })
+		return treeTimeoutContext{ctx}, func() { stop(); cancel(context.Canceled) }
+	}
+	return factory, expire
 }

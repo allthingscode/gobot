@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -21,7 +22,8 @@ func New(cfg Config) Executor {
 }
 
 type winExecutor struct {
-	cfg Config
+	cfg         Config
+	withTimeout func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 
 // Run starts name with args inside a Windows Job Object with the configured limits.
@@ -32,7 +34,7 @@ type winExecutor struct {
 func (e *winExecutor) Run(ctx context.Context, name string, args []string) (string, error) {
 	if e.cfg.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, e.cfg.Timeout)
+		ctx, cancel = e.timeoutContext(ctx)
 		defer cancel()
 	}
 
@@ -197,4 +199,11 @@ func resumeThread(threadID uint32) error {
 		return fmt.Errorf("ResumeThread: %w", err)
 	}
 	return nil
+}
+
+func (e *winExecutor) timeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if e.withTimeout != nil {
+		return e.withTimeout(ctx, e.cfg.Timeout)
+	}
+	return context.WithTimeout(ctx, e.cfg.Timeout)
 }
