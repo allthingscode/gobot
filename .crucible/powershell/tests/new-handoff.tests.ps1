@@ -1141,14 +1141,14 @@ budget_tier: "low"
             & git commit -m "commit B" --quiet
             $tipB = (Invoke-ExternalCommand -AsLines { & git rev-parse HEAD }).Trim()
             & git checkout master --quiet
-            Start-Sleep -Milliseconds 1100
+            Move-Item -LiteralPath $firstFile.FullName -Destination (Join-Path $handoffs ($taskId + "-20000101-000000.json"))
             $second = Invoke-Generator -InputArgs $argsForHandoff -NoRegister
             if ($second.ExitCode -ne 0) { throw "Later handoff failed: $($second.Output)" }
             $secondFile = Get-ChildItem -Path $handoffs -Filter ($taskId + "-*.json") | Sort-Object Name -Descending | Select-Object -First 1
             $secondHash = (Get-Content -LiteralPath $secondFile.FullName -Raw | ConvertFrom-Json).commit_hash
 
+            Move-Item -LiteralPath $secondFile.FullName -Destination (Join-Path $handoffs ($taskId + "-20000101-000001.json"))
             & git branch -D "task/$taskId" --quiet
-            Start-Sleep -Milliseconds 1100
             $control = Invoke-Generator -InputArgs $argsForHandoff -NoRegister
             if ($control.ExitCode -ne 0) { throw "No-branch handoff failed: $($control.Output)" }
             $controlFile = Get-ChildItem -Path $handoffs -Filter ($taskId + "-*.json") | Sort-Object Name -Descending | Select-Object -First 1

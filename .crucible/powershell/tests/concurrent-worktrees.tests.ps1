@@ -201,7 +201,6 @@ try {
         Assert-CrucibleSuccess -Result $resFirst -Name "task A recreate crucible init"
         Assert-Result -Name "worktree A recreated" -Condition (Test-Path $wtA) -FailureMessage "worktree A was not recreated"
 
-        Start-Sleep -Milliseconds 10
         Write-GroomerHandoff -ProjectRoot $projectRoot -TaskId $taskA | Out-Null
         $resSecond = Invoke-CrucibleForArchitect -ProjectRoot $projectRoot -TaskId $taskA
         Assert-CrucibleSuccess -Result $resSecond -Name "task A same-ID crucible init"

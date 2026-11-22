@@ -405,18 +405,26 @@ Invoke-FileLock -LockPath ($Record + '.lock') -TimeoutMs 100 -ScriptBlock { thro
         New-Item -ItemType Directory -Path $session -Force | Out-Null
         $libText = (Join-Path $REPO_ROOT "powershell/lib/checks-not-run.ps1").Replace("'", "''")
         $procs = @()
+        $readyFiles = @()
         foreach ($source in @("scope gate", "isolated checks")) {
             $script = Join-Path $tempRoot ("not-run-concurrent/" + $source.Replace(" ", "-") + ".ps1")
+            $ready = $script + ".ready"
+            $readyFiles += $ready
             $body = @(
                 "`$ErrorActionPreference = 'Stop'",
                 ". '$libText'",
+                "[IO.File]::WriteAllText('$ready', 'ready')",
                 "while (-not (Test-Path -LiteralPath '$go')) { Start-Sleep -Milliseconds 10 }",
                 "for (`$i = 0; `$i -lt 25; `$i++) { Write-CheckNotRun -SessionDir '$session' -TaskId 'F-259' -Source '$source' -Check (""check "" + `$i) -Reason ""writer race"" }"
             ) -join "`n"
             [System.IO.File]::WriteAllText($script, $body, (New-Object System.Text.UTF8Encoding($false)))
             $procs += Start-Process -FilePath $pwshCmd -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $script) -PassThru -NoNewWindow -RedirectStandardError ($script + ".err")
         }
-        Start-Sleep -Milliseconds 1500
+        $deadline = [datetime]::UtcNow.AddSeconds(120)
+        while (@($readyFiles | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -gt 0) {
+            if ([datetime]::UtcNow -gt $deadline) { throw 'writers did not reach the go barrier' }
+            Start-Sleep -Milliseconds 10
+        }
         [System.IO.File]::WriteAllText($go, "go")
         foreach ($p in $procs) { $p.WaitForExit(120000) | Out-Null }
         $errors = @($procs | ForEach-Object { $_.ExitCode }) -join ","

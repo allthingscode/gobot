@@ -24,21 +24,48 @@ function Stage-RunnerScratch {
     Copy-Item -Path (Join-Path $PSScriptRoot "_*.ps1") -Destination $testsDir -Force
     Copy-TestRunnerLibraries -Destination $libDir
     Set-Content -LiteralPath (Join-Path $testsDir "_fixtures.ps1") -Value 'function Get-SharedAdopterFixture { return $null }' -Encoding UTF8
+    # Hold every dispatched child until the whole current pool has recorded begin.
+    # A wrongly pooled serial child must therefore overlap the pool, at any speed.
+    $runner = Join-Path $powershellDir 'run-all-tests.ps1'
+    $source = [IO.File]::ReadAllText($runner)
+    $anchor = '                    # Check status of running processes'
+    Assert-Result 'scheduling barrier remains calibrated' ($source.Contains($anchor)) 'pool status point changed'
+    $barrier = @"
+                    `$deadline = [datetime]::UtcNow.AddSeconds(120)
+                    foreach (`$probe in `$running) {
+                        `$begin = Join-Path `$env:CRUCIBLE_SERIAL_MARKER_LOG (`$probe.File.Name + '.begin')
+                        while (-not (Test-Path -LiteralPath `$begin)) {
+                            if ([datetime]::UtcNow -gt `$deadline) { throw 'probe did not begin' }
+                            Start-Sleep -Milliseconds 10
+                        }
+                    }
+                    foreach (`$probe in `$running) {
+                        [IO.File]::WriteAllText((Join-Path `$env:CRUCIBLE_SERIAL_MARKER_LOG (`$probe.File.Name + '.release')), 'go')
+                    }
+"@
+    $source = $source.Replace($anchor, $barrier + "`n" + $anchor)
+    [IO.File]::WriteAllText($runner, $source, [Text.UTF8Encoding]::new($false))
     return $powershellDir
 }
 
-# A synthetic test that records its start and end, in UTC ticks, under the directory the
-# caller names in CRUCIBLE_SERIAL_MARKER_LOG, sleeping in between so overlap is visible.
+# Each begin marker records which children had ended; no wall clock determines order.
+# A scheduler handshake makes overlap observable.
 function Write-RecordingTest {
-    param([string]$Path, [string]$Header, [int]$SleepMs)
+    param([string]$Path, [string]$Header, [switch]$WaitForRelease)
     $name = Split-Path -Leaf $Path
     $body = @"
 $Header
 `$ErrorActionPreference = "Stop"
 `$log = `$env:CRUCIBLE_SERIAL_MARKER_LOG
-[System.IO.File]::WriteAllText((Join-Path `$log "$name.begin"), [string][DateTime]::UtcNow.Ticks)
-Start-Sleep -Milliseconds $SleepMs
-[System.IO.File]::WriteAllText((Join-Path `$log "$name.end"), [string][DateTime]::UtcNow.Ticks)
+[System.IO.File]::WriteAllText((Join-Path `$log "$name.begin"), ((@(Get-ChildItem -LiteralPath `$log -Filter '*.end') | ForEach-Object { `$_.Name }) -join "`n"))
+if (`$$($WaitForRelease.IsPresent.ToString().ToLowerInvariant())) {
+    `$deadline = [datetime]::UtcNow.AddSeconds(120)
+    while (-not (Test-Path -LiteralPath (Join-Path `$log "$name.release"))) {
+        if ([datetime]::UtcNow -gt `$deadline) { throw 'scheduler did not release the probe' }
+        Start-Sleep -Milliseconds 10
+    }
+}
+[System.IO.File]::WriteAllText((Join-Path `$log "$name.end"), 'ended')
 Write-Host "PASSED"
 exit 0
 "@
@@ -51,11 +78,11 @@ function Invoke-ScratchRunner {
     return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($out -join "`n") }
 }
 
-function Get-Ticks {
+function Get-RecordedEnds {
     param([string]$Log, [string]$Name)
     $path = Join-Path $Log $Name
-    if (-not (Test-Path -LiteralPath $path)) { return $null }
-    return [long]([System.IO.File]::ReadAllText($path).Trim())
+    if (-not (Test-Path -LiteralPath $path)) { return @() }
+    return @([System.IO.File]::ReadAllLines($path))
 }
 
 try {
@@ -72,9 +99,9 @@ try {
         # Its weight starts it first if the declaration is lost, exposing overlap below.
         $header = (Get-Content -LiteralPath (Join-Path $PSScriptRoot $name) -TotalCount 20) -join "`n"
         $comments = ($header -split "`n" | Where-Object { $_ -match '^\s*#' }) -join "`n"
-        Write-RecordingTest -Path (Join-Path $testsDir $name) -Header $comments -SleepMs 1500
+        Write-RecordingTest -Path (Join-Path $testsDir $name) -Header $comments -WaitForRelease
         foreach ($worker in @("bbb", "ccc", "ddd")) {
-            Write-RecordingTest -Path (Join-Path $testsDir "$worker.tests.ps1") -Header "# CI pool worker" -SleepMs 3000
+            Write-RecordingTest -Path (Join-Path $testsDir "$worker.tests.ps1") -Header "# CI pool worker" -WaitForRelease
         }
         $env:CRUCIBLE_SERIAL_MARKER_LOG = $log
         try {
@@ -83,11 +110,10 @@ try {
             Remove-Item env:CRUCIBLE_SERIAL_MARKER_LOG -ErrorAction SilentlyContinue
         }
         Assert-Result -Name "all scheduling probes ran successfully" -Condition ($r.ExitCode -eq 0 -and $r.Output -match 'Passed: 4') -FailureMessage $r.Output
-        $begin = Get-Ticks $log "$name.begin"
-        Assert-Result -Name "adopter probe ran" -Condition ($null -ne $begin) -FailureMessage $r.Output
+        $begin = @(Get-RecordedEnds $log "$name.begin")
+        Assert-Result -Name "adopter probe ran" -Condition (Test-Path -LiteralPath (Join-Path $log "$name.begin")) -FailureMessage $r.Output
         foreach ($worker in @("bbb", "ccc", "ddd")) {
-            $end = Get-Ticks $log "$worker.tests.ps1.end"
-            Assert-Result -Name "adopter starts after $worker finishes" -Condition ($null -ne $end -and $begin -ge $end) -FailureMessage "the silent update fixture shared contention with a CI pool worker"
+            Assert-Result -Name "adopter starts after $worker finishes" -Condition ($begin -contains "$worker.tests.ps1.end") -FailureMessage "the silent update fixture shared contention with a CI pool worker"
         }
     }
 
@@ -98,10 +124,10 @@ try {
         New-Item -ItemType Directory -Path $log -Force | Out-Null
         # The serial files sort first by name, so a runner that ignored the marker would
         # start them alongside the pool files.
-        Write-RecordingTest -Path (Join-Path $testsDir "aaa-serial.tests.ps1") -Header "# crucible-test: serial - records its own timing" -SleepMs 1500
-        Write-RecordingTest -Path (Join-Path $testsDir "aab-serial.tests.ps1") -Header "# crucible-test: serial: also records its own timing" -SleepMs 1500
-        Write-RecordingTest -Path (Join-Path $testsDir "bbb-pool.tests.ps1") -Header "# pool file" -SleepMs 3000
-        Write-RecordingTest -Path (Join-Path $testsDir "ccc-pool.tests.ps1") -Header "# pool file" -SleepMs 3000
+        Write-RecordingTest -Path (Join-Path $testsDir "aaa-serial.tests.ps1") -Header "# crucible-test: serial - records its own timing" -WaitForRelease
+        Write-RecordingTest -Path (Join-Path $testsDir "aab-serial.tests.ps1") -Header "# crucible-test: serial: also records its own timing" -WaitForRelease
+        Write-RecordingTest -Path (Join-Path $testsDir "bbb-pool.tests.ps1") -Header "# pool file" -WaitForRelease
+        Write-RecordingTest -Path (Join-Path $testsDir "ccc-pool.tests.ps1") -Header "# pool file" -WaitForRelease
 
         $env:CRUCIBLE_SERIAL_MARKER_LOG = $log
         try {
@@ -113,14 +139,18 @@ try {
         Assert-Result -Name "all four ran" -Condition ($r.Output -match "Passed: 4") -FailureMessage ("expected 'Passed: 4': " + $r.Output)
         Assert-Result -Name "names the file and its reason" -Condition ($r.Output -match "SERIAL aaa-serial\.tests\.ps1 - records its own timing") -FailureMessage ("expected the SERIAL line with the reason: " + $r.Output)
 
-        $poolEnd = [Math]::Max((Get-Ticks $log "bbb-pool.tests.ps1.end"), (Get-Ticks $log "ccc-pool.tests.ps1.end"))
-        $aBegin = Get-Ticks $log "aaa-serial.tests.ps1.begin"
-        $aEnd = Get-Ticks $log "aaa-serial.tests.ps1.end"
-        $bBegin = Get-Ticks $log "aab-serial.tests.ps1.begin"
-        $bEnd = Get-Ticks $log "aab-serial.tests.ps1.end"
-        Assert-Result -Name "every file recorded" -Condition ($null -notin @($aBegin, $aEnd, $bBegin, $bEnd, $poolEnd)) -FailureMessage ("a synthetic file did not record its run: " + $r.Output)
-        Assert-Result -Name "serial files start after the pool ends" -Condition (($aBegin -ge $poolEnd) -and ($bBegin -ge $poolEnd)) -FailureMessage "a serial file started while the pool was still running"
-        Assert-Result -Name "serial files do not overlap each other" -Condition (($aEnd -le $bBegin) -or ($bEnd -le $aBegin)) -FailureMessage "two serial files ran at the same time"
+        $aBegin = @(Get-RecordedEnds $log "aaa-serial.tests.ps1.begin")
+        $bBegin = @(Get-RecordedEnds $log "aab-serial.tests.ps1.begin")
+        $recorded = @('aaa-serial', 'aab-serial', 'bbb-pool', 'ccc-pool' | Where-Object {
+            -not (Test-Path -LiteralPath (Join-Path $log "${_}.tests.ps1.begin")) -or
+            -not (Test-Path -LiteralPath (Join-Path $log "${_}.tests.ps1.end"))
+        })
+        Assert-Result -Name "every file recorded" -Condition ($recorded.Count -eq 0) -FailureMessage $r.Output
+        $afterPool = @('bbb-pool.tests.ps1.end', 'ccc-pool.tests.ps1.end' | Where-Object {
+            $_ -notin $aBegin -or $_ -notin $bBegin
+        }).Count -eq 0
+        Assert-Result -Name "serial files start after the pool ends" -Condition $afterPool -FailureMessage "a serial file started while the pool was still running"
+        Assert-Result -Name "serial files do not overlap each other" -Condition (('aaa-serial.tests.ps1.end' -in $bBegin) -or ('aab-serial.tests.ps1.end' -in $aBegin)) -FailureMessage "two serial files ran at the same time"
     }
 
     foreach ($case in @(
@@ -134,8 +164,8 @@ try {
             $testsDir = Join-Path $psDir "tests"
             $log = Join-Path $tempRoot ("bad-" + $slug + "-log")
             New-Item -ItemType Directory -Path $log -Force | Out-Null
-            Write-RecordingTest -Path (Join-Path $testsDir "bad.tests.ps1") -Header $case.Header -SleepMs 0
-            Write-RecordingTest -Path (Join-Path $testsDir "good.tests.ps1") -Header "# pool file" -SleepMs 0
+            Write-RecordingTest -Path (Join-Path $testsDir "bad.tests.ps1") -Header $case.Header
+            Write-RecordingTest -Path (Join-Path $testsDir "good.tests.ps1") -Header "# pool file"
 
             $env:CRUCIBLE_SERIAL_MARKER_LOG = $log
             try {

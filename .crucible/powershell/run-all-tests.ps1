@@ -252,6 +252,11 @@ try {
     # read. Without it the Linux leg would be quietly weaker than the Windows one rather than
     # measurably narrower. Items 102, 104 and 344.
 
+    # Only idle measurement uses this factory, so tests can control silence and resets.
+    function New-TestIdleClock {
+        return [System.Diagnostics.Stopwatch]::StartNew()
+    }
+
     # Consumes every line one stream has already produced, without blocking, restarting
     # the idle clock for each. Returns the still-pending read, or $null once the stream
     # has reached end of stream and must not be read again.
@@ -341,7 +346,7 @@ try {
             OutLines = (New-Object System.Collections.Generic.List[string])
             ErrLines = (New-Object System.Collections.Generic.List[string])
             Stopwatch = $sw
-            Idle = [System.Diagnostics.Stopwatch]::StartNew()
+            Idle = New-TestIdleClock
             StopAttempted = $false
         }
     }
@@ -367,7 +372,7 @@ try {
             $outLines = New-Object System.Collections.Generic.List[string]
             $outRead = $proc.StandardOutput.ReadLineAsync()
             $errRead = $proc.StandardError.ReadLineAsync()
-            $idle = [System.Diagnostics.Stopwatch]::StartNew()
+            $idle = New-TestIdleClock
             $pollMs = 250
             $isTimeout = $false
             $cleanupError = ''

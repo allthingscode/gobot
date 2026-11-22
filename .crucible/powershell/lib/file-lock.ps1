@@ -21,6 +21,11 @@ function Assert-FileLockRuntime {
     }
 }
 
+# Monotonic denial-budget clock; tests advance it without real delays.
+function Get-FileLockDenialNowMs {
+    return [System.Diagnostics.Stopwatch]::GetTimestamp() * 1000.0 / [System.Diagnostics.Stopwatch]::Frequency
+}
+
 # One attempt at the lock: the open handle, or $null while another holder has it. A failure
 # that waiting cannot clear throws, naming the lock as $Description. Every DeleteOnClose lock
 # opens through here, so the runtime floor and the recheck's preconditions have one owner.
@@ -55,13 +60,14 @@ function Open-FileLockHandle {
         $denial = $_.Exception
         while ($null -ne $denial.InnerException) { $denial = $denial.InnerException }
         if (-not $IsWindows -or ($denial.HResult -band 0xFFFF) -ne 5) { throw }
+        $now = Get-FileLockDenialNowMs
         # A closing DeleteOnClose lock can disappear before the denied open returns.
         if (-not $script:FileLockDenials.ContainsKey($LockPath) -or
-            $script:FileLockDenials[$LockPath].LastDenial.ElapsedMilliseconds -gt $script:FileLockDenialStaleMs) {
-            $script:FileLockDenials[$LockPath] = @{ Budget = [System.Diagnostics.Stopwatch]::StartNew(); LastDenial = [System.Diagnostics.Stopwatch]::StartNew() }
+            ($now - $script:FileLockDenials[$LockPath].LastDenial) -gt $script:FileLockDenialStaleMs) {
+            $script:FileLockDenials[$LockPath] = @{ Budget = $now; LastDenial = $now }
         }
-        $script:FileLockDenials[$LockPath].LastDenial.Restart()
-        if ($script:FileLockDenials[$LockPath].Budget.ElapsedMilliseconds -ge $AccessDeniedBudgetMs) {
+        $script:FileLockDenials[$LockPath].LastDenial = $now
+        if (($now - $script:FileLockDenials[$LockPath].Budget) -ge $AccessDeniedBudgetMs) {
             $script:FileLockDenials.Remove($LockPath)
             throw [System.UnauthorizedAccessException]::new("Cannot acquire " + $Description + ": " + $denial.Message, $denial)
         }

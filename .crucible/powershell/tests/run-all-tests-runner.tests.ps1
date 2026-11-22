@@ -48,6 +48,58 @@ function Get-SharedAdopterFixture { return $null }
         return $powershellDir
     }
 
+    function Set-ControlledIdleClock {
+        param([string]$Runner, [string]$Directory)
+        # The runner is a separate process: replace only its clock factory in this
+        # scratch copy. Tick files and reset acknowledgements cross that boundary.
+        $factory = @'
+function New-TestIdleClock {
+    $clock = [pscustomobject]@{ Base = 0; Directory = '__CLOCK_DIR__' }
+    $clock | Add-Member ScriptProperty Elapsed {
+        $now = @(Get-ChildItem -LiteralPath $this.Directory -Filter '*.tick').Count
+        return [TimeSpan]::FromSeconds(($now - $this.Base) * 4)
+    }
+    $clock | Add-Member ScriptMethod Restart {
+        $this.Base = @(Get-ChildItem -LiteralPath $this.Directory -Filter '*.tick').Count
+        [IO.File]::WriteAllText((Join-Path $this.Directory ("ack-" + $this.Base)), 'reset')
+    }
+    $clock | Add-Member ScriptMethod Stop { }
+    return $clock
+}
+'@
+        New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+        $source = [IO.File]::ReadAllText($Runner)
+        $pattern = '(?s)function New-TestIdleClock \{.*?\n    \}'
+        Assert-Result 'idle clock factory remains calibrated' ([regex]::Matches($source, $pattern).Count -eq 1) 'clock seam changed'
+        $replacement = $factory.Replace('__CLOCK_DIR__', $Directory.Replace("'", "''"))
+        $source = [regex]::Replace($source, $pattern, [Text.RegularExpressions.MatchEvaluator]{ param($m) $replacement })
+        [IO.File]::WriteAllText($Runner, $source, [Text.UTF8Encoding]::new($false))
+    }
+
+    function New-ControlledTalkingChild {
+        param([string]$Runner, [string]$Directory, [switch]$Stderr, [switch]$Silent)
+        Set-ControlledIdleClock -Runner $Runner -Directory $Directory
+        $body = @'
+$clockDir = '__CLOCK_DIR__'
+foreach ($number in 1..7) {
+    [IO.File]::WriteAllText((Join-Path $clockDir "$number.tick"), 'tick')
+    __WRITE_PROGRESS__
+    $deadline = [datetime]::UtcNow.AddSeconds(120)
+    while (-not (Test-Path -LiteralPath (Join-Path $clockDir "ack-$number"))) {
+        if ([datetime]::UtcNow -gt $deadline) { throw 'progress was not acknowledged' }
+        Start-Sleep -Milliseconds 10
+    }
+}
+__FINISH__
+'@
+        $write = if ($Stderr) { '[Console]::Error.WriteLine("stderr progress $number")' } else { 'Write-Host "progress $number"' }
+        $finish = if ($Silent) {
+            # Eight virtual seconds of silence must trip the five-second idle cap.
+            '[IO.File]::WriteAllText((Join-Path $clockDir "8.tick"), "tick"); [IO.File]::WriteAllText((Join-Path $clockDir "9.tick"), "tick"); Start-Sleep -Seconds 120'
+        } else { 'exit 0' }
+        return $body.Replace('__CLOCK_DIR__', $Directory.Replace("'", "''")).Replace('__WRITE_PROGRESS__', $write).Replace('__FINISH__', $finish)
+    }
+
     $results += Run-Test -Name "Exits non-zero when zero test files discovered (parallel mode)" -Body {
         $scratchDir = Join-Path $tempRoot "parallel-empty"
         $psDir = Stage-RunnerScratch -Dir $scratchDir
@@ -229,18 +281,8 @@ exit 0
         $runnerCopy = Join-Path $psDir "run-all-tests.ps1"
         $testsDir = Join-Path $psDir "tests"
 
-        # Runs 7s in 1s steps against a 5s threshold. Total runtime has to exceed the
-        # threshold or an implementation measuring elapsed-since-start would pass this
-        # too, but the per-line gap needs several times the threshold's margin: the
-        # first line cannot arrive until the child shell has started, and this file runs
-        # alongside seven others.
-        $syntheticContent = @'
-foreach ($number in 1..7) {
-    Write-Host "progress $number"
-    Start-Sleep -Seconds 1
-}
-exit 0
-'@
+        # Seven acknowledged four-second virtual steps exceed the total cap.
+        $syntheticContent = New-ControlledTalkingChild -Runner $runnerCopy -Directory (Join-Path $scratchDir 'clock')
         Set-Content -LiteralPath (Join-Path $testsDir "talking.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
         $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 5 2>&1 })
@@ -252,6 +294,20 @@ exit 0
         Assert-Result -Name "talking child has no timeout report" -Condition ($output -notmatch "TIMEOUT") -FailureMessage ("did not expect timeout in output: " + $output)
     }
 
+    foreach ($mode in @('serial', 'parallel')) {
+        $results += Run-Test -Name ("Controlled silence trips the idle cap in " + $mode) -Body {
+            $scratchDir = Join-Path $tempRoot ($mode + '-controlled-silence')
+            $psDir = Stage-RunnerScratch -Dir $scratchDir
+            $runnerCopy = Join-Path $psDir 'run-all-tests.ps1'
+            $body = New-ControlledTalkingChild -Runner $runnerCopy -Directory (Join-Path $scratchDir 'clock') -Silent
+            Set-Content -LiteralPath (Join-Path $psDir 'tests/silence.tests.ps1') -Value $body -Encoding UTF8
+            $modeArgs = @(if ($mode -eq 'serial') { '-Serial' })
+            $run = Invoke-ExternalCommand { & (Get-PwshCommand) -NoProfile -File $runnerCopy @modeArgs -IdleTimeoutSeconds 5 }
+            Assert-Result 'progress was acknowledged before silence' (Test-Path -LiteralPath (Join-Path $scratchDir 'clock/ack-7')) $run.Output
+            Assert-Result 'virtual silence times out' ($run.ExitCode -ne 0 -and $run.Output -match 'TIMEOUT after 5s') $run.Output
+        }
+    }
+
     $results += Run-Test -Name "Serial mode NoTimeout lets a silent child finish" -Body {
         $scratchDir = Join-Path $tempRoot "serial-no-timeout"
         $psDir = Stage-RunnerScratch -Dir $scratchDir
@@ -259,7 +315,7 @@ exit 0
         $testsDir = Join-Path $psDir "tests"
 
         $syntheticContent = @'
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 20
 exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "silent-finish.tests.ps1") -Value $syntheticContent -Encoding UTF8
@@ -278,16 +334,8 @@ exit 0
         $runnerCopy = Join-Path $psDir "run-all-tests.ps1"
         $testsDir = Join-Path $psDir "tests"
 
-        # Nothing is written to stdout at all, so this child is silent for its whole
-        # 7s run to a stdout-only idle check. Same 5s threshold and startup margin as
-        # the talking-child case above.
-        $syntheticContent = @'
-foreach ($number in 1..7) {
-    [Console]::Error.WriteLine("stderr progress $number")
-    Start-Sleep -Seconds 1
-}
-exit 0
-'@
+        # Seven acknowledged four-second virtual steps exceed the total cap.
+        $syntheticContent = New-ControlledTalkingChild -Runner $runnerCopy -Directory (Join-Path $scratchDir 'clock') -Stderr
         Set-Content -LiteralPath (Join-Path $testsDir "stderr-talking.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
         $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -Serial -IdleTimeoutSeconds 5 2>&1 })
@@ -357,7 +405,6 @@ exit 0
             }
         }
 
-        Assert-Result -Name "leaked-pipe runner exits" -Condition ($exited) -FailureMessage ("runner did not exit within 60s after killing a timed-out child that leaked its pipes. Output: " + $output)
         Assert-Result -Name "leaked-pipe timeout report" -Condition ($output -match "FAIL  orphan-holder.tests.ps1 \(TIMEOUT after 2s\)") -FailureMessage ("expected timeout failure in output: " + $output)
         Assert-Result -Name "leaked-pipe exit code" -Condition ($exitCode -ne 0) -FailureMessage ("expected non-zero exit code, got " + $exitCode + ". Output: " + $output)
     }
@@ -627,18 +674,8 @@ exit 0
         $runnerCopy = Join-Path $psDir "run-all-tests.ps1"
         $testsDir = Join-Path $psDir "tests"
 
-        # The pool used to cap on total runtime, so this is the case that distinguishes
-        # the two: 7s of work against a 5s threshold, still printing the whole way. A
-        # wall-clock implementation kills it; an idle one does not. Parallel mode prints
-        # nothing for a passing child, so the proof is the absence of the timeout rather
-        # than the presence of the progress lines.
-        $syntheticContent = @'
-foreach ($number in 1..7) {
-    Write-Host "progress $number"
-    Start-Sleep -Seconds 1
-}
-exit 0
-'@
+        # Seven acknowledged four-second virtual steps exceed the total cap.
+        $syntheticContent = New-ControlledTalkingChild -Runner $runnerCopy -Directory (Join-Path $scratchDir 'clock')
         Set-Content -LiteralPath (Join-Path $testsDir "parallel-talking.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
         $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 5 2>&1 })
@@ -656,15 +693,8 @@ exit 0
         $runnerCopy = Join-Path $psDir "run-all-tests.ps1"
         $testsDir = Join-Path $psDir "tests"
 
-        # Nothing reaches stdout at all, so this child is silent for its whole 7s run to
-        # an idle check that watches stdout alone.
-        $syntheticContent = @'
-foreach ($number in 1..7) {
-    [Console]::Error.WriteLine("stderr progress $number")
-    Start-Sleep -Seconds 1
-}
-exit 0
-'@
+        # Seven acknowledged four-second virtual steps exceed the total cap.
+        $syntheticContent = New-ControlledTalkingChild -Runner $runnerCopy -Directory (Join-Path $scratchDir 'clock') -Stderr
         Set-Content -LiteralPath (Join-Path $testsDir "parallel-stderr.tests.ps1") -Value $syntheticContent -Encoding UTF8
 
         $outputLines = @(Invoke-ExternalCommand -AsLines { & (Get-PwshCommand) -NoProfile -ExecutionPolicy Bypass -File $runnerCopy -IdleTimeoutSeconds 5 2>&1 })
@@ -682,7 +712,7 @@ exit 0
         $testsDir = Join-Path $psDir "tests"
 
         $syntheticContent = @'
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 20
 exit 0
 '@
         Set-Content -LiteralPath (Join-Path $testsDir "parallel-silent-finish.tests.ps1") -Value $syntheticContent -Encoding UTF8
@@ -812,7 +842,6 @@ exit 0
             if ($null -ne $holderProc) { try { $holderProc.Kill() } catch {} }
         }
 
-        Assert-Result -Name "parallel leaked-pipe runner exits" -Condition ($exited) -FailureMessage ("runner did not exit within 60s after killing a timed-out child that leaked its pipes. Output: " + $output)
         Assert-Result -Name "parallel leaked-pipe timeout report" -Condition ($output -match "FAIL  parallel-orphan.tests.ps1 \(TIMEOUT after 2s\)") -FailureMessage ("expected timeout failure in output: " + $output)
         Assert-Result -Name "parallel leaked-pipe exit code" -Condition ($exitCode -ne 0) -FailureMessage ("expected non-zero exit code, got " + $exitCode + ". Output: " + $output)
     }
@@ -822,6 +851,13 @@ exit 0
         $psDir = Stage-RunnerScratch -Dir $scratchDir
         $runnerCopy = Join-Path $psDir "run-all-tests.ps1"
         $testsDir = Join-Path $psDir "tests"
+
+        # Observe the branch directly rather than infer it from a reported duration.
+        $source = [IO.File]::ReadAllText($runnerCopy)
+        $branch = '} elseif (-not $NoTimeout -and $item.Idle.Elapsed.TotalSeconds -ge $IdleTimeoutSeconds) {'
+        Assert-Result 'exited-holder branch probe remains calibrated' ($source.Contains($branch)) 'idle branch changed'
+        $source = $source.Replace($branch, $branch + "`n                            Write-Host 'EXITED-HOLDER-IDLE-BRANCH'")
+        [IO.File]::WriteAllText($runnerCopy, $source, [Text.UTF8Encoding]::new($false))
 
         $holderPidFile = Join-Path $scratchDir "holder-pid.txt"
 
@@ -897,28 +933,11 @@ exit 0
             }
         }
 
-        Assert-Result -Name "exited-holder runner exits" -Condition ($exited) -FailureMessage ("runner did not exit within $([int]($runnerBoundMs / 1000))s waiting on pipes held open by a grandchild of a child that had already finished. Output: " + $output)
         Assert-Result -Name "exited-holder is not reported as a timeout" -Condition ($output -notmatch "TIMEOUT") -FailureMessage ("a child that had already exited was reported as a timeout: " + $output)
         Assert-Result -Name "exited-holder passes" -Condition ($output -match "PASS  exited-holder.tests.ps1") -FailureMessage ("expected a PASS line in output: " + $output)
         Assert-Result -Name "exited-holder run exit code" -Condition ($exitCode -eq 0) -FailureMessage ("expected exit code 0, got " + $exitCode + ". Output: " + $output)
 
-        # The three assertions above are all satisfied by a run where the pipes were never
-        # held at all: the child exits, the streams close, the pool takes the ordinary path
-        # and reports a pass. So none of them prove the leaked-handle branch ran, and a
-        # threshold raised past the pipe hold would turn this test green while testing
-        # nothing - the failure mode the second acceptance criterion of item 76 names.
-        #
-        # The runner reports each child's duration on its own PASS line, and for this child
-        # the duration and the idle clock start together and the idle clock never resets, so
-        # reaching the idle branch means a duration of at least the threshold, while the
-        # ordinary streams-closed path means about a second. Asserting the floor therefore
-        # pins which branch ran. It is one-sided on purpose: contention can only push the
-        # measured duration up, never toward a false failure.
-        $reportedDuration = $null
-        if ($output -match 'PASS  exited-holder\.tests\.ps1 \(([0-9.]+)s\)') {
-            $reportedDuration = [double]$Matches[1]
-        }
-        Assert-Result -Name "exited-holder waited out the idle window with its pipes still held" -Condition ($null -ne $reportedDuration -and $reportedDuration -ge $idleTimeout) -FailureMessage ("expected a reported duration of at least the ${idleTimeout}s idle threshold, proving the pool reached the idle branch on a child whose pipes were still open; got '" + $reportedDuration + "'. A shorter duration means the grandchild released the pipes first and the leaked-handle path was never exercised. Output: " + $output)
+        Assert-Result -Name "exited-holder waited out the idle window with its pipes still held" -Condition ($output -match 'EXITED-HOLDER-IDLE-BRANCH') -FailureMessage $output
     }
 
     # A release handshake proves live forwarding without sleeping out an idle

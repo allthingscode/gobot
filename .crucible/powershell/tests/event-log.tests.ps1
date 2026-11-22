@@ -79,10 +79,23 @@ param(
 $ErrorActionPreference = "Stop"
 $Quiet = $true
 . $CrucibleLib
+$realOpen = ${function:Open-FileLockHandle}
+function Open-FileLockHandle {
+    param([string]$LockPath)
+    $handle = & $realOpen -LockPath $LockPath
+    if ($null -eq $handle) { [IO.File]::WriteAllText(($EventsPath + '.contended'), 'contended') }
+    return $handle
+}
 
 Invoke-FileLock -LockPath $LockPath -TimeoutMs 200 -ScriptBlock {
     [System.IO.File]::AppendAllText($EventsPath, $Name + "-enter`n", [System.Text.UTF8Encoding]::new($false))
-    Start-Sleep -Milliseconds $HoldMs
+    if ($Name -eq 'holder') {
+        $deadline = [datetime]::UtcNow.AddSeconds(120)
+        while (-not (Test-Path -LiteralPath ($EventsPath + '.contended'))) {
+            if ([datetime]::UtcNow -gt $deadline) { throw 'waiter did not contend' }
+            Start-Sleep -Milliseconds 10
+        }
+    }
     [System.IO.File]::AppendAllText($EventsPath, $Name + "-exit`n", [System.Text.UTF8Encoding]::new($false))
 }
 '@
