@@ -25,6 +25,72 @@ import (
 	"github.com/allthingscode/gobot/internal/provider"
 )
 
+func TestPrimaryCalendarLookupTool(t *testing.T) {
+	t.Parallel()
+	for _, query := range []string{"planning", "", "denied"} {
+		t.Run(query, func(t *testing.T) {
+			t.Parallel()
+			tool := &lookupPrimaryCalendarTool{find: func(_ context.Context, _, query string) ([]google.PrimaryCalendarEvent, error) {
+				if query == "denied" {
+					return nil, fmt.Errorf("scope denied")
+				}
+				return []google.PrimaryCalendarEvent{fetchedCalendarEvent("first-match"), fetchedCalendarEvent("second-match")}, nil
+			}}
+			assertPrimaryLookupTool(t, tool, query)
+		})
+	}
+}
+
+func assertPrimaryLookupTool(t *testing.T, tool *lookupPrimaryCalendarTool, query string) {
+	t.Helper()
+	out, err := tool.Execute(context.Background(), "telegram:123", "", map[string]any{"query": query})
+	if query != "planning" {
+		if err == nil {
+			t.Fatal("expected lookup failure")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"primary", "first-match", "second-match", "Human selection required", "2026-11-01T10:00:00-06:00"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lookup omitted %q", want)
+		}
+	}
+}
+
+func TestRescheduleToolFailsClosed(t *testing.T) {
+	t.Parallel()
+	tool := &rescheduleCalendarTool{reschedule: func(context.Context, string, string, string, string, func(context.Context, google.PrimaryCalendarEvent) error) error {
+		t.Error("unapproved invocation reached integration")
+		return nil
+	}}
+	for _, change := range []string{"shared calendar", "missing calendar", "missing event", "missing approval service", "direct execution"} {
+		t.Run(change, func(t *testing.T) {
+			t.Parallel()
+			args := calendarRescheduleArgs()
+			switch change {
+			case "shared calendar":
+				args["calendar_id"] = "shared"
+			case "missing calendar":
+				delete(args, "calendar_id")
+			case "missing event":
+				delete(args, "event_id")
+			}
+			var err error
+			if change == "direct execution" {
+				_, err = tool.Execute(context.Background(), "telegram:123", "", args)
+			} else {
+				_, err = tool.executeApproved(context.Background(), "telegram:123", args, nil)
+			}
+			if err == nil {
+				t.Fatal("unapproved invocation succeeded")
+			}
+		})
+	}
+}
+
 func TestWebSearchTool(t *testing.T) {
 	t.Parallel()
 	// Mock Google Search API

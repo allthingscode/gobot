@@ -141,7 +141,24 @@ func SetupHooks(cfg *config.Config, runner *AgentRunner, mgr *agent.SessionManag
 		return runner.SideEffectingTools[name]
 	})
 	policyHook := agent.NewPolicyHook(policy, hitl)
-	hooks.RegisterPreTool(policyHook.PreToolHook)
+	hooks.RegisterPreTool(func(ctx context.Context, session, name string, args map[string]any) (string, error) {
+		if name != rescheduleCalendarToolName {
+			return policyHook.PreToolHook(ctx, session, name, args)
+		}
+		// This operation owns one approval after fetching the actual event. Generic
+		// policy/channel HITL would approve model arguments before that fetch.
+		if policy.Evaluate(ctx, agent.PolicyContext{ToolName: name, SessionKey: session, Args: args}) == agent.PolicyDeny {
+			return "", fmt.Errorf("%w: calendar rescheduling is not permitted", agent.ErrToolDenied)
+		}
+		if !cfg.HumanInTheLoop() || !bot.IsTelegramSession(session) || bot.IsCronSession(session) {
+			return "", fmt.Errorf("%w: calendar rescheduling requires enabled interactive Telegram approval", agent.ErrToolDenied)
+		}
+		tool, ok := runner.ToolsByName[name].(*rescheduleCalendarTool)
+		if !ok {
+			return "", fmt.Errorf("%w: calendar rescheduling approval tool unavailable", agent.ErrToolDenied)
+		}
+		return tool.executeApproved(ctx, session, args, hitl)
+	})
 	hooks.RegisterPreTool(hitl.PreToolHook)
 
 	mgr.SetHooks(hooks)

@@ -14,6 +14,7 @@ import (
 	"github.com/allthingscode/gobot/internal/agent"
 	"github.com/allthingscode/gobot/internal/browser"
 	"github.com/allthingscode/gobot/internal/config"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/memory"
 	"github.com/allthingscode/gobot/internal/memory/vector"
 	"github.com/allthingscode/gobot/internal/observability"
@@ -219,6 +220,8 @@ func appendCalendarTaskTools(secretsRoot string, tools []Tool, tracer *observabi
 	return append(tools, []Tool{
 		newListCalendarTool(secretsRoot, tracer),
 		newCreateCalendarEventTool(secretsRoot, tracer),
+		&lookupPrimaryCalendarTool{secretsRoot: secretsRoot, find: google.FindPrimaryCalendarEvents},
+		&rescheduleCalendarTool{secretsRoot: secretsRoot, reschedule: google.ReschedulePrimaryEvent},
 		newListTasksTool(secretsRoot, tracer),
 		newCreateTaskTool(secretsRoot, tracer),
 		newCompleteTaskTool(secretsRoot, tracer),

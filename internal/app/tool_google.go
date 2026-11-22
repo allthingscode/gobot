@@ -2,16 +2,129 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/allthingscode/gobot/internal/agent"
+	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/observability"
 	"github.com/allthingscode/gobot/internal/provider"
 )
+
+const (
+	lookupPrimaryCalendarToolName = "lookup_primary_calendar_events"
+	rescheduleCalendarToolName    = "reschedule_calendar_event"
+)
+
+type lookupPrimaryCalendarTool struct {
+	secretsRoot string
+	find        func(context.Context, string, string) ([]google.PrimaryCalendarEvent, error)
+}
+
+func (t *lookupPrimaryCalendarTool) Name() string { return lookupPrimaryCalendarToolName }
+
+type lookupPrimaryCalendarArgs struct {
+	Query string `json:"query" schema:"Text to find events on the primary calendar. Required. Results include event IDs and original times; present all matches for human selection."`
+}
+
+func (t *lookupPrimaryCalendarTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
+		Name: lookupPrimaryCalendarToolName, Parameters: agent.DeriveSchema(lookupPrimaryCalendarArgs{}),
+		Description: "Find up to 50 matching primary-calendar events with identities. Results may be limited; never infer an event ID from a title. The human must select the exact event in the rescheduling approval.",
+	}
+}
+
+func (t *lookupPrimaryCalendarTool) Execute(ctx context.Context, _, _ string, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("calendar lookup: query is required")
+	}
+	events, err := t.find(ctx, t.secretsRoot, query)
+	if err != nil {
+		return "", fmt.Errorf("calendar lookup: %w", err)
+	}
+	result := struct {
+		CalendarID string                        `json:"calendar_id"`
+		Selection  string                        `json:"selection"`
+		Events     []google.PrimaryCalendarEvent `json:"events"`
+	}{"primary", "Up to 50 matches. Human selection required: approving a reschedule explicitly selects the displayed exact event, including when titles are ambiguous.", events}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("encode calendar matches: %w", err)
+	}
+	return string(payload), nil
+}
+
+type rescheduleCalendarTool struct {
+	secretsRoot string
+	reschedule  func(context.Context, string, string, string, string, func(context.Context, google.PrimaryCalendarEvent) error) error
+}
+
+type rescheduleCalendarArgs struct {
+	CalendarID string `json:"calendar_id" schema:"Must be primary. Required."`
+	EventID    string `json:"event_id" schema:"Exact event ID from primary-calendar lookup. Required. Never infer an ID from a title."`
+	StartTime  string `json:"start_time" schema:"Proposed start in RFC3339 with explicit offset. Required."`
+	EndTime    string `json:"end_time" schema:"Proposed end in RFC3339 with explicit offset, strictly after start. Required."`
+}
+
+func (t *rescheduleCalendarTool) Name() string { return rescheduleCalendarToolName }
+
+func (t *rescheduleCalendarTool) Declaration() provider.ToolDeclaration {
+	return provider.ToolDeclaration{
+		Name: rescheduleCalendarToolName, SideEffecting: true, Parameters: agent.DeriveSchema(rescheduleCalendarArgs{}),
+		Description: "Reschedule one non-recurring timed primary-calendar event. The human must select and approve the fetched exact event and proposed times through Telegram buttons. Guests are notified. Requires enabled interactive approval; no scheduled use.",
+	}
+}
+
+// Execute fails closed when the feature-specific approval hook is unavailable.
+func (t *rescheduleCalendarTool) Execute(context.Context, string, string, map[string]any) (string, error) {
+	return "", fmt.Errorf("%w: calendar rescheduling requires the interactive approval hook", agent.ErrToolDenied)
+}
+
+func (t *rescheduleCalendarTool) executeApproved(ctx context.Context, session string, args map[string]any, hitl *agent.HITLManager) (string, error) {
+	calendarID, _ := args["calendar_id"].(string)
+	eventID, _ := args["event_id"].(string)
+	start, _ := args["start_time"].(string)
+	end, _ := args["end_time"].(string)
+	if calendarID != "primary" || strings.TrimSpace(eventID) == "" {
+		return "", fmt.Errorf("calendar reschedule requires calendar_id primary and an exact event_id")
+	}
+	if !bot.IsTelegramSession(session) || bot.IsCronSession(session) || hitl == nil {
+		return "", fmt.Errorf("%w: calendar rescheduling requires interactive Telegram approval", agent.ErrToolDenied)
+	}
+	err := t.reschedule(ctx, t.secretsRoot, eventID, start, end, func(ctx context.Context, event google.PrimaryCalendarEvent) error {
+		return approveCalendarReschedule(ctx, hitl, session, event, start, end)
+	})
+	if err != nil {
+		return "", fmt.Errorf("calendar reschedule: %w", err)
+	}
+	return fmt.Sprintf("Primary calendar event %s rescheduled to %s - %s. Update notifications sent to all guests.", eventID, start, end), nil
+}
+
+func approveCalendarReschedule(ctx context.Context, hitl *agent.HITLManager, session string, event google.PrimaryCalendarEvent, start, end string) error {
+	// A fresh nonce prevents persisted HITL decisions from authorizing another write.
+	approval := map[string]any{
+		"operation_id": rand.Text(), "calendar_id": "primary", "event_id": event.ID, "etag": event.ETag,
+		"original_title": event.Summary, "original_location": event.Location,
+		"original_start": event.Start.DateTime, "original_end": event.End.DateTime,
+		"proposed_start": start, "proposed_end": end,
+		"selection":     "Approve explicitly selects ONLY this exact event, even if lookup found multiple matches. Reject if this is not the event you intended.",
+		"notifications": "All guests will receive update notifications (sendUpdates=all).",
+	}
+	approved, err := hitl.RequestApproval(ctx, session, rescheduleCalendarToolName, approval)
+	if err != nil {
+		return fmt.Errorf("calendar approval: %w", err)
+	}
+	if !approved {
+		return fmt.Errorf("%w: calendar selection and reschedule rejected", agent.ErrToolDenied)
+	}
+	return nil
+}
 
 // ── ListCalendarTool ──────────────────────────────────────────────────────────────
 

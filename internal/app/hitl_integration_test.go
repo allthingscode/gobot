@@ -16,8 +16,291 @@ import (
 	"github.com/allthingscode/gobot/internal/bot"
 	"github.com/allthingscode/gobot/internal/config"
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/allthingscode/gobot/internal/integrations/google"
 	"github.com/allthingscode/gobot/internal/provider"
 )
+
+const (
+	calendarCancelAction = "cancel"
+	forgedCalendarValue  = "forged"
+)
+
+type calendarApprovalRequest struct {
+	message bot.OutboundMessage
+	buttons [][]bot.Button
+}
+
+type calendarApprovalAPI struct {
+	bot.API
+	requests chan calendarApprovalRequest
+}
+
+func (a *calendarApprovalAPI) Send(context.Context, bot.OutboundMessage) error { return nil }
+func (a *calendarApprovalAPI) SendWithButtons(ctx context.Context, message bot.OutboundMessage, buttons [][]bot.Button) error {
+	select {
+	case a.requests <- calendarApprovalRequest{message, buttons}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// calendarDeadlineContext lets the test expire approval after observing delivery.
+type calendarDeadlineContext struct {
+	context.Context
+	done chan struct{}
+}
+
+func (c *calendarDeadlineContext) Done() <-chan struct{} { return c.done }
+func (c *calendarDeadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func calendarRescheduleArgs() map[string]any {
+	return map[string]any{"calendar_id": "primary", "event_id": "second-match",
+		"start_time": "2026-11-02T10:00:00-06:00", "end_time": "2026-11-02T11:00:00-06:00",
+		"approved": true, "etag": forgedCalendarValue, "original_title": forgedCalendarValue}
+}
+
+func fetchedCalendarEvent(id string) google.PrimaryCalendarEvent {
+	return google.PrimaryCalendarEvent{CalendarID: "primary", ID: id, ETag: `"fetched-v1"`, Summary: "Ambiguous planning title",
+		Start: google.PrimaryEventTime{DateTime: "2026-11-01T10:00:00-06:00"},
+		End:   google.PrimaryEventTime{DateTime: "2026-11-01T11:00:00-06:00"}}
+}
+
+type calendarHITLCase struct {
+	name, session, policy, action string
+	disabled, unavailable         bool
+	prompt, success               bool
+}
+
+func TestCalendarRescheduleHITL(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []calendarHITLCase{
+		{name: "human selects ambiguous second match", prompt: true, success: true},
+		{name: "reject selection", prompt: true, action: "reject"},
+		{name: calendarCancelAction, prompt: true, action: calendarCancelAction},
+		{name: "timeout", prompt: true, action: "deadline"},
+		{name: "policy deny", policy: "deny"},
+		{name: "policy require HITL approves once", policy: "require_hitl", prompt: true, success: true},
+		{name: "disabled", disabled: true},
+		{name: "cron", session: "cron:job"},
+		{name: "cron with require HITL", session: "cron:job", policy: "require_hitl"},
+		{name: "unsupported", session: "cli:human"},
+		{name: "missing API", unavailable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCalendarHITLCase(t, tc)
+		})
+	}
+}
+
+func runCalendarHITLCase(t *testing.T, tc calendarHITLCase) {
+	t.Helper()
+	if tc.session == "" {
+		tc.session = "telegram:123"
+	}
+	runner, _, _, _ := newHITLLoop(t, hitlLoopCase{tool: rescheduleCalendarToolName, enabled: !tc.disabled, policy: tc.policy, highRisk: true})
+	api := &calendarApprovalAPI{requests: make(chan calendarApprovalRequest, 4)}
+	var botAPI bot.API = api
+	if tc.unavailable {
+		botAPI = nil
+	}
+	_, hitl, err := SetupHooks(runner.Cfg, runner, &agent.SessionManager{}, botAPI, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var writes atomic.Int32
+	tool := &rescheduleCalendarTool{reschedule: func(ctx context.Context, _, id, start, end string, approve func(context.Context, google.PrimaryCalendarEvent) error) error {
+		if err := approve(ctx, fetchedCalendarEvent(id)); err != nil {
+			return err
+		}
+		writes.Add(1)
+		return nil
+	}}
+	runner.SetTools([]Tool{tool})
+	ctx := &calendarDeadlineContext{Context: context.Background(), done: make(chan struct{})}
+	cancelCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := runner.executeSingleToolCall(cancelCtx, tc.session, "", rescheduleCalendarToolName, calendarRescheduleArgs(), 0, 0)
+		done <- err
+	}()
+	if tc.prompt {
+		request := awaitCalendarApproval(t, api, done)
+		assertFetchedCalendarApproval(t, request)
+		if writes.Load() != 0 {
+			t.Fatal("write before human selection/approval")
+		}
+		finishCalendarApproval(t, hitl, cancelCtx, request, tc.action, func() {
+			if tc.action == "deadline" {
+				close(ctx.done)
+			} else {
+				cancel()
+			}
+		})
+	}
+	assertCalendarHITLResult(t, done, &writes, tc.success)
+	select {
+	case <-api.requests:
+		t.Fatal("unexpected or duplicate approval")
+	default:
+	}
+}
+
+func assertCalendarHITLResult(t *testing.T, done <-chan error, writes *atomic.Int32, success bool) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if (err == nil) != success || (writes.Load() == 1) != success {
+			t.Fatalf("err=%v writes=%d success=%v", err, writes.Load(), success)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reschedule did not finish")
+	}
+}
+
+func finishCalendarApproval(t *testing.T, hitl *agent.HITLManager, ctx context.Context, request calendarApprovalRequest, action string, expire func()) {
+	t.Helper()
+	if action == calendarCancelAction || action == "deadline" {
+		expire()
+		return
+	}
+	index := 0
+	if action == "reject" {
+		index = 1
+	}
+	if err := hitl.HandleCallback(ctx, bot.InboundCallback{ChatID: 123, Data: request.buttons[0][index].Data}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func awaitCalendarApproval(t *testing.T, api *calendarApprovalAPI, done <-chan error) calendarApprovalRequest {
+	t.Helper()
+	select {
+	case request := <-api.requests:
+		return request
+	case err := <-done:
+		t.Fatalf("operation ended before approval: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no calendar approval")
+	}
+	return calendarApprovalRequest{}
+}
+
+func assertFetchedCalendarApproval(t *testing.T, request calendarApprovalRequest) {
+	t.Helper()
+	for _, want := range []string{"second-match", "fetched-v1", "Ambiguous planning title", "primary", "2026-11-01T10:00:00-06:00", "2026-11-01T11:00:00-06:00", "2026-11-02T10:00:00-06:00", "2026-11-02T11:00:00-06:00", "All guests", "selects ONLY this exact event"} {
+		if !strings.Contains(request.message.Text, want) {
+			t.Errorf("approval omitted %q: %s", want, request.message.Text)
+		}
+	}
+	if strings.Contains(request.message.Text, forgedCalendarValue) {
+		t.Fatal("approval trusted model-provided original data")
+	}
+}
+
+func TestCalendarApprovalCannotBeReused(t *testing.T) {
+	t.Parallel()
+	dbDir := t.TempDir()
+	store, err := agentctx.GetCheckpointManager(dbDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { agentctx.EvictCheckpointManagerForTest(dbDir) })
+	api := &calendarApprovalAPI{requests: make(chan calendarApprovalRequest, 4)}
+	hitl := agent.NewHITLManager(api, store, nil)
+	seen := make(map[string]bool)
+	for _, change := range []string{"first", "identical operation", "identity", "etag", "time", "title"} {
+		event, start := calendarApprovalVariant(change)
+		done := make(chan error, 1)
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			done <- approveCalendarReschedule(ctx, hitl, "telegram:123", event, start, "2026-11-02T11:00:00-06:00")
+		}()
+		request := awaitCalendarApproval(t, api, done)
+		button := request.buttons[0][0].Data
+		if seen[button] {
+			cancel()
+			t.Fatalf("%s reused a persisted approval", change)
+		}
+		seen[button] = true
+		if err := hitl.HandleCallback(ctx, bot.InboundCallback{ChatID: 123, Data: button}); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(5 * time.Second):
+			cancel()
+			t.Fatal("approval did not complete")
+		}
+		cancel()
+	}
+}
+
+func calendarApprovalVariant(change string) (event google.PrimaryCalendarEvent, start string) {
+	event = fetchedCalendarEvent("second-match")
+	start = "2026-11-02T10:00:00-06:00"
+	switch change {
+	case "identity":
+		event.ID = "first-match"
+	case "etag":
+		event.ETag = `"fetched-v2"`
+	case "time":
+		start = "2026-11-02T09:00:00-06:00"
+	case "title":
+		event.Summary = "Changed title"
+	}
+	return event, start
+}
+
+func TestCalendarApprovalCapturesArguments(t *testing.T) {
+	t.Parallel()
+	api := &calendarApprovalAPI{requests: make(chan calendarApprovalRequest, 1)}
+	hitl := agent.NewHITLManager(api, nil, nil)
+	args := calendarRescheduleArgs()
+	done := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tool := &rescheduleCalendarTool{reschedule: func(ctx context.Context, _, id, start, end string, approve func(context.Context, google.PrimaryCalendarEvent) error) error {
+		if err := approve(ctx, fetchedCalendarEvent(id)); err != nil {
+			return err
+		}
+		if id != "second-match" || start != "2026-11-02T10:00:00-06:00" || end != "2026-11-02T11:00:00-06:00" {
+			return fmt.Errorf("operation arguments changed after approval")
+		}
+		return nil
+	}}
+	go func() {
+		_, err := tool.executeApproved(ctx, "telegram:123", args, hitl)
+		done <- err
+	}()
+	request := awaitCalendarApproval(t, api, done)
+	// Delivery synchronizes after argument capture and before mutation.
+	args["event_id"], args["start_time"], args["end_time"] = forgedCalendarValue, forgedCalendarValue, forgedCalendarValue
+	if err := hitl.HandleCallback(ctx, bot.InboundCallback{ChatID: 123, Data: request.buttons[0][0].Data}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation did not complete")
+	}
+}
 
 type hitlMockAPI struct {
 	bot.API

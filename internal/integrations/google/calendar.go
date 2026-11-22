@@ -2,8 +2,10 @@ package google
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -14,7 +16,211 @@ import (
 	"github.com/allthingscode/gobot/internal/logattr"
 )
 
-const calendarBaseURL = "https://www.googleapis.com/calendar/v3"
+const (
+	calendarBaseURL   = "https://www.googleapis.com/calendar/v3"
+	primaryCalendarID = "primary"
+)
+
+// PrimaryEventTime retains the API's distinction between timed and all-day events.
+type PrimaryEventTime struct {
+	DateTime string `json:"dateTime,omitempty"`
+	Date     string `json:"date,omitempty"`
+}
+
+// PrimaryCalendarEvent contains the fetched identity and rescheduling safeguards.
+// CalendarID is assigned locally, never accepted from an API response or model.
+type PrimaryCalendarEvent struct {
+	CalendarID         string            `json:"-"`
+	ID                 string            `json:"id"`
+	ETag               string            `json:"etag"`
+	Summary            string            `json:"summary"`
+	Location           string            `json:"location,omitempty"`
+	Status             string            `json:"status"`
+	EventType          string            `json:"eventType,omitempty"`
+	Start              PrimaryEventTime  `json:"start"`
+	End                PrimaryEventTime  `json:"end"`
+	Recurrence         []string          `json:"recurrence,omitempty"`
+	RecurringEventID   string            `json:"recurringEventId,omitempty"`
+	OriginalStartTime  *PrimaryEventTime `json:"originalStartTime,omitempty"`
+	EndTimeUnspecified bool              `json:"endTimeUnspecified,omitempty"`
+}
+
+// ValidateEventTimes compares explicit RFC3339 instants, including offset changes.
+func ValidateEventTimes(start, end string) error {
+	startTime, err := parseCalendarInstant(start)
+	if err != nil {
+		return fmt.Errorf("invalid start time (want RFC3339 with offset): %w", err)
+	}
+	endTime, err := parseCalendarInstant(end)
+	if err != nil {
+		return fmt.Errorf("invalid end time (want RFC3339 with offset): %w", err)
+	}
+	if !endTime.After(startTime) {
+		return fmt.Errorf("end time must be after start time")
+	}
+	return nil
+}
+
+func parseCalendarInstant(value string) (time.Time, error) {
+	instant, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse calendar instant: %w", err)
+	}
+	// time.Parse accepts single-digit hours, comma fractions and offset 24:00,
+	// which RFC3339 does not. Keep the boundary stricter than that parser.
+	if len(value) < 20 || value[13] != ':' || value[19] == ',' {
+		return time.Time{}, fmt.Errorf("invalid RFC3339 representation")
+	}
+	if !strings.HasSuffix(value, "Z") {
+		zone := value[len(value)-6:]
+		if zone[1:3] > "23" || zone[4:6] > "59" {
+			return time.Time{}, fmt.Errorf("invalid RFC3339 offset")
+		}
+	}
+	return instant, nil
+}
+
+func validatePrimaryEvent(event PrimaryCalendarEvent, eventID string) error {
+	if event.CalendarID != primaryCalendarID || eventID == "" || event.ID != eventID {
+		return fmt.Errorf("missing or mismatched primary calendar event identity")
+	}
+	if !validCalendarETag(event.ETag) {
+		return fmt.Errorf("missing or unsupported event ETag")
+	}
+	return validateReschedulableShape(event)
+}
+
+func validCalendarETag(etag string) bool {
+	return len(etag) >= 3 && etag[0] == '"' && etag[len(etag)-1] == '"' && !strings.ContainsAny(etag[1:len(etag)-1], "\"\r\n")
+}
+
+func validateReschedulableShape(event PrimaryCalendarEvent) error {
+	if event.Status != "confirmed" && event.Status != "tentative" {
+		return fmt.Errorf("event is deleted, cancelled or has unsupported status")
+	}
+	if hasCalendarRecurrence(event) {
+		return fmt.Errorf("recurring masters and instances cannot be rescheduled")
+	}
+	if event.Start.Date != "" || event.End.Date != "" || event.EndTimeUnspecified || (event.EventType != "" && event.EventType != "default") {
+		return fmt.Errorf("all-day or unsupported event shape cannot be rescheduled")
+	}
+	return ValidateEventTimes(event.Start.DateTime, event.End.DateTime)
+}
+
+func hasCalendarRecurrence(event PrimaryCalendarEvent) bool {
+	return len(event.Recurrence) != 0 || event.RecurringEventID != "" || event.OriginalStartTime != nil
+}
+
+// FindPrimaryCalendarEvents returns up to 50 identity-bearing matches, including
+// unsupported shapes so a human can distinguish similarly named events.
+func FindPrimaryCalendarEvents(ctx context.Context, secretsRoot, query string) ([]PrimaryCalendarEvent, error) {
+	return findPrimaryCalendarEventsWithClient(ctx, secretsRoot, query, TimeoutClient)
+}
+
+func findPrimaryCalendarEventsWithClient(ctx context.Context, secretsRoot, query string, client *http.Client) ([]PrimaryCalendarEvent, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, fmt.Errorf("calendar lookup: query is required")
+	}
+	token, err := bearerTokenWithClient(ctx, secretsRoot, client)
+	if err != nil {
+		return nil, fmt.Errorf("calendar lookup auth: %w", err)
+	}
+	params := url.Values{"q": {query}, "maxResults": {"50"}, "singleEvents": {"false"}}
+	var events []PrimaryCalendarEvent
+	seen := map[string]bool{}
+	for {
+		var page struct {
+			Items         []PrimaryCalendarEvent `json:"items"`
+			NextPageToken string                 `json:"nextPageToken"`
+		}
+		if err := apiGet(ctx, token, calendarBaseURL+"/calendars/primary/events?"+params.Encode(), client, &page); err != nil {
+			return nil, fmt.Errorf("calendar lookup: %w", err)
+		}
+		for _, event := range page.Items {
+			event.CalendarID = primaryCalendarID
+			events = append(events, event)
+			if len(events) == 50 {
+				return events, nil
+			}
+		}
+		if page.NextPageToken == "" {
+			return events, nil
+		}
+		if seen[page.NextPageToken] {
+			return nil, fmt.Errorf("calendar lookup: %w", errCalendarRepeatedPageToken)
+		}
+		seen[page.NextPageToken] = true
+		params.Set("pageToken", page.NextPageToken)
+	}
+}
+
+// ReschedulePrimaryEvent fetches an exact event and obtains approval for that
+// snapshot before one conditional write. approve must perform interactive approval.
+func ReschedulePrimaryEvent(ctx context.Context, secretsRoot, eventID, start, end string, approve func(context.Context, PrimaryCalendarEvent) error) error {
+	return reschedulePrimaryEventWithClient(ctx, secretsRoot, eventID, start, end, approve, TimeoutClient)
+}
+
+func reschedulePrimaryEventWithClient(ctx context.Context, secretsRoot, eventID, start, end string, approve func(context.Context, PrimaryCalendarEvent) error, client *http.Client) error {
+	if strings.TrimSpace(eventID) == "" || approve == nil {
+		return fmt.Errorf("reschedule requires exact event identity and interactive approval")
+	}
+	if err := ValidateEventTimes(start, end); err != nil {
+		return err
+	}
+	token, err := bearerTokenWithClient(ctx, secretsRoot, client)
+	if err != nil {
+		return fmt.Errorf("calendar reschedule auth: %w", err)
+	}
+	apiURL := calendarBaseURL + "/calendars/primary/events/" + url.PathEscape(eventID)
+	var event PrimaryCalendarEvent
+	if err := apiGet(ctx, token, apiURL, client, &event); err != nil {
+		return fmt.Errorf("fetch selected event: %w", err)
+	}
+	event.CalendarID = primaryCalendarID
+	if err := validatePrimaryEvent(event, eventID); err != nil {
+		return fmt.Errorf("selected event: %w", err)
+	}
+	if err := approve(ctx, event); err != nil {
+		return fmt.Errorf("approve selected event: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("before calendar patch: %w", err)
+	}
+	return patchPrimaryEvent(ctx, token, apiURL, event.ETag, start, end, client)
+}
+
+func patchPrimaryEvent(ctx context.Context, token, apiURL, etag, start, end string, client *http.Client) error {
+	body := map[string]PrimaryEventTime{"start": {DateTime: start}, "end": {DateTime: end}}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encode calendar times: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, apiURL+"?sendUpdates=all", strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("build calendar patch: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", etag)
+	// Redirects must not replay a mutation or move it to another calendar/event.
+	patchClient := *client
+	patchClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := patchClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("calendar patch outcome unknown; inspect event before retrying with fresh approval: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// Do not decode a response after a successful mutation: failure to read it
+	// cannot establish that the write failed. No retries, even on transport errors.
+	if resp.StatusCode == http.StatusPreconditionFailed {
+		return fmt.Errorf("calendar event changed (412); fetch again and obtain fresh approval")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("calendar patch HTTP %d; inspect event before retrying with fresh approval", resp.StatusCode)
+	}
+	return nil
+}
 
 // errCalendarRepeatedPageToken marks a continuation token the API already returned, which would loop forever.
 var errCalendarRepeatedPageToken = errors.New("repeated pagination token prevents progress")
@@ -269,7 +475,7 @@ func createEventWithClient(ctx context.Context, secretsRoot, calendarID, summary
 	}
 
 	if calendarID == "" {
-		calendarID = "primary"
+		calendarID = primaryCalendarID
 	}
 
 	type eventTime struct {
