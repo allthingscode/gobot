@@ -79,22 +79,24 @@ func TestDo_NonRetryableError(t *testing.T) {
 
 func TestDo_ContextCancelled(t *testing.T) {
 	t.Parallel()
-	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: 100 * time.Millisecond}
+	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: time.Hour}
 	ctx, cancel := context.WithCancel(context.Background())
-	calls := 0
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}()
-	err := Do(ctx, cfg, IsRetryable, func() error {
+	defer cancel()
+	calls, waits := 0, 0
+	pause := func(ctx context.Context, delay time.Duration) error {
+		waits++
+		if delay != time.Hour {
+			t.Errorf("delay = %v", delay)
+		}
+		cancel() // Cancel at entry to the retry wait, after the failed attempt.
+		return wait(ctx, delay)
+	}
+	err := doWithWait(ctx, cfg, IsRetryable, func() error {
 		calls++
 		return &HTTPStatusError{StatusCode: http.StatusServiceUnavailable}
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("expected context.Canceled, got %v", err)
-	}
-	if calls == 0 {
-		t.Error("expected at least one call before cancellation")
+	}, pause, func(d time.Duration, _ RetryConfig) time.Duration { return d })
+	if !errors.Is(err, context.Canceled) || calls != 1 || waits != 1 {
+		t.Errorf("err=%v calls=%d waits=%d", err, calls, waits)
 	}
 }
 

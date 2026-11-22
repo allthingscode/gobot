@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/observability"
@@ -124,31 +125,22 @@ func (m *mockAPIWithError) Stop() { m.fallback.Stop() }
 
 // mockAPIWithCircuit returns ErrCircuitOpen on Updates/Callbacks.
 type mockAPIWithCircuit struct {
-	lastUpdate   time.Time
-	lastCallback time.Time
-	delays       []time.Duration
-	mu           sync.Mutex
+	updates   int
+	callbacks int
+	mu        sync.Mutex
 }
 
 func (m *mockAPIWithCircuit) Updates(_ context.Context, _ int) (<-chan InboundMessage, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	now := time.Now()
-	if !m.lastUpdate.IsZero() {
-		m.delays = append(m.delays, now.Sub(m.lastUpdate))
-	}
-	m.lastUpdate = now
+	m.updates++
 	return nil, errors.New("circuit breaker: open")
 }
 
 func (m *mockAPIWithCircuit) Callbacks(_ context.Context) (<-chan InboundCallback, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	now := time.Now()
-	if !m.lastCallback.IsZero() {
-		m.delays = append(m.delays, now.Sub(m.lastCallback))
-	}
-	m.lastCallback = now
+	m.callbacks++
 	return nil, errors.New("circuit breaker: open")
 }
 func (m *mockAPIWithCircuit) Send(_ context.Context, _ OutboundMessage) error { return nil }
@@ -414,30 +406,31 @@ func TestBot_Run_HandlerErrorDoesNotStop(t *testing.T) {
 
 func TestBot_Run_RetriesOnTransientError(t *testing.T) {
 	t.Parallel()
-	fallback := newMockAPI(InboundMessage{ChatID: 99, SenderID: 999, Text: "retry-msg"})
-	api := &mockAPIWithError{fallback: fallback}
-	handler := &mockHandler{response: "ok"}
-	bot := New(api, handler)
-
-	// Override retry delay via a short-timeout context to avoid 5s wait.
-	// We'll use a subtest that cancels quickly if retry doesn't happen.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	go func() {
-		// Wait for the message to be processed, then close and cancel.
-		assert.Eventually(t, func() bool {
-			return len(handler.getCalls()) >= 1
-		}, 10*time.Second, 100*time.Millisecond)
-		close(fallback.updates)
+	synctest.Test(t, func(t *testing.T) {
+		fallback := newMockAPI(InboundMessage{ChatID: 99, SenderID: 999, Text: "retry-msg"})
+		api := &mockAPIWithError{fallback: fallback}
+		handler := &mockHandler{response: "ok"}
+		bot := New(api, handler)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		delays := make(chan time.Duration, 1)
+		tick := make(chan time.Time)
+		bot.retryTimer = func(d time.Duration) (<-chan time.Time, func()) {
+			delays <- d
+			return tick, func() {}
+		}
+		go func() { done <- bot.Run(ctx) }()
+		if d := <-delays; d != 5*time.Second {
+			t.Fatalf("initial backoff = %v", d)
+		}
+		tick <- time.Time{}
+		synctest.Wait()
+		assert.Equal(t, []string{"telegram:99"}, handler.getCalls())
+		assert.Len(t, fallback.getSent(), 1)
 		cancel()
-	}()
-
-	_ = bot.Run(ctx)
-
-	if calls := handler.getCalls(); len(calls) == 0 {
-		t.Error("expected at least one handler call after retry")
-	}
+		assert.ErrorIs(t, <-done, context.Canceled)
+	})
 }
 
 func TestBot_Run_ContextCancellation(t *testing.T) {
@@ -525,34 +518,11 @@ func (h *callCountHandler) callCount() int {
 
 func TestBot_Run_BackoffOnCircuitOpen(t *testing.T) {
 	t.Parallel()
-	api := &mockAPIWithCircuit{}
-	bot := New(api, &mockHandler{})
-
-	// Context that cancels quickly after a couple of retries would take.
-	// Since initial delay is 5s, we'll wait 6s to see at least one retry gap.
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
-
-	start := time.Now()
-	_ = bot.Run(ctx)
-	elapsed := time.Since(start)
-
-	if elapsed < 5*time.Second {
-		t.Errorf("Bot.Run exited too early: %v, expected it to wait for backoff (at least 5s)", elapsed)
-	}
-
-	api.mu.Lock()
-	delays := api.delays
-	api.mu.Unlock()
-
-	// We expect at least one delay recorded (between 1st and 2nd attempt).
-	if len(delays) == 0 {
-		t.Error("expected at least one retry attempt with delay")
-	}
-	for i, d := range delays {
-		if d < 4*time.Second { // Allow some slack from 5s
-			t.Errorf("delay %d was too short: %v, want ~5s", i, d)
-		}
+	for _, loop := range []string{"updates", "callbacks"} {
+		t.Run(loop, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) { checkBotBackoff(t, loop) })
+		})
 	}
 }
 
@@ -937,4 +907,46 @@ func awaitReconnectSignal(t *testing.T, signals <-chan string) string {
 		t.Fatal("reconnect signal timed out")
 		return ""
 	}
+}
+
+func checkBotBackoff(t *testing.T, loop string) {
+	t.Helper()
+	api := &mockAPIWithCircuit{}
+	bot := New(api, &mockHandler{})
+	delays := make(chan time.Duration, 1)
+	tick := make(chan time.Time)
+	stopped := 0
+	bot.retryTimer = func(d time.Duration) (<-chan time.Time, func()) {
+		delays <- d
+		return tick, func() { stopped++ }
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		if loop == "updates" {
+			done <- bot.runUpdateLoop(ctx)
+		} else {
+			done <- bot.runCallbackLoop(ctx)
+		}
+	}()
+	for _, want := range []time.Duration{5 * time.Second, 10 * time.Second} {
+		assert.Equal(t, want, <-delays)
+		synctest.Wait()
+		api.mu.Lock()
+		calls := api.updates + api.callbacks
+		api.mu.Unlock()
+		if want == 5*time.Second {
+			assert.Equal(t, 1, calls)
+			tick <- time.Time{}
+		} else {
+			assert.Equal(t, 2, calls)
+		}
+	}
+	cancel()
+	assert.ErrorIs(t, <-done, context.Canceled)
+	assert.Equal(t, 2, stopped)
+	api.mu.Lock()
+	assert.Equal(t, 2, api.updates+api.callbacks)
+	api.mu.Unlock()
 }

@@ -6,28 +6,29 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	agentctx "github.com/allthingscode/gobot/internal/context"
+	"github.com/stretchr/testify/assert"
 )
 
-// delayedRunner simulates API latency to amplify race conditions.
+// gatedRunner holds dispatches at observable entry until the test releases them.
 // It is a separate type from mockRunner to avoid name collision.
-type delayedRunner struct {
-	delay    time.Duration
+type gatedRunner struct {
+	entered  chan<- struct{}
+	release  <-chan struct{}
 	response string
 	mu       sync.Mutex
 	calls    int
 }
 
-func (r *delayedRunner) RunText(_ context.Context, _, _, _ string) (string, error) {
+func (r *gatedRunner) RunText(_ context.Context, _, _, _ string) (string, error) {
 	return r.response, nil
 }
 
-func (r *delayedRunner) Run(_ context.Context, _, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
-	if r.delay > 0 {
-		time.Sleep(r.delay)
-	}
+func (r *gatedRunner) Run(_ context.Context, _, _ string, messages []agentctx.StrategicMessage) (string, []agentctx.StrategicMessage, error) {
+	r.entered <- struct{}{}
+	<-r.release
 	r.mu.Lock()
 	r.calls++
 	r.mu.Unlock()
@@ -40,9 +41,27 @@ func (r *delayedRunner) Run(_ context.Context, _, _ string, messages []agentctx.
 // gaps or duplicates — proof that per-session serialization is correct.
 func TestSessionManager_OrderedIterations(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, checkOrderedIterations)
+}
+
+// TestSessionManager_ParallelSessionsNoInterference verifies that dispatches
+// to different sessions proceed independently and each session accumulates its
+// own iteration counter without cross-session contamination.
+func TestSessionManager_ParallelSessionsNoInterference(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, checkParallelIterations)
+}
+
+func checkOrderedIterations(t *testing.T) {
+	t.Helper()
 	const n = 20
 	store := newMockStore()
-	runner := &delayedRunner{delay: 2 * time.Millisecond, response: "ok"}
+	entered := make(chan struct{}, 50)
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	runner := &gatedRunner{entered: entered, release: release, response: "ok"}
 	mgr := NewSessionManager(runner, store, "model")
 
 	var wg sync.WaitGroup
@@ -55,6 +74,9 @@ func TestSessionManager_OrderedIterations(t *testing.T) {
 			}
 		}()
 	}
+	<-entered
+	synctest.Wait()
+	unblock()
 	wg.Wait()
 
 	store.mu.Lock()
@@ -70,20 +92,27 @@ func TestSessionManager_OrderedIterations(t *testing.T) {
 	}
 	// If serialization is correct, each Dispatch increments iteration by exactly 1,
 	// so the final value must equal n.
+	for i, iteration := range store.iterations["ordered-session"] {
+		if iteration != i+1 {
+			t.Errorf("iteration[%d] = %d, want %d", i, iteration, i+1)
+		}
+	}
 	if snap.Iteration != n {
 		t.Errorf("final iteration = %d, want %d (gap or duplicate iteration detected)", snap.Iteration, n)
 	}
 }
 
-// TestSessionManager_ParallelSessionsNoInterference verifies that dispatches
-// to different sessions proceed independently and each session accumulates its
-// own iteration counter without cross-session contamination.
-func TestSessionManager_ParallelSessionsNoInterference(t *testing.T) {
-	t.Parallel()
+func checkParallelIterations(t *testing.T) {
+	t.Helper()
 	const sessions = 10
 	const msgsPerSession = 5
 	store := newMockStore()
-	runner := &delayedRunner{delay: 2 * time.Millisecond, response: "ok"}
+	entered := make(chan struct{}, 50)
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	runner := &gatedRunner{entered: entered, release: release, response: "ok"}
 	mgr := NewSessionManager(runner, store, "model")
 
 	var wg sync.WaitGroup
@@ -99,6 +128,11 @@ func TestSessionManager_ParallelSessionsNoInterference(t *testing.T) {
 			}(s)
 		}
 	}
+	for i := 0; i < sessions; i++ {
+		<-entered
+	}
+	synctest.Wait()
+	unblock()
 	wg.Wait()
 
 	store.mu.Lock()
@@ -109,6 +143,9 @@ func TestSessionManager_ParallelSessionsNoInterference(t *testing.T) {
 		if snap == nil {
 			t.Errorf("no snapshot for %s", key)
 			continue
+		}
+		for i, iteration := range store.iterations[key] {
+			assert.Equal(t, i+1, iteration, "%s iteration[%d]", key, i)
 		}
 		if snap.Iteration != msgsPerSession {
 			t.Errorf("%s: final iteration = %d, want %d", key, snap.Iteration, msgsPerSession)

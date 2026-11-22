@@ -319,7 +319,7 @@ func TestSchedulerPoll_JobTimeout(t *testing.T) {
 	_ = os.WriteFile(storePath, data, 0o600)
 
 	// Dispatcher that blocks
-	dispatcher := &blockingDispatcher{delay: 50 * time.Millisecond}
+	dispatcher := &blockingDispatcher{}
 	start := time.UnixMilli(1000)
 	fc := NewFakeClock(start)
 	s := NewScheduler(storePath, "", dispatcher).WithClock(fc).WithJobTimeout(1 * time.Millisecond)
@@ -889,7 +889,6 @@ func assertEnabledRefreshJob(t *testing.T, jobs []Job, enabled bool, state JobSt
 
 type blockingDispatcher struct {
 	mu       sync.Mutex
-	delay    time.Duration
 	payloads []Payload
 	alerts   []Payload
 	lastErr  error
@@ -899,15 +898,11 @@ func (m *blockingDispatcher) Dispatch(ctx context.Context, p Payload) error {
 	m.mu.Lock()
 	m.payloads = append(m.payloads, p)
 	m.mu.Unlock()
-	select {
-	case <-time.After(m.delay):
-		return nil
-	case <-ctx.Done():
-		m.mu.Lock()
-		m.lastErr = ctx.Err()
-		m.mu.Unlock()
-		return fmt.Errorf("context canceled: %w", ctx.Err())
-	}
+	<-ctx.Done()
+	m.mu.Lock()
+	m.lastErr = ctx.Err()
+	m.mu.Unlock()
+	return fmt.Errorf("context canceled: %w", ctx.Err())
 }
 
 func (m *blockingDispatcher) Alert(_ context.Context, p Payload) error {

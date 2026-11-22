@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -12,131 +13,68 @@ import (
 
 func TestSessionLock_Metrics(t *testing.T) {
 	t.Parallel()
-	l := acquireLock("metrics-test-session", 0)
-	defer l.release()
-
-	// First lock
-	err := l.Lock(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	_ = 1 + 1 // Non-empty section to satisfy staticcheck
-	l.Unlock()
-
-	metrics := GetLockMetrics()
-	m, ok := metrics["metrics-test-session"]
-	if !ok {
-		t.Fatal("metrics not found for metrics-test-session")
-	}
-
-	if m.WaitCount != 0 {
-		t.Errorf("expected 0 wait count, got %d", m.WaitCount)
-	}
-
-	// Wait, we need to test contention
-	l2 := acquireLock("metrics-test-session", 0)
-	defer l2.release()
-
-	err = l.Lock(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- l2.Lock(context.Background())
-		l2.Unlock()
-	}()
-
-	// Wait for waiter to register in metrics, then give it time to block on the select.
-	assert.Eventually(t, func() bool {
-		m := GetLockMetrics()["metrics-test-session"]
-		return m.WaitCount >= 1
-	}, 1*time.Second, 10*time.Millisecond)
-	// WaitCount is incremented before the goroutine reaches select <-l.ch.
-	// Sleep briefly so it is definitely blocked when we call Unlock, ensuring elapsed > 0.
-	time.Sleep(20 * time.Millisecond)
-
-	l.Unlock()
-	if err := <-errCh; err != nil {
-		t.Fatalf("waiter failed: %v", err)
-	}
-
-	// Wait for wait time to be recorded
-	time.Sleep(1 * time.Millisecond)
-
-	metrics = GetLockMetrics()
-	m = metrics["metrics-test-session"]
-	if m.ContentionCount < 1 {
-		t.Errorf("expected contention count >= 1, got %d", m.ContentionCount)
-	}
-	if m.WaitCount < 1 {
-		t.Errorf("expected wait count >= 1, got %d", m.WaitCount)
-	}
-	if m.MaxWaitTime == 0 {
-		t.Error("expected MaxWaitTime > 0")
-	}
+	synctest.Test(t, checkSessionLockMetrics)
 }
 
 func TestSessionLock_DeadlockError(t *testing.T) {
 	t.Parallel()
-	l := acquireLock("deadlock-test", 10*time.Millisecond)
-	defer l.release()
+	synctest.Test(t, func(t *testing.T) {
+		l := acquireLock("deadlock-test", 10*time.Millisecond)
+		defer l.release()
 
-	err := l.Lock(context.Background()) // First acquisition succeeds
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+		err := l.Lock(context.Background()) // First acquisition succeeds
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
-	// Second acquisition should timeout and return error
-	err = l.Lock(context.Background())
-	if err == nil {
-		t.Error("expected error on deadlock, but got nil")
-	}
+		// Second acquisition should timeout and return error
+		err = l.Lock(context.Background())
+		if err == nil {
+			t.Error("expected error on deadlock, but got nil")
+		}
+	})
 }
 
 func TestSessionLock_ContextCancellation(t *testing.T) {
 	t.Parallel()
-	l := acquireLock("cancel-test", 120*time.Second)
-	defer l.release()
+	synctest.Test(t, func(t *testing.T) {
+		l := acquireLock("cancel-test", 120*time.Second)
+		defer l.release()
 
-	// 1. Acquire lock to block others
-	if err := l.Lock(context.Background()); err != nil {
-		t.Fatalf("failed to acquire initial lock: %v", err)
-	}
-
-	// 2. Start a waiter with a cancellable context
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-
-	start := time.Now()
-	go func() {
-		errCh <- l.Lock(ctx)
-	}()
-
-	// 3. Wait until waiter registers, then cancel
-	assert.Eventually(t, func() bool {
-		m := GetLockMetrics()["cancel-test"]
-		return m.WaitCount >= 1
-	}, 1*time.Second, 10*time.Millisecond)
-	cancel()
-
-	// 4. Verify the waiter returns immediately with wrapped context.Canceled
-	select {
-	case err := <-errCh:
-		elapsed := time.Since(start)
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("expected context.Canceled error, got: %v", err)
+		// 1. Acquire lock to block others
+		if err := l.Lock(context.Background()); err != nil {
+			t.Fatalf("failed to acquire initial lock: %v", err)
 		}
-		if elapsed > 500*time.Millisecond {
-			t.Errorf("waiter took too long to return after cancellation: %v", elapsed)
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for waiter to return after cancellation")
-	}
 
-	// 5. Cleanup: release initial lock
-	l.Unlock()
+		// 2. Start a waiter with a cancellable context
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+
+		go func() {
+			errCh <- l.Lock(ctx)
+		}()
+
+		// 3. Wait until waiter registers, then cancel
+		synctest.Wait()
+		if GetLockMetrics()["cancel-test"].WaitCount != 1 {
+			t.Fatal("waiter did not register")
+		}
+		cancel()
+
+		// 4. Verify the waiter returns immediately with wrapped context.Canceled
+		select {
+		case err := <-errCh:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("expected context.Canceled error, got: %v", err)
+			}
+
+		case <-time.After(1 * time.Second):
+			t.Fatal("timed out waiting for waiter to return after cancellation")
+		}
+
+		// 5. Cleanup: release initial lock
+		l.Unlock()
+	})
 }
 
 func TestSessionLock_Lifecycle(t *testing.T) {
@@ -233,4 +171,61 @@ func TestLockStatus_CurrentHoldDurationAndStaleness(t *testing.T) {
 			}
 		})
 	}
+}
+
+func checkSessionLockMetrics(t *testing.T) {
+	t.Helper()
+	l := acquireLock("metrics-test-session", 0)
+	defer l.release()
+
+	// First lock
+	err := l.Lock(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = 1 + 1 // Non-empty section to satisfy staticcheck
+	l.Unlock()
+
+	metrics := GetLockMetrics()
+	m, ok := metrics["metrics-test-session"]
+	if !ok {
+		t.Fatal("metrics not found for metrics-test-session")
+	}
+
+	if m.WaitCount != 0 {
+		t.Errorf("expected 0 wait count, got %d", m.WaitCount)
+	}
+
+	// Wait, we need to test contention
+	l2 := acquireLock("metrics-test-session", 0)
+	defer l2.release()
+
+	err = l.Lock(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		err := l2.Lock(context.Background())
+		if err == nil {
+			l2.Unlock()
+		}
+		errCh <- err
+	}()
+
+	synctest.Wait()
+	time.Sleep(20 * time.Millisecond) // Advances the bubble clock while the waiter is held.
+	l.Unlock()
+	if err := <-errCh; err != nil {
+		t.Fatalf("waiter failed: %v", err)
+	}
+
+	metrics = GetLockMetrics()
+	m = metrics["metrics-test-session"]
+	assert.Equal(t, 1, m.ContentionCount)
+	assert.Equal(t, 1, m.WaitCount)
+	assert.Equal(t, 20*time.Millisecond, m.MaxWaitTime)
+	assert.Equal(t, 20*time.Millisecond, m.TotalWaitTime)
+	assert.False(t, m.IsLocked)
 }

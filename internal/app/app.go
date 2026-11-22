@@ -232,11 +232,21 @@ func runInitializedAgentLoopWithReady(ctx context.Context, cfg *config.Config, s
 func joinSessionCompactions(timeout time.Duration, managers ...*agent.SessionManager) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	waiters := make([]func(context.Context) error, len(managers))
 	for i, mgr := range managers {
-		if mgr == nil {
+		if mgr != nil {
+			waiters[i] = mgr.WaitForBackgroundCompactions
+		}
+	}
+	joinSessionCompactionsWithContext(ctx, waiters...)
+}
+
+func joinSessionCompactionsWithContext(ctx context.Context, waiters ...func(context.Context) error) {
+	for i, wait := range waiters {
+		if wait == nil {
 			continue
 		}
-		if err := mgr.WaitForBackgroundCompactions(ctx); err != nil {
+		if err := wait(ctx); err != nil {
 			slog.Warn("gobot: background compaction drain failed", "manager", i, "err", err)
 		}
 	}

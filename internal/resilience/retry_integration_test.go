@@ -94,7 +94,7 @@ func TestRetryIntegration_NoRetryOn4xx(t *testing.T) {
 	}
 }
 
-func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
+func TestRetryIntegration_ExponentialBackoff(t *testing.T) {
 	t.Parallel()
 	fs := testutil.NewFaultyServer()
 	defer fs.Close()
@@ -109,11 +109,11 @@ func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
 		MaxAttempts:  3,
 		InitialDelay: 100 * time.Millisecond,
 		Multiplier:   2.0,
-		JitterFactor: 0.05, // small jitter for timing test
+		MaxDelay:     150 * time.Millisecond,
 	}
 
-	start := time.Now()
-	err := Do(context.Background(), cfg, IsRetryable, func() error {
+	var delays []time.Duration
+	err := doWithWait(context.Background(), cfg, IsRetryable, func() error {
 		req, _ := http.NewRequestWithContext(context.Background(), "GET", fs.URL, http.NoBody)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -124,24 +124,21 @@ func TestRetryIntegration_ExponentialBackoffTiming(t *testing.T) {
 			return &HTTPStatusError{StatusCode: resp.StatusCode}
 		}
 		return nil
-	})
-	elapsed := time.Since(start)
+	}, func(_ context.Context, d time.Duration) error { delays = append(delays, d); return nil },
+		func(d time.Duration, cfg RetryConfig) time.Duration {
+			cfg.JitterFactor = 0
+			return calculateSleep(d, cfg)
+		})
 
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 
-	// Expected delay:
-	// 1st retry: ~100ms
-	// 2nd retry: ~200ms
-	// Total wait time: ~300ms
-	// Lower bound: -25% to verify delays are actually happening.
-	// Upper bound: +100% to absorb Windows CI scheduling variance.
-	minWait := 225 * time.Millisecond
-	maxWait := 600 * time.Millisecond
-
-	if elapsed < minWait || elapsed > maxWait {
-		t.Errorf("total elapsed time %v out of expected range [%v, %v]", elapsed, minWait, maxWait)
+	if len(delays) != 2 || delays[0] != 100*time.Millisecond || delays[1] != 150*time.Millisecond {
+		t.Errorf("requested delays = %v", delays)
+	}
+	if fs.RequestCount != 3 {
+		t.Errorf("requests = %d, want 3", fs.RequestCount)
 	}
 }
 

@@ -51,6 +51,10 @@ var DefaultRetryConfig = RetryConfig{
 // ctx cancellation during a sleep returns ctx.Err() immediately.
 // Each retry attempt is logged at Warn level; final failure is also logged.
 func Do(ctx context.Context, cfg RetryConfig, shouldRetry func(error) bool, fn func() error) error {
+	return doWithWait(ctx, cfg, shouldRetry, fn, wait, calculateSleep)
+}
+
+func doWithWait(ctx context.Context, cfg RetryConfig, shouldRetry func(error) bool, fn func() error, pause func(context.Context, time.Duration) error, sleepFor func(time.Duration, RetryConfig) time.Duration) error {
 	cfg = normalizeConfig(cfg)
 	delay := cfg.InitialDelay
 	var lastErr error
@@ -66,10 +70,10 @@ func Do(ctx context.Context, cfg RetryConfig, shouldRetry func(error) bool, fn f
 			break
 		}
 
-		sleep := calculateSleep(delay, cfg)
+		sleep := sleepFor(delay, cfg)
 		logRetryAttempt(attempt, cfg.MaxAttempts, lastErr, sleep)
 
-		if err := wait(ctx, sleep); err != nil {
+		if err := pause(ctx, sleep); err != nil {
 			return err
 		}
 
@@ -116,10 +120,12 @@ func nextDelay(current time.Duration, cfg RetryConfig) time.Duration {
 }
 
 func wait(ctx context.Context, sleep time.Duration) error {
+	timer := time.NewTimer(sleep)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("wait: %w", ctx.Err())
-	case <-time.After(sleep):
+	case <-timer.C:
 		return nil
 	}
 }

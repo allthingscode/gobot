@@ -1,70 +1,67 @@
-//nolint:testpackage // intentionally uses unexported helpers from main package
+//nolint:testpackage // intentionally uses the main package
 package main
 
 import (
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/allthingscode/gobot/internal/app"
 )
 
-func TestDrainGoroutines(t *testing.T) { //nolint:paralleltest // timing-sensitive test flakes under Windows race CI when parallelized
-	tests := []struct {
-		name          string
-		wgCount       int
-		blockDuration time.Duration
-		timeout       time.Duration
-		wantMinTime   time.Duration
-		wantMaxTime   time.Duration
-	}{
-		{
-			name:          "completed_immediately",
-			wgCount:       0,
-			blockDuration: 0,
-			timeout:       1 * time.Second,
-			wantMinTime:   0,
-			wantMaxTime:   250 * time.Millisecond,
-		},
-		{
-			name:          "waits_for_completion",
-			wgCount:       1,
-			blockDuration: 200 * time.Millisecond,
-			timeout:       1 * time.Second,
-			wantMinTime:   180 * time.Millisecond,
-			wantMaxTime:   500 * time.Millisecond,
-		},
-		{
-			name:          "times_out",
-			wgCount:       1,
-			blockDuration: 1 * time.Second,
-			timeout:       200 * time.Millisecond,
-			wantMinTime:   180 * time.Millisecond,
-			wantMaxTime:   500 * time.Millisecond,
-		},
-	}
-
-	for _, tt := range tests { //nolint:paralleltest // subtests share scheduler-sensitive timing assertions
-		t.Run(tt.name, func(t *testing.T) {
-			var wg sync.WaitGroup
-			for i := 0; i < tt.wgCount; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					time.Sleep(tt.blockDuration)
-				}()
-			}
-
-			start := time.Now()
-			app.DrainGoroutines(&wg, tt.timeout)
-			elapsed := time.Since(start)
-
-			if elapsed < tt.wantMinTime {
-				t.Errorf("DrainGoroutines() took %v, want at least %v", elapsed, tt.wantMinTime)
-			}
-			if elapsed > tt.wantMaxTime {
-				t.Errorf("DrainGoroutines() took %v, want at most %v", elapsed, tt.wantMaxTime)
-			}
+func TestDrainGoroutines(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"completed", "held worker", "timeout"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) { checkDrainScenario(t, scenario) })
 		})
+	}
+}
+
+func checkDrainScenario(t *testing.T, scenario string) {
+	t.Helper()
+	var wg sync.WaitGroup
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer func() { unblock(); wg.Wait(); synctest.Wait() }()
+	if scenario != "completed" {
+		wg.Add(1)
+		go func() { defer wg.Done(); <-release }()
+	}
+	done := make(chan struct{})
+	go func() { app.DrainGoroutines(&wg, time.Hour); close(done) }()
+	synctest.Wait()
+	if scenario == "completed" {
+		if !drainSignalClosed(done) {
+			t.Fatal("completed work did not drain")
+		}
+		return
+	}
+	if drainSignalClosed(done) {
+		t.Fatal("drain returned while worker held")
+	}
+	if scenario == "timeout" {
+		time.Sleep(time.Hour)
+	} else {
+		unblock()
+	}
+	synctest.Wait()
+	if !drainSignalClosed(done) {
+		t.Fatal("drain did not finish")
+	}
+	if scenario == "timeout" && drainSignalClosed(release) {
+		t.Fatal("timeout released worker")
+	}
+}
+
+func drainSignalClosed(signal <-chan struct{}) bool {
+	select {
+	case <-signal:
+		return true
+	default:
+		return false
 	}
 }

@@ -182,6 +182,10 @@ func alertSenderFromAPI(api *TgAPI) AlertSender {
 // StartHeartbeat starts the periodic health check runner, injecting the alert sender so
 // probe failures can page the operator.
 func StartHeartbeat(ctx context.Context, cfg *config.Config, token string, sender AlertSender, wg *sync.WaitGroup) {
+	startHeartbeat(ctx, cfg, token, sender, wg, nil)
+}
+
+func startHeartbeat(ctx context.Context, cfg *config.Config, token string, sender AlertSender, wg *sync.WaitGroup, entered func()) {
 	if !cfg.Heartbeat.Enabled {
 		return
 	}
@@ -190,6 +194,9 @@ func StartHeartbeat(ctx context.Context, cfg *config.Config, token string, sende
 	go func() {
 		defer RecoverWithStack("heartbeat-runner")
 		defer wg.Done()
+		if entered != nil {
+			entered()
+		}
 		hb.Run(ctx)
 	}()
 	slog.Info("gobot: heartbeat runner started")
