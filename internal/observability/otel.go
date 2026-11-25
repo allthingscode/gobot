@@ -66,7 +66,7 @@ func (h *otelSlogHandler) WithGroup(name string) slog.Handler {
 // NewTintedHandler returns a colorized slog.Handler for development console output.
 // level controls the minimum log level emitted.
 func NewTintedHandler(w io.Writer, level slog.Level) slog.Handler {
-	return tint.NewHandler(w, &tint.Options{
+	return tint.NewTextHandler(w, &tint.Options{
 		Level:   level,
 		NoColor: false,
 	})
