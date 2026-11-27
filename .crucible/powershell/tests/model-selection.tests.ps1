@@ -72,8 +72,8 @@ $results += Run-Test "Default map: 'agent' resolves to the claude row" {
     Assert-Result "empty target -> claude" ((Get-ConfiguredModel -Target '' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'claude-haiku-5-5') "expected claude-haiku-5-5"
 }
 
-$results += Run-Test "Default map: codex tiers -> gpt-6.1-sol/gpt-6.1-terra/gpt-6-luna" {
-    Assert-Result "codex strong" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'gpt-6.1-sol') "expected gpt-6.1-sol"
+$results += Run-Test "Default map: codex tiers -> gpt-6.2-sol/gpt-6.1-terra/gpt-6-luna" {
+    Assert-Result "codex strong" ((Get-ConfiguredModel -Target 'codex' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'gpt-6.2-sol') "expected gpt-6.2-sol"
     Assert-Result "codex default" ((Get-ConfiguredModel -Target 'codex' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'gpt-6.1-terra') "expected gpt-6.1-terra"
     Assert-Result "codex light" ((Get-ConfiguredModel -Target 'codex' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'gpt-6-luna') "expected gpt-6-luna"
 }
@@ -85,9 +85,9 @@ $results += Run-Test "Default map: grok tiers -> inherit, not a Claude slug" {
 }
 
 $results += Run-Test "Default map: antigravity tiers -> Gemini labels" {
-    Assert-Result "ag strong" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.1 Pro (High)') "expected Gemini 3.1 Pro (High)"
-    Assert-Result "ag default" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.8 Flash (High)') "expected Gemini 3.8 Flash (High)"
-    Assert-Result "ag light" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'Gemini 3.8 Flash (Medium)') "expected Gemini 3.8 Flash (Medium)"
+    Assert-Result "ag strong" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'strong' -ProjectRoot $noCfgRoot) -eq 'Gemini 4 Neon (High)') "expected Gemini 4 Neon (High)"
+    Assert-Result "ag default" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'default' -ProjectRoot $noCfgRoot) -eq 'Gemini 4 Hydrogen (High)') "expected Gemini 4 Hydrogen (High)"
+    Assert-Result "ag light" ((Get-ConfiguredModel -Target 'antigravity' -Tier 'light' -ProjectRoot $noCfgRoot) -eq 'Gemini 4 Hydrogen (Medium)') "expected Gemini 4 Hydrogen (Medium)"
 }
 
 $results += Run-Test "Empty tier (done phase) resolves to empty model; unknown target/tier degrade safely" {
@@ -152,8 +152,8 @@ function New-LevelConfigRoot {
     return $root
 }
 
-$results += Run-Test "Built-in Codex levels: strong sol/high, default sol/low, light luna/high" {
-    Assert-Result "strong" ((Get-LevelPair 'strong' $noCfgRoot) -eq 'gpt-6.1-sol/high') "expected gpt-6.1-sol/high"
+$results += Run-Test "Built-in Codex levels: strong sol/high, default terra/high, light luna/high" {
+    Assert-Result "strong" ((Get-LevelPair 'strong' $noCfgRoot) -eq 'gpt-6.2-sol/high') "expected gpt-6.2-sol/high"
     Assert-Result "default" ((Get-LevelPair 'default' $noCfgRoot) -eq 'gpt-6.1-terra/high') "expected gpt-6.1-terra/high"
     Assert-Result "light" ((Get-LevelPair 'light' $noCfgRoot) -eq 'gpt-6-luna/high') "expected gpt-6-luna/high"
 }
@@ -161,7 +161,7 @@ $results += Run-Test "Built-in Codex levels: strong sol/high, default sol/low, l
 $results += Run-Test "Codex level: empty/unknown tier has no level (nothing emitted)" {
     Assert-Result "empty tier" ($null -eq (Get-CodexLevel -Tier '' -ProjectRoot $noCfgRoot)) "expected no level"
     Assert-Result "unknown tier" ($null -eq (Get-CodexLevel -Tier 'bogus' -ProjectRoot $noCfgRoot)) "expected no level"
-    Assert-Result "case/space-insensitive" ((Get-LevelPair '  STRONG ' $noCfgRoot) -eq 'gpt-6.1-sol/high') "expected gpt-6.1-sol/high"
+    Assert-Result "case/space-insensitive" ((Get-LevelPair '  STRONG ' $noCfgRoot) -eq 'gpt-6.2-sol/high') "expected gpt-6.2-sol/high"
 }
 
 $pairRoot = New-LevelConfigRoot -Name "modelsel-pair" -Models @"
@@ -247,7 +247,7 @@ $results += Run-Test "A bare model that changes a level's model, with no effort,
     $strong = Get-CodexLevel -Tier 'strong' -ProjectRoot $cfgRoot -WarningVariable warnings -WarningAction SilentlyContinue
     Assert-Result "pinned model at the built-in effort" (($strong.Model + "/" + $strong.Effort) -eq 'pinned-codex-x/high') "expected pinned-codex-x/high"
     Assert-Result "half change warns" ((@($warnings) -join "`n") -match "changes the strong level's model to 'pinned-codex-x' but not its effort") ("expected a half-change warning, got: " + (@($warnings) -join "`n"))
-    $sameRoot = New-LevelConfigRoot -Name "modelsel-same" -Models "models:`n  targets:`n    codex:`n      strong: gpt-6.1-sol`n"
+    $sameRoot = New-LevelConfigRoot -Name "modelsel-same" -Models "models:`n  targets:`n    codex:`n      strong: gpt-6.2-sol`n"
     $warnings = $null
     Get-CodexLevel -Tier 'strong' -ProjectRoot $sameRoot -WarningVariable warnings | Out-Null
     Assert-Result "bare built-in model is silent" (@($warnings).Count -eq 0) ("expected no warning, got: " + (@($warnings) -join "`n"))

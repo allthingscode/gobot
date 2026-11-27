@@ -105,7 +105,7 @@ launch status.
    **Pass the whole level.** For a Codex target each tier is a level, a model and an effort
    together, and Crucible prints it as one pair:
    `[RECOMMENDED LEVEL] <tier> = <model> at <effort> effort`, followed by `[RECOMMENDED MODEL]` and
-   `[RECOMMENDED EFFORT]`. The built-in levels are strong = `gpt-6.1-sol` at `high`, default =
+   `[RECOMMENDED EFFORT]`. The built-in levels are strong = `gpt-6.2-sol` at `high`, default =
    `gpt-6.1-terra` at `high`, light = `gpt-6-luna` at `high`, unless `config.yaml` sets the pair under
    `models.targets.codex.<tier>`. Always pass both halves, `-Model` and `-Effort`; the launcher forwards
    the effort as `-c model_reasoning_effort` and warns when `-Effort` is missing. A Claude target prints

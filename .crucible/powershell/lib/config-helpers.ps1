@@ -873,7 +873,7 @@ function Get-ConfiguredModel {
     }
 
     $defaults = @{
-        antigravity = @{ strong = "Gemini 3.1 Pro (High)";   default = "Gemini 3.8 Flash (High)";  light = "Gemini 3.8 Flash (Medium)" }
+        antigravity = @{ strong = "Gemini 4 Neon (High)";   default = "Gemini 4 Hydrogen (High)";  light = "Gemini 4 Hydrogen (Medium)" }
         grok        = @{ strong = "inherit";                 default = "inherit";                  light = "inherit" }
     }
 
@@ -900,7 +900,7 @@ function Get-ModelFromConfig {
 }
 
 # A level is a model and an effort taken together, and one is never set without the
-# other. Codex: strong is gpt-6.1-sol at high, default is gpt-6.1-terra at high, light is
+# other. Codex: strong is gpt-6.2-sol at high, default is gpt-6.1-terra at high, light is
 # gpt-6-luna at high. Luna is most effective at high, so the cheapest level is Luna at high
 # rather than a stronger model at a lower effort. Claude (Item 212): strong is
 # claude-opus-5-5 at medium, default is claude-sonnet-5-5 at high, light is claude-haiku-5-5
@@ -921,7 +921,7 @@ function Get-ModelLevel {
     if ($Target -eq "codex") {
         $label = "Codex"
         $levels = @{
-            strong  = @{ Model = "gpt-6.1-sol"; Effort = "high" }
+            strong  = @{ Model = "gpt-6.2-sol"; Effort = "high" }
             default = @{ Model = "gpt-6.1-terra"; Effort = "high" }
             light   = @{ Model = "gpt-6-luna";  Effort = "high" }
         }

@@ -423,7 +423,7 @@ exit 0
         $template = Join-Path $REPO_ROOT "templates/project/.crucible/config.yaml"
         $content = Get-Content -LiteralPath $template -Raw -Encoding UTF8
         $got = Get-ConfigBlockValue -Content $content -Path @("models", "targets", "antigravity", "strong") -Source $template
-        Assert-Result -Name "quoted nested value" -Condition ($got -eq "Gemini 3.1 Pro (High)") -FailureMessage ("expected the quoted antigravity strong model, got '$got'")
+        Assert-Result -Name "quoted nested value" -Condition ($got -eq "Gemini 4 Neon (High)") -FailureMessage ("expected the quoted antigravity strong model, got '$got'")
         $grokDefault = Get-ConfigBlockValue -Content $content -Path @("models", "targets", "grok", "default") -Source $template
         Assert-Result -Name "grok default is inherit" -Condition ($grokDefault -eq "inherit") -FailureMessage ("expected inherit, got '$grokDefault'")
         $absent = Get-ConfigBlockValue -Content $content -Path @("review", "require_green_ci") -Source $template

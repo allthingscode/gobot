@@ -100,8 +100,8 @@ The concrete model each tier maps to lives in `config.yaml` under `models:` (see
 | Target | `strong` | `default` | `light` |
 |---|---|---|---|
 | `claude` (and `agent`) | claude-opus-5-5 at medium | claude-sonnet-5-5 at high | claude-haiku-5-5 at high |
-| `codex` | gpt-6.1-sol at high | gpt-6.1-terra at high | gpt-6-luna at high |
-| `antigravity` | Gemini 3.1 Pro (High) | Gemini 3.8 Flash (High) | Gemini 3.8 Flash (Medium) |
+| `codex` | gpt-6.2-sol at high | gpt-6.1-terra at high | gpt-6-luna at high |
+| `antigravity` | Gemini 4 Neon (High) | Gemini 4 Hydrogen (High) | Gemini 4 Hydrogen (Medium) |
 | `grok` | inherit | inherit | inherit |
 
 The Claude `crucible-researcher` agent has its own `researcher` level, claude-opus-5-5 at high, so lowering `strong` does not lower research.
